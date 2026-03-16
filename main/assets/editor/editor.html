@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>日记</title>
+    <link href="style.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 10px;
+            background-color: #f5f7fa;
+            font-family: sans-serif;
+            overflow-x: hidden;
+        }
+        p {
+            margin:  0 !important;
+        }
+        span{
+            line-height: 1.0;
+        }
+
+        /* 编辑容器外观 */
+        #content {
+            width: 100%;
+            height: 600px;
+            border-left: 3px solid #4a90e2 !important; /* 蓝色粗边框 */
+            border-right: 3px solid #4a90e2 !important; /* 蓝色粗边框 */
+            border-bottom: 3px solid #4a90e2 !important; /* 蓝色粗边框 */
+            border-bottom-left-radius: 12px !important;
+            border-bottom-right-radius: 12px !important;
+            background-color: #f0f8ff !important; /* 浅蓝色背景 */
+            overflow: hidden; /* 防止内部内容溢出影响边框 */
+        }
+
+        /* 内部编辑区 */
+        #content .w-e-text-container [contenteditable="true"] {
+            padding: 1px 10px !important;
+            font-size: 26px;
+        }
+
+        /* 顶部工具 */
+        .top-action-bar {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background: #fff;
+            display: flex;
+            padding: 50px 10px 0px 10px;
+            height: 50px;
+        }
+        #toast{
+            position: sticky;
+            justify-content: end;
+            top: 0;
+            background-color: #fff;
+            display: flex;
+            padding: 10px 10px;
+            height: 10px;
+            width: 70%;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        .bottom-format-bar {
+            position:sticky;
+            top: 0;
+            background: #fff;
+            display: flex;
+            flex-direction: column; /* 纵向排列*/
+        }
+        #custom-toolbar {
+            display: flex; align-items: center;width: 100%;
+            overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;
+            border-left: 3px solid #4a90e2 !important; /* 蓝色粗边框 */
+            border-right: 3px solid #4a90e2 !important; /* 蓝色粗边框 */
+            border-top: 3px solid #4a90e2 !important; /* 蓝色粗边框 */
+            border-bottom:1px solid #cccccc;
+        }
+
+        /*滑动条不展示*/
+        /*#custom-toolbar::-webkit-scrollbar { display: none; }*/
+
+
+        .tool-btn {
+            min-width: 44px; height: 44px; border: none; background: transparent;
+            font-size: 16px; color: #333; cursor: pointer; border-radius: 8px;
+            display: inline-flex; align-items: center; justify-content: center;width: 100%;
+        }
+        .tool-btn:active { background: #f0f0f0; }
+
+        /*标题设置 */
+        .title {
+            display: flex;
+            width: 100%;
+            top: 0;
+            background: #fff;
+            border: 3px solid #cccccc;
+            margin-bottom: 5px;
+        }
+        #title-input {
+             outline: none; padding: 15px 10px;
+            font-size: 22px; font-weight: bold;width: 100%;
+        }
+
+
+        /* 4. 颜色选择条 */
+        #color-bar { display: none; padding: 10px; background: #fff; border-bottom: 1px solid #eee; gap: 15px; overflow-x: auto; }
+        .dot { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #eee; flex-shrink: 0; }
+    </style>
+</head>
+<body>
+
+
+<div class="top-action-bar">
+    <button class="tool-btn"  id="back" style="justify-content: flex-start;width: 10px"><</button>
+    <div id="toast">保存成功</div>
+    <button class="tool-btn"  id="save" onclick="" style="width: 15px;background-color: #cccccc;justify-content:flex-end">保存</button>
+</div>
+
+<div class="title">
+    <input type="text" id="title-input" placeholder="输入标题...">
+</div>
+
+
+<div class="bottom-format-bar">
+
+    <div id="color-bar">
+        <div class="dot" style="background:#000"  onclick="EditorAPI.do('color','#000')"></div>
+        <div class="dot" style="background:#ff4d4f"  onclick="EditorAPI.do('color','#ff4d4f')"></div>
+        <div class="dot" style="background:#1890ff"  onclick="EditorAPI.do('color','#1890ff')"></div>
+        <div class="dot" style="background:#52c41a"  onclick="EditorAPI.do('color','#52c41a')"></div>
+    </div>
+
+    <div id="custom-toolbar">
+        <button class="tool-btn"  onclick="EditorAPI.do('undo')">↺</button>
+        <button class="tool-btn"  onclick="EditorAPI.do('redo')">↻</button>
+        <button class="tool-btn"  onclick="EditorAPI.do('bold')"><b>B</b></button>
+        <button class="tool-btn"  onclick="EditorAPI.do('underline')"><ins>U</ins></button>
+        <button class="tool-btn"  onclick="EditorAPI.do('italic')"><em>I</em></button>
+        <button class="tool-btn"  onclick="toggleColorBar()">🎨</button>
+        <div style="width:1px; height:18px; background:#eee; margin:0 8px;"></div>
+        <button class="tool-btn"  onclick="EditorAPI.do('fontSize', '26px')">大</button>
+        <button class="tool-btn"  onclick="EditorAPI.do('fontSize', '19px')">中</button>
+        <button class="tool-btn"  onclick="EditorAPI.do('fontSize', '14px')">小</button>
+    </div>
+
+</div>
+
+<div id="content"></div>
+
+
+
+
+<script src="index.js"></script>
+<script>
+
+
+    const { createEditor,SlateEditor} = window.wangEditor;
+
+    //  初始化编辑器
+    const editor = createEditor({
+        selector: '#content',
+        config: {
+            hoverbarKeys: {
+                'text': { menuKeys: [] },
+                'image': { menuKeys: [] },
+                'link': { menuKeys: [] }
+            }
+        },
+        mode: 'default',
+    });
+
+    // 2. 封装增强版 API 执行逻辑
+    const EditorAPI = {
+        // 通用切换函数：用于 bold/italic/underline 等行内样式
+        toggleMark(editor, markType) {
+            try {
+                const marks = SlateEditor.marks(editor);
+                if (marks && marks[markType]) {
+                    editor.removeMark(markType);
+                } else {
+                    editor.addMark(markType, true);
+                }
+            } catch (e) {
+                console.error(`切换 ${markType} 失败:`, e);
+            }
+        },
+
+        // 执行入口
+        do(type, val) {
+            if (!editor) return;
+            editor.focus();
+
+            // 使用策略对象映射，避免长长的 if-else 链
+            const actionMap = {
+                undo: () => editor.undo?.(),
+                redo: () => editor.redo?.(),
+                bold: () => this.toggleMark(editor, 'bold'),
+                italic: () => this.toggleMark(editor, 'italic'),
+                underline: () => this.toggleMark(editor, 'underline'),
+                color: () => {
+                    editor.addMark('color', val);
+                    toggleColorBar();
+                },
+                fontSize: () => editor.addMark('fontSize', val),
+                // 没用的功能，列表
+                // bulletedList: () => {
+                //     // 统一命令调用方式
+                //     if (typeof editor.command === 'function') {
+                //         editor.command('bulletedList');
+                //     } else {
+                //         editor.emit?.('command', { key: 'bulletedList' });
+                //     }
+                // }
+            };
+
+            // 执行对应的动作
+            const action = actionMap[type];
+            if (action) {
+                try {
+                    action();
+                } catch (e) {
+                    console.error(`执行 ${type} 失败:`, e);
+                    // 可选：延迟重试逻辑可以放在这里
+                }
+            } else {
+                console.warn(`未知操作类型: ${type}`);
+            }
+        }
+    };
+
+    function toggleColorBar() {
+        const bar = document.getElementById('color-bar');
+        bar.style.display = (bar.style.display === 'flex') ? 'none' : 'flex';
+    }
+</script>
+<script>
+    // 1. 从Android获取初始数据（注意：这些是同步调用，必须在WebView注入完成后执行）
+    const initialTitle = window.Android.getTitle();
+    const initialContent = window.Android.getContent();
+
+    const titleInput = document.getElementById('title-input');
+    const backButton = document.getElementById('back');
+    const saveButton = document.getElementById('save')
+
+    if(initialTitle) {
+        titleInput.value = initialTitle;
+    }
+    if(initialContent && editor) { // 【修正】当内容存在且编辑器就绪时
+        editor.setHtml(initialContent);
+    }
+
+
+    titleInput.addEventListener('input', function(event) {
+        const currentTitle = event.target.value;
+        const currentContent = editor.getHtml()
+        if(window.Android && window.Android.onSaved) {
+            window.Android.onSaved(currentTitle, currentContent);
+        }
+    });
+
+
+    backButton.addEventListener('click', function() {
+        const finalTitle = titleInput.value;
+        const finalContent = editor.getHtml();
+        if(window.Android && window.Android.onSaved) {
+            window.Android.onSaved(finalTitle, finalContent);
+        }
+        // 然后通知关闭
+        if(window.Android && window.Android.onClosed) {
+            window.Android.onClosed();
+        }
+    });
+
+    saveButton.addEventListener('click',function (){
+        const finalTitle = titleInput.value;
+        const finalContent = editor.getHtml();
+        if(window.Android && window.Android.onSaved) {
+            window.Android.onSaved(finalTitle, finalContent);
+            const toast = document.getElementById('toast');
+            toast.style.opacity = '1'
+            setTimeout(()=>toast.style.opacity = '0',2000)
+        }
+    })
+</script>
+</body>
+</html>
