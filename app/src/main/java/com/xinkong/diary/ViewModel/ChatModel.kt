@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.xinkong.diary.Http.AiHttp
 import com.xinkong.diary.Data.AiResponse
 import com.xinkong.diary.Data.AiState
+import com.xinkong.diary.Data.AiToolCall
 import com.xinkong.diary.repository.AppDatabase
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.AiChatConfig
@@ -40,7 +41,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val chatId: Long,
         val keyword: String,
         val limit: Int,
-        val messages: List<Map<String, String>>
+        val toolCallId: String,
+        val messages: List<Map<String, Any>>
     )
 
     private val _pendingDiaryRead = MutableStateFlow<PendingDiaryReadAction?>(null)
@@ -117,8 +119,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             handleAiResponse(
                 chatId = chatId,
                 result = result,
-                messages = messages,
-                allowToolRequest = true
+                messages = messages
             )
         }
     }
@@ -143,7 +144,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * 测试 AI 连接（供 SettingScreen 使用）
      */
     suspend fun testConnection(config: AiChatConfig): Result<AiResponse> {
-        val messages = listOf(mapOf("role" to "user", "content" to "你好"))
+        val messages = listOf(mapOf<String, Any>("role" to "user", "content" to "你好"))
         return aiHttp.chatWithAi(config, messages)
     }
 
@@ -160,9 +161,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val diaries = diaryDao.searchByKeyword(pending.keyword, pending.limit)
             val toolResult = formatDiaryToolResult(diaries)
 
-            val continuedMessages = pending.messages + mapOf(
-                "role" to "system",
-                "content" to buildToolResultPrompt(pending.keyword, toolResult)
+            val continuedMessages = pending.messages + buildToolResultMessage(
+                toolCallId = pending.toolCallId,
+                keyword = pending.keyword,
+                toolResult = toolResult
             )
 
             _aiState.value = AiState.Loading
@@ -170,8 +172,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             handleAiResponse(
                 chatId = pending.chatId,
                 result = result,
-                messages = continuedMessages,
-                allowToolRequest = false
+                messages = continuedMessages
             )
         }
     }
@@ -201,8 +202,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * 构建发送给 AI 的完整消息列表：
      * [system(上下文)] + [历史消息] + [当前用户消息]
      */
-    private suspend fun buildMessages(chatId: Long, currentContent: String): List<Map<String, String>> {
-        val messages = mutableListOf<Map<String, String>>()
+    private suspend fun buildMessages(chatId: Long, currentContent: String): List<Map<String, Any>> {
+        val messages = mutableListOf<Map<String, Any>>()
 
         // system 消息：上下文资料
         val systemContent = buildSystemMessage(chatId)
@@ -236,21 +237,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             append(
                 """
     【工具协议】
-    当你需要读取本地笔记才能回答用户问题时，你必须输出以下格式的JSON（只能输出这一行，不要有其他文字）：
-    {"tool":"read_notes","keyword":"关键词","limit":3}
+    你可使用函数工具 read_notes。参数格式：
+    - keyword: string（中英文关键词，不含标点）
+    - limit: integer（1 到 5）
     
-    示例1：
-    用户问：“我昨天写了什么？”
-    你应该输出：{"tool":"read_notes","keyword":"昨天","limit":3}
-    
-    示例2：
-    用户问：“关于旅行的笔记有哪些？”
-    你应该输出：{"tool":"read_notes","keyword":"旅行","limit":3}
-    
-    重要规则：
-    1. keyword必须是中文或英文单词，不能包含标点
-    2. 如果不需要调用工具，直接正常对话
-    3. 如果需要调用工具，必须只输出JSON，不能有任何其他文字
+    当需要查询笔记时，请返回标准 tool_calls（由系统注入），并可同时给出简短说明。
+    若不需要工具，直接给出正常回答。
     """.trimIndent()
             )
         }.trim()
@@ -276,36 +268,50 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun handleAiResponse(
         chatId: Long,
         result: Result<AiResponse>,
-        messages: List<Map<String, String>>,
-        allowToolRequest: Boolean
+        messages: List<Map<String, Any>>
     ) {
         result.fold(
             onSuccess = { response ->
                 when (response) {
-                    is AiResponse.Text -> {
-                        val request = if (allowToolRequest) parseReadNotesToolRequest(response.content) else null
+                    is AiResponse.Message -> {
+                        val request = parseReadNotesToolRequest(response.toolCalls)
                         if (request != null) {
+                            val assistantToolCallMessage = buildAssistantToolCallMessage(
+                                content = response.content,
+                                toolCall = request.toolCall
+                            )
+
+                            if (response.content.isNotBlank()) {
+                                val aiMsg = ChatMessage(
+                                    chatId = chatId,
+                                    role = "assistant",
+                                    content = response.content,
+                                    date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date())
+                                )
+                                chatDao.insertMessage(aiMsg)
+                            }
+
                             _pendingDiaryRead.value = PendingDiaryReadAction(
                                 chatId = chatId,
                                 keyword = request.keyword,
                                 limit = request.limit,
-                                messages = messages
+                                toolCallId = request.toolCall.id,
+                                messages = messages + assistantToolCallMessage
                             )
                             _aiState.value = AiState.Idle
                             return@fold
                         }
 
+                        val displayContent = response.content.ifBlank { "(空回复)" }
                         val aiMsg = ChatMessage(
                             chatId = chatId,
                             role = "assistant",
-                            content = response.content,
+                            content = displayContent,
                             date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date())
                         )
                         chatDao.insertMessage(aiMsg)
-                        _aiState.value = AiState.Success(result = response.content)
+                        _aiState.value = AiState.Success(result = displayContent)
                     }
-                    // 未来扩展：处理技能调用
-                    // is AiResponse.SkillAction -> { ... }
                 }
             },
             onFailure = { error ->
@@ -323,22 +329,39 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private data class ReadNotesToolRequest(
         val keyword: String,
-        val limit: Int
+        val limit: Int,
+        val toolCall: AiToolCall
     )
 
-    private fun parseReadNotesToolRequest(content: String): ReadNotesToolRequest? {
-        val raw = content.trim()
-        if (!raw.startsWith("{") || !raw.endsWith("}")) return null
+    private fun parseReadNotesToolRequest(toolCalls: List<AiToolCall>): ReadNotesToolRequest? {
+        val call = toolCalls.firstOrNull { it.type == "function" && it.functionName == "read_notes" }
+            ?: return null
         return try {
-            val json = JSONObject(raw)
-            if (json.optString("tool") != "read_notes") return null
+            val json = JSONObject(call.arguments)
             val keyword = json.optString("keyword").trim()
             if (keyword.isEmpty() || !keyword.matches(Regex("^[\\w\\u4e00-\\u9fa5]+$"))) return null
             val limit = json.optInt("limit", 3).coerceIn(1, 5)
-            ReadNotesToolRequest(keyword = keyword, limit = limit)
-        } catch (_: Exception) {
+            ReadNotesToolRequest(keyword = keyword, limit = limit, toolCall = call)
+        } catch (e: Exception) {
             null
         }
+    }
+
+    private fun buildAssistantToolCallMessage(content: String, toolCall: AiToolCall): Map<String, Any> {
+        return mapOf(
+            "role" to "assistant",
+            "content" to content,
+            "tool_calls" to listOf(
+                mapOf(
+                    "id" to toolCall.id,
+                    "type" to toolCall.type,
+                    "function" to mapOf(
+                        "name" to toolCall.functionName,
+                        "arguments" to toolCall.arguments
+                    )
+                )
+            )
+        )
     }
 
     private fun formatDiaryToolResult(diaries: List<com.xinkong.diary.repository.Diary>): String {
@@ -350,8 +373,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun buildToolResultPrompt(keyword: String, toolResult: String): String {
-        return "你请求了读取本地笔记，关键词为：$keyword。以下是查询结果，请基于结果继续回答用户问题：\n$toolResult"
+    private fun buildToolResultMessage(toolCallId: String, keyword: String, toolResult: String): Map<String, Any> {
+        return mapOf(
+            "role" to "tool",
+            "tool_call_id" to toolCallId,
+            "name" to "read_notes",
+            "content" to "关键词：$keyword\n$toolResult"
+        )
     }
 }
 

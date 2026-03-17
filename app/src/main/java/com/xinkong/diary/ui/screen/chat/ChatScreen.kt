@@ -186,9 +186,10 @@ fun ChatHeaderColumn(
                     .toggleRotateEffect(isRotated = isRolled)
             )
             Spacer(modifier = Modifier.weight(1f))
-//            Text("☰", fontSize = 30.sp, modifier = Modifier
-//                .padding(8.dp)
-//                .clickable { showAiSettings = true })
+            Text("☰", fontSize = 30.sp, modifier = Modifier
+                .padding(8.dp)
+//                .clickable { showAiSettings = true }
+            )
         }
 
         AnimatedVisibility(

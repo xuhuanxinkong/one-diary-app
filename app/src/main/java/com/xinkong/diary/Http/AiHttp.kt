@@ -2,18 +2,46 @@ package com.xinkong.diary.Http
 
 
 import com.xinkong.diary.Data.AiResponse
+import com.xinkong.diary.Data.AiToolCall
 import com.xinkong.diary.repository.AiChatConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 
 class AiHttp {
     private val client = OkHttpClient()
     private val mediaType = "application/json".toMediaType()
+    private val readNotesToolSchema = JSONArray().put(
+        JSONObject().apply {
+            put("type", "function")
+            put("function", JSONObject().apply {
+                put("name", "read_notes")
+                put("description", "按关键词读取本地笔记摘要")
+                put("parameters", JSONObject().apply {
+                    put("type", "object")
+                    put("properties", JSONObject().apply {
+                        put("keyword", JSONObject().apply {
+                            put("type", "string")
+                            put("description", "搜索关键词，仅中英文单词")
+                        })
+                        put("limit", JSONObject().apply {
+                            put("type", "integer")
+                            put("description", "返回条数，1 到 5")
+                            put("minimum", 1)
+                            put("maximum", 5)
+                        })
+                    })
+                    put("required", JSONArray().put("keyword"))
+                    put("additionalProperties", false)
+                })
+            })
+        }
+    )
 
     /**
      * 发送对话请求（无状态，config 由调用方传入）
@@ -21,7 +49,7 @@ class AiHttp {
      */
     suspend fun chatWithAi(
         config: AiChatConfig,
-        messages: List<Map<String, String>>
+        messages: List<Map<String, Any>>
     ): Result<AiResponse> {
         return withContext(Dispatchers.IO) {
             try {
@@ -40,12 +68,13 @@ class AiHttp {
                 val response = client.newCall(requestBuilder.build()).execute()
                 if (response.isSuccessful) {
                     val json = JSONObject(response.body?.string() ?: "")
-                    val content = json
+                    val message = json
                         .getJSONArray("choices")
                         .getJSONObject(0)
                         .getJSONObject("message")
-                        .getString("content")
-                    Result.success(AiResponse.Text(content))
+                    val content = message.optString("content", "")
+                    val toolCalls = parseToolCalls(message.optJSONArray("tool_calls"))
+                    Result.success(AiResponse.Message(content = content, toolCalls = toolCalls))
                 } else {
                     Result.failure(IOException("请求失败${response.code}"))
                 }
@@ -87,13 +116,35 @@ class AiHttp {
 
     // ---- 私有工具方法 ----
 
-    private fun buildRequestBody(model: String, messages: List<Map<String, String>>): RequestBody {
+    private fun buildRequestBody(model: String, messages: List<Map<String, Any>>): RequestBody {
         val json = JSONObject().apply {
             put("model", model)
             put("messages", JSONObject.wrap(messages))
+            put("tools", readNotesToolSchema)
+            put("tool_choice", "auto")
             put("stream", false)
         }
         return json.toString().toRequestBody(mediaType)
+    }
+
+    private fun parseToolCalls(toolCallsArray: JSONArray?): List<AiToolCall> {
+        if (toolCallsArray == null) return emptyList()
+        val toolCalls = mutableListOf<AiToolCall>()
+        for (i in 0 until toolCallsArray.length()) {
+            val callObj = toolCallsArray.optJSONObject(i) ?: continue
+            val functionObj = callObj.optJSONObject("function") ?: continue
+            val name = functionObj.optString("name")
+            if (name.isEmpty()) continue
+            toolCalls.add(
+                AiToolCall(
+                    id = callObj.optString("id"),
+                    type = callObj.optString("type", "function"),
+                    functionName = name,
+                    arguments = functionObj.optString("arguments", "{}")
+                )
+            )
+        }
+        return toolCalls
     }
 
     private fun resolveCompletionsUrl(baseUrl: String): String = when {

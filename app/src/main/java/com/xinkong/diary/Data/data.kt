@@ -8,9 +8,16 @@ sealed class AiState{
     data class Error(val message: String): AiState()
 }
 
-// AI 响应：未来可扩展技能调用等类型
 sealed class AiResponse {
-    data class Text(val content: String) : AiResponse()
-    // 未来扩展：AI 返回可执行技能
-    // data class SkillAction(val skill: String, val params: Map<String, Any>) : AiResponse()
+    data class Message(
+        val content: String,
+        val toolCalls: List<AiToolCall>
+    ) : AiResponse()
 }
+
+data class AiToolCall(
+    val id: String,
+    val type: String,
+    val functionName: String,
+    val arguments: String
+)
