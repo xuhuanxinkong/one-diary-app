@@ -4,6 +4,7 @@ import android.os.Message
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
@@ -58,14 +59,4 @@ interface DiaryDao {
         """
     )
     fun searchAllByKeyword(keyword: String): Flow<List<Diary>>
-
-    // Diary Tag 相关
-    @Insert
-    suspend fun insertDiaryTag(tag: DiaryTag)
-
-    @Delete
-    suspend fun deleteDiaryTag(tag: DiaryTag)
-
-    @Query("SELECT * FROM diary_tags")
-    fun getAllDiaryTags(): Flow<List<DiaryTag>>
 }

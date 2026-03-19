@@ -72,15 +72,25 @@ import com.xinkong.diary.repository.Diary
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.text.input.ImeAction
+
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import com.xinkong.diary.ui.screen.chat.ChatTagSetting
+import com.xinkong.diary.repository.Chat
+import com.xinkong.diary.ui.screen.chat.ChatTagList
+import com.xinkong.diary.ui.theme.currentDiaryColors
+import kotlin.collections.component1
+import kotlin.collections.component2
+import kotlin.collections.plus
 
 @Composable
 fun SearchBarItem(
@@ -512,7 +522,7 @@ fun ExportDialog(
                                     )
                                     Column {
                                         Text(diary.title.ifEmpty { "无标题" }, fontSize = 14.sp, color = MaterialTheme.diaryColors.sweetText, maxLines = 1)
-                                        Text(diary.tag ?: "未分类", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+                                        Text(diary.tag, fontSize = 12.sp, color = Color.Gray, maxLines = 1)
                                     }
                                 }
                             }
@@ -679,52 +689,60 @@ fun SelectionModeBottomBar(
     }
 }
 
+
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MoveToCategoryBar(
-    tags: List<String>,
-    onTagSelected: (String) -> Unit,
+fun MoveToCategoryDialog(
+    isDiary: Boolean,
+    diaryList: List<Diary> = emptyList(),
+    chatList: List<Chat> = emptyList(),
+    onTagSelected: (Pair<String, String>) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp, 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(bottom = 32.dp)
         ) {
-            Text("移动到:", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.weight(1f))
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "取消",
+            Row(
                 modifier = Modifier
-                    .size(24.dp)
-                    .clickable { onDismiss() }
-            )
-        }
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(tags) { tag ->
-                Button(
-                    onClick = { onTagSelected(tag) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.diaryColors.primary
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("选择移动到：", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.weight(1f))
+            }
+            
+            if (isDiary) {
+                TagList(
+                    contentList = diaryList,
+                    onTagSelect = { onTagSelected(it) },
+                    displayConfig = TagListDisplayConfig(
+                        showManageAction = false,
+                        showAddAction = false,
+                        enableSelection = false
                     ),
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Text(tag, color = Color.White)
-                }
+                    onTagsDelete = {}
+                )
+            } else {
+                ChatTagList(
+                    chatList = chatList,
+                    onTagSelect = { onTagSelected(it) },
+                    displayConfig = TagListDisplayConfig(
+                        showManageAction = false,
+                        showAddAction = false,
+                        enableSelection = false
+                    ),
+                    onTagsDelete = {}
+                )
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 

@@ -15,18 +15,9 @@ data class Diary(
     val text: String="",
     val content:String="",
     val date:String="",
-    val tag:String?=null,
+    val tag:String="未分类",
+    val tagFolder: String = "我的笔记",
     val type: String="Diary"
-)
-
-@Entity(tableName = "diary_tags")
-data class DiaryTag(
-    @PrimaryKey
-    val name: String,
-    val colorInt: Int,
-    val bg2Int: Int,
-    val border2Int: Int,
-    val bgImage: String? = null
 )
 
 // 定义 Diary 的 Saver
@@ -37,7 +28,8 @@ val DiarySaver = Saver<Diary, Map<String, Any>>(
             "title" to diary.title,
             "content" to diary.content,
             "date" to diary.date,
-            "tag" to (diary.tag ?: ""),
+            "tag" to diary.tag,
+            "tagFolder" to diary.tagFolder,
             "type" to diary.type
         )
     },
@@ -47,7 +39,8 @@ val DiarySaver = Saver<Diary, Map<String, Any>>(
             title = map["title"] as String,
             content = map["content"] as String,
             date = map["date"] as String,
-            tag = map["tag"] as String?,
+            tag = map["tag"] as String,
+            tagFolder = map["tagFolder"] as? String ?: "我的笔记",
             type = map["type"] as String
         )
     }

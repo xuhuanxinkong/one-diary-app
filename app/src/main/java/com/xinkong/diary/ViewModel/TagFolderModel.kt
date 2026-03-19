@@ -4,39 +4,37 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xinkong.diary.repository.AppDatabase
-import com.xinkong.diary.repository.DiaryTag
-import kotlinx.coroutines.flow.Flow
+import com.xinkong.diary.repository.TagFolder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class DiaryTagModel(application: Application) : AndroidViewModel(application) {
+class TagFolderModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
-    private val diaryDao = db.diaryDao()
+    private val tagDao = db.tagDao()
 
-    private val _tags = MutableStateFlow(listOf<DiaryTag>())
-    val tags: StateFlow<List<DiaryTag>> = _tags.asStateFlow()
+    private val _folders = MutableStateFlow(listOf<TagFolder>())
+    val folders: StateFlow<List<TagFolder>> = _folders.asStateFlow()
 
     init {
         viewModelScope.launch {
-            diaryDao.getAllDiaryTags().collect { tags ->
-                _tags.update { tags }
+            tagDao.getAllTagFolders().collect { folders ->
+                _folders.update { folders }
             }
         }
     }
 
-    fun addTag(tag: DiaryTag) {
+    fun addOrUpdateFolder(folder: TagFolder) {
         viewModelScope.launch {
-            diaryDao.insertDiaryTag(tag)
+            tagDao.insertTagFolder(folder)
         }
     }
 
-    fun deleteTag(tag: DiaryTag) {
+    fun deleteFolder(folder: TagFolder) {
         viewModelScope.launch {
-            diaryDao.deleteDiaryTag(tag)
+            tagDao.deleteTagFolder(folder)
         }
     }
 }
-

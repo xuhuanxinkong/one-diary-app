@@ -18,7 +18,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -58,7 +58,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -85,12 +85,18 @@ import com.xinkong.diary.ui.theme.currentDiaryColors
 import com.xinkong.diary.ui.theme.diaryColors
 import java.text.SimpleDateFormat
 import java.util.Locale
-import com.xinkong.diary.ViewModel.DiaryTagModel
-import com.xinkong.diary.ViewModel.ChatTagModel
+import com.xinkong.diary.ViewModel.TagModel
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.combinedClickable
-
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.MarkUnreadChatAlt
+import androidx.compose.material.icons.filled.NoteAlt
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.ui.Alignment
+import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
+import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
 
 @Composable
@@ -105,37 +111,43 @@ fun HomeScreen(){
 
     val diaryViewModel: DiaryViewModel = viewModel()
     val chatViewModel: com.xinkong.diary.ViewModel.ChatViewModel = viewModel()
-    val diaryTagModel: DiaryTagModel = viewModel()
-    val chatTagModel: ChatTagModel = viewModel()
+    val tagModel: TagModel = viewModel()
     
     val contentList by diaryViewModel.listState.collectAsStateWithLifecycle()
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
-    val diaryTags by diaryTagModel.tags.collectAsStateWithLifecycle()
-    val chatTags by chatTagModel.tags.collectAsStateWithLifecycle()
+    val diaryTags by tagModel.diaryTags.collectAsStateWithLifecycle()
+    val chatTags by tagModel.chatTags.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
-    val availableTags = remember(contentList, chatList, diaryTags, chatTags) {
-        val allTags = (contentList.mapNotNull { it.tag } + chatList.map { it.tag } +
-            diaryTags.map { it.name } + chatTags.map { it.name }).distinct()
-        listOf("未分类") + allTags.filter { it != "未分类" }
-    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
             if (isSelectionMode) {
                 Column {
-                    AnimatedVisibility(visible = showMoveBar) {
-                        MoveToCategoryBar(
-                            tags = availableTags,
+                    if (showMoveBar) {
+                        MoveToCategoryDialog(
+                            isDiary = selectedTab == Tab.HOME,
+                            diaryList = contentList,
+                            chatList = chatList,
                             onTagSelected = { tag ->
                                 if (selectedTab == Tab.HOME) {
                                     contentList.filter { it.id in selectedIds }.forEach {
-                                        diaryViewModel.updateDiary(it.copy(tag = tag))
+                                        diaryViewModel.updateDiary(
+                                            it.copy(
+                                                tag = tag.second,
+                                                tagFolder = tag.first
+                                            )
+                                        )
                                     }
                                 } else {
                                     chatList.filter { it.id in selectedIds }.forEach {
-                                        chatViewModel.updateChat(it.copy(tag = tag))
+                                        chatViewModel.updateChat(
+                                            it.copy(
+                                                tag = tag.second,
+                                                tagFolder = tag.first
+                                            )
+                                        )
                                     }
                                 }
                                 showMoveBar = false
@@ -195,6 +207,9 @@ fun HomeScreen(){
                         selectedIds = emptySet()
                         showMoveBar = false
                     },
+                    onManageTags = {
+                        navViewModel.navigateTo(com.xinkong.diary.ViewModel.Route.TagManage("diary"))
+                    },
                     onClick = { diary ->
                         navViewModel.navigateTo(Route.DiaryDetail(diary.id))
                     }
@@ -215,6 +230,9 @@ fun HomeScreen(){
                         isSelectionMode = false
                         selectedIds = emptySet()
                         showMoveBar = false
+                    },
+                    onManageTags = {
+                        navViewModel.navigateTo(Route.TagManage("chat"))
                     },
                     onClick = { chat ->
                         navViewModel.navigateTo(Route.ChatDetail(chat.id))
@@ -255,12 +273,13 @@ fun ContentShow(
     onEnterSelection: (Long) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
     onExitSelection: () -> Unit = {},
+    onManageTags: () -> Unit = {},
     onClick: (Diary) -> Unit
 ){
     val viewModel: DiaryViewModel=viewModel()
     val contentList by viewModel.listState.collectAsStateWithLifecycle()
 
-    var selectedTag by rememberSaveable{mutableStateOf<String>("未分类")}
+    var selectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
 
     // ----------- 搜索状态 -------------
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -276,10 +295,8 @@ fun ContentShow(
         if (isSearchMode && searchQuery.isNotBlank()) {
             searchResults
         } else {
-            if (selectedTag.isEmpty()) {
-                contentList
-            } else {
-                contentList.filter { diary -> diary.tag == selectedTag }
+            contentList.filter { diary ->
+                diary.tag == selectedTag.second && diary.tagFolder == selectedTag.first
             }
         }
     }
@@ -311,15 +328,25 @@ fun ContentShow(
                 HeaderColumn(
                     selectedTag = selectedTag,
                     contentList = contentList,
-                    onTagSelect = { tag -> 
-                        selectedTag = tag 
+                    onTagSelect = { tag ->
+                        selectedTag = tag
                         isSearchMode = false
                         searchQuery = ""
                     },
+                    onManageTags = onManageTags,
                     onTagsDelete = { deletedTags ->
-                        contentList.filter { it.tag in deletedTags }.forEach { diary ->
-                            viewModel.updateDiary(diary.copy(tag = "未分类"))
-                        }
+                        deletedTags.forEach { (folder, tagName) ->
+                            contentList
+                                .filter { it.tag == tagName && it.tagFolder == folder }
+                                .forEach { diary ->
+                                    viewModel.updateDiary(
+                                        diary.copy(
+                                            tag = UNCLASSIFIED_TAG_NAME,
+                                            tagFolder = folder
+                                        )
+                                    )
+                                }
+                            }
                     }
                 )
             }
@@ -385,10 +412,11 @@ fun ContentShow(
 //----------------目录头部--------------------
 @Composable
 fun HeaderColumn(
-    selectedTag: String,
+    selectedTag: Pair<String, String>,
     contentList: List<Diary>,
-    onTagSelect: (String) -> Unit,
-    onTagsDelete: (List<String>) -> Unit
+    onTagSelect: (Pair<String, String>) -> Unit,
+    onTagsDelete: (List<Pair<String, String>>) -> Unit,
+    onManageTags: () -> Unit = {}
 ) {
     var isRolled by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -398,27 +426,36 @@ fun HeaderColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.diaryColors.background2)
-                .padding(20.dp,60.dp,20.dp,20.dp),
+                .padding(20.dp,60.dp,20.dp,0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(selectedTag, fontSize = 35.sp, modifier = Modifier.clickable{isRolled = !isRolled })
+            val displayTitle = selectedTag.second
+            Text(displayTitle, fontSize = 35.sp, modifier = Modifier.clickable{isRolled = !isRolled })
             Icon(imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = "展开",
                 modifier = Modifier.padding(top = 5.dp).toggleRotateEffect(isRotated = isRolled))
             Spacer(modifier = Modifier.weight(1f))
             Text("☰", fontSize = 30.sp, modifier=Modifier.padding(8.dp).clickable { showSettings = true })
         }
+        Text("当前文件夹：${selectedTag.first}", fontSize = 15.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(start = 20.dp, bottom = 20.dp))
         AnimatedVisibility(visible = isRolled,
             enter = expandVertically(animationSpec = tween (300)) + fadeIn(),
             exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
         ) {
             TagSetting(
-                contentList,
+                contentList = contentList,
+                selectedTag = selectedTag,
                 onTagSelect = { tag ->
                     onTagSelect(tag)
                     isRolled = false
                 },
-                onTagsDelete = onTagsDelete
+                onTagsDelete = onTagsDelete,
+                onManageClick = {
+                    isRolled = false
+                    onManageTags()
+                }
             )
         }
     }
@@ -431,7 +468,7 @@ fun HeaderColumn(
 
 //----------------添加按钮--------------------
 @Composable
-fun AddButton(tag: String?) {
+fun AddButton(tag: Pair<String, String>) {
     val viewModel: DiaryViewModel = viewModel()
     var title by remember { mutableStateOf("标题") }
     var content by remember { mutableStateOf("") }
@@ -442,7 +479,7 @@ fun AddButton(tag: String?) {
         colors = ButtonDefaults.buttonColors(MaterialTheme.diaryColors.primary),
         contentPadding = PaddingValues(0.dp),
         onClick = {
-            viewModel.addDiary(title, content,tag,"Diary")
+            viewModel.addDiary(title, content, tag.second, tag.first, "Diary")
         },
         interactionSource = interactionSource, // 关键：传递 interactionSource
         modifier = Modifier
@@ -585,38 +622,68 @@ fun DeleteDialog(
 
 //----------------底部栏--------------------
 @Composable
-fun BottomNavigate(selectedTab: Tab,
-                   onTabSelected:(Tab)-> Unit){
-
+fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
     val background1 = MaterialTheme.diaryColors.background
     val background2 = MaterialTheme.diaryColors.background0
-
     val border1 = MaterialTheme.diaryColors.border1
     val border2 = MaterialTheme.diaryColors.sweetBorder
-    Row (
-        modifier = Modifier.fillMaxWidth()
-            .background(MaterialTheme.diaryColors.background2)
-            .padding(15.dp),
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.diaryColors.background2),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceEvenly // 均匀分布
     ) {
         val homeInteractionSource = remember { MutableInteractionSource() }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .padding(end = 30.dp)
+                .clickable(
+                    interactionSource = homeInteractionSource,
+                    indication = null
+                ) {
+                    onTabSelected(Tab.HOME)
+                    currentDiaryColors.value = currentDiaryColors.value.copy(
+                        background2 = background1,
+                        border2 = border1
+                    )
+                }
+                .pressScaleEffect(homeInteractionSource, 0.75f)
+        ) {
+            Icon(
+                imageVector = Icons.Default.NoteAlt,
+                contentDescription = "笔记",
+                modifier = Modifier.size(24.dp)
+            )
+            Text("笔记", fontSize = 10.sp)
+        }
+
         val funInteractionSource = remember { MutableInteractionSource() }
-        Icon(imageVector = Icons.Filled.Home, contentDescription = "首页",
-            modifier = Modifier.clickable(interactionSource = homeInteractionSource,
-                indication = null){onTabSelected(Tab.HOME)
-                currentDiaryColors.value = currentDiaryColors.value.copy(
-                    background2 = background1,
-                    border2 = border1
-                )}
-                .pressScaleEffect(homeInteractionSource,0.75f).weight(1f))
-        Icon(imageVector = Icons.Filled.DateRange, contentDescription = "AI",
-            modifier = Modifier.clickable(interactionSource = funInteractionSource,
-                indication = null){onTabSelected(Tab.AI)
-                currentDiaryColors.value = currentDiaryColors.value.copy(
-                    background2 = background2,
-                    border2 = border2
-                )}
-                .pressScaleEffect(funInteractionSource,0.75f).weight(1f))
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .padding(start = 30.dp)
+                .clickable(
+                    interactionSource = funInteractionSource,
+                    indication = null
+                ) {
+                    onTabSelected(Tab.AI)
+                    currentDiaryColors.value = currentDiaryColors.value.copy(
+                        background2 = background2,
+                        border2 = border2
+                    )
+                }
+                .pressScaleEffect(funInteractionSource, 0.75f)
+        ) {
+            Icon(
+                imageVector = Icons.Default.MarkUnreadChatAlt,
+                contentDescription = "对话",
+                modifier = Modifier.size(24.dp)
+            )
+            Text("对话", fontSize = 10.sp)
+        }
     }
 }
 

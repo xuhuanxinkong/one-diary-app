@@ -34,13 +34,14 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // 添加
-    fun addDiary(title: String, content: String, tag: String?, type: String) {
+    fun addDiary(title: String, content: String, tag: String, tagFolder: String, type: String) {
         viewModelScope.launch {
             val diary = Diary(
                 title = title,
                 content = content,
                 date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-                tag = tag ?: "未分类",
+                tag = tag,
+                tagFolder = tagFolder,
                 type = type
             )
             diaryDao.insert(diary)
@@ -121,7 +122,8 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                             title = diary.title,
                             content = diary.content,
                             date = diary.date,
-                            tag = if (targetTag.isNotEmpty()) targetTag else (diary.tag ?: "未分类"),
+                            tag = if (targetTag.isNotEmpty()) targetTag else diary.tag,
+                            tagFolder = diary.tagFolder,
                             type = diary.type
                         )
                         diaryDao.insert(newDiary)
@@ -141,7 +143,8 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                         title = "导入的笔记",
                         content = formattedJson,
                         date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-                        tag = if (targetTag.isNotEmpty()) targetTag else "导入"
+                        tag = if (targetTag.isNotEmpty()) targetTag else "导入",
+                        tagFolder = "我的笔记"
                     )
                     diaryDao.insert(newDiary)
                     callback(Result.success(1))

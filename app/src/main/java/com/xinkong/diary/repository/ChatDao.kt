@@ -3,6 +3,7 @@ package com.xinkong.diary.repository
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
@@ -82,14 +83,4 @@ interface ChatDao {
 
     @Query("SELECT * FROM user_chat_configs WHERE chatId = :chatId LIMIT 1")
     suspend fun getUserConfigOnce(chatId: Long): UserChatConfig?
-
-    // Chat Tag 相关
-    @Insert
-    suspend fun insertChatTag(tag: ChatTag)
-
-    @Delete
-    suspend fun deleteChatTag(tag: ChatTag)
-
-    @Query("SELECT * FROM chat_tags")
-    fun getAllChatTags(): Flow<List<ChatTag>>
 }

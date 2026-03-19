@@ -1,20 +1,17 @@
 package com.xinkong.diary.ui.screen.chat
 
-import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -39,25 +36,42 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.xinkong.diary.ViewModel.ChatTagModel
+import com.xinkong.diary.ViewModel.TagModel
+import com.xinkong.diary.ViewModel.TagDisplayItem
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.ChatTag
-import com.xinkong.diary.ui.theme.ColorPalette
-import com.xinkong.diary.ui.theme.SweetBorder
-import com.xinkong.diary.ui.theme.SweetWhite
-import com.xinkong.diary.ui.theme.ThemeDefault
+import com.xinkong.diary.ui.screen.home.TagListDisplayConfig
+import com.xinkong.diary.ui.screen.home.TagUI
+import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
+import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
+import com.xinkong.diary.ui.screen.tag.TagFolderListState
+import com.xinkong.diary.ui.screen.tag.tagFolderItems
 import com.xinkong.diary.ui.theme.currentDiaryColors
 import com.xinkong.diary.ui.theme.diaryColors
 import kotlin.collections.minus
 import kotlin.collections.plus
+
+private fun TagDisplayItem.toTagUi(): TagUI {
+    return TagUI(
+        name = name,
+        color = Color(colorInt),
+        background2 = Color(bg2Int),
+        border2 = Color(border2Int),
+        folder = folder,
+        displayName = displayName
+    )
+}
 
 
 //----------------对话分类面板（包装卡片）--------------------
 @Composable
 fun ChatTagSetting(
     chatList: List<Chat>,
-    onTagSelect: (String) -> Unit = {},
-    onTagsDelete: (List<String>) -> Unit = {}
+    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
+    onTagSelect: (Pair<String, String>) -> Unit = {},
+    onTagsDelete: (List<Pair<String, String>>) -> Unit = {},
+    displayConfig: TagListDisplayConfig = TagListDisplayConfig(),
+    onManageClick: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -67,7 +81,14 @@ fun ChatTagSetting(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
-        ChatTagList(chatList, onTagSelect, onTagsDelete)
+        ChatTagList(
+            chatList = chatList,
+            selectedTag = selectedTag,
+            onTagSelect = onTagSelect,
+            onTagsDelete = onTagsDelete,
+            displayConfig = displayConfig,
+            onManageClick = onManageClick
+        )
     }
 }
 
@@ -77,62 +98,30 @@ fun ChatTagSetting(
 @Composable
 fun ChatTagList(
     chatList: List<Chat>,
-    onTagSelect: (String) -> Unit,
-    onTagsDelete: (List<String>) -> Unit,
-    tagModel: ChatTagModel = viewModel()
+    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
+    onTagSelect: (Pair<String, String>) -> Unit,
+    onTagsDelete: (List<Pair<String, String>>) -> Unit,
+    displayConfig: TagListDisplayConfig = TagListDisplayConfig(),
+    tagModel: TagModel = viewModel(),
+    onManageClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val dbTags by tagModel.tags.collectAsStateWithLifecycle()
+    val dbTags by tagModel.chatTags.collectAsStateWithLifecycle()
+    val dbFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
+    
+    val groupedResult = remember(chatList, dbTags, dbFolders) {
+        tagModel.buildChatGroupedTags(chatList)
+    }
 
-    val customTags = remember(dbTags) {
-        dbTags.map { dbTag ->
-            com.xinkong.diary.ui.screen.home.TagUI(
-                name = dbTag.name,
-                color = Color(dbTag.colorInt),
-                background2 = Color(dbTag.bg2Int),
-                border2 = Color(dbTag.border2Int)
-            )
+    val groupedTags = remember(groupedResult) {
+        groupedResult.groupedTags.mapValues { (_, items) ->
+            items.map { it.toTagUi() }
         }
-    }
-
-    val distinctChatTags = remember(chatList) {
-        chatList.map { it.tag }.distinct()
-    }
-
-    // 合并：Chat 已有标签 + 用户自定义标签
-    val mergedTags = remember(distinctChatTags, customTags) {
-        val allTagNames = (distinctChatTags + customTags.map { it.name }).distinct()
-        allTagNames
-            .filter { it != "未分类" }
-            .map { name ->
-                val custom = customTags.find { it.name == name }
-                if (custom != null) {
-                    custom
-                } else {
-                    val colorIndex = kotlin.math.abs(name.hashCode()) % ColorPalette.size
-                    com.xinkong.diary.ui.screen.home.TagUI(
-                        name,
-                        ColorPalette[colorIndex]
-                    )
-                }
-            }
-    }
-
-    // "未分类" 置顶
-    val displayTags = remember(mergedTags) {
-        listOf(
-            com.xinkong.diary.ui.screen.home.TagUI(
-                "未分类",
-                Color.Black,
-                background2 = SweetWhite,
-                border2 = SweetBorder
-            )
-        ) + mergedTags
     }
 
     var isTagAdd by remember { mutableStateOf(false) }
     var isSelectionMode by remember { mutableStateOf(false) }
-    var selectedTags by remember { mutableStateOf(setOf<String>()) }
+    var selectedTags by remember { mutableStateOf(setOf<Pair<String, String>>()) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         LazyColumn(
@@ -150,13 +139,24 @@ fun ChatTagList(
                 ) {
                     Text("分类：", fontSize = 24.sp)
                     Spacer(modifier = Modifier.weight(1f))
-                    if (isSelectionMode) {
+                    if (displayConfig.showManageAction) {
+                        Text(
+                            text = "管理",
+                            color = MaterialTheme.diaryColors.primary,
+                            modifier = Modifier
+                                .clickable {
+                                    onManageClick()
+                                }
+                                .padding(end = 16.dp)
+                        )
+                    }
+                    if (displayConfig.enableSelection && isSelectionMode) {
                         IconButton(onClick = {
-                            val tagsToRemove = selectedTags.toList()
-                            dbTags.filter { it.name in tagsToRemove }.forEach {
-                                tagModel.deleteTag(it)
+                            val tagsToRemove = dbTags.filter { (it.folder to it.name) in selectedTags }
+                            tagsToRemove.forEach {
+                                tagModel.deleteChatTag(it)
                             }
-                            onTagsDelete(tagsToRemove)
+                            onTagsDelete(tagsToRemove.map { it.folder to it.name })
                             isSelectionMode = false
                             selectedTags = emptySet()
                         }) {
@@ -165,41 +165,35 @@ fun ChatTagList(
                     }
                 }
             }
-            items(displayTags) { tag ->
-                val isUnclassified = tag.name == "未分类"
-                // 复用 TagScreen 的 TagCard
-                com.xinkong.diary.ui.screen.home.TagCard(
-                    tag = tag,
-                    isSelectionMode = isSelectionMode && !isUnclassified,
-                    isSelected = selectedTags.contains(tag.name),
-                    onLongClick = {
-                        if (!isUnclassified) {
-                            isSelectionMode = true
-                            selectedTags = selectedTags + tag.name
-                        }
-                    },
-                    onClick = {
-                        if (isSelectionMode) {
-                            if (!isUnclassified) {
-                                selectedTags = if (selectedTags.contains(tag.name)) {
-                                    selectedTags - tag.name
-                                } else {
-                                    selectedTags + tag.name
-                                }
-                            }
-                        } else {
-                            onTagSelect(tag.name)
-                            currentDiaryColors.value = currentDiaryColors.value.copy(
-                                background2 = tag.background2,
-                                border2 = tag.border2
-                            )
-                        }
+            tagFolderItems(
+                groupedTags = groupedTags,
+                listState = TagFolderListState(
+                    selectedTag = selectedTag,
+                    isSelectionMode = displayConfig.enableSelection && isSelectionMode,
+                    selectedTags = selectedTags
+                ),
+                onTagClick = { tag ->
+                    if (displayConfig.enableSelection && isSelectionMode) {
+                        val key = tag.folder to tag.name
+                        selectedTags = if (selectedTags.contains(key)) selectedTags - key else selectedTags + key
+                    } else {
+                        onTagSelect(tag.folder to tag.name)
+                        currentDiaryColors.value = currentDiaryColors.value.copy(
+                            background2 = tag.background2,
+                            border2 = tag.border2
+                        )
                     }
-                )
-            }
+                },
+                onTagLongClick = { tag ->
+                    if (displayConfig.enableSelection) {
+                        isSelectionMode = true
+                        selectedTags = selectedTags + (tag.folder to tag.name)
+                    }
+                }
+            )
         }
 
-        if (!isSelectionMode) {
+        if (displayConfig.showAddAction && !isSelectionMode) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -216,16 +210,24 @@ fun ChatTagList(
     }
 
     // 复用 TagScreen 的 TagAdd 对话框
-    if (isTagAdd) {
+    if (displayConfig.showAddAction && isTagAdd) {
+        val uniqueFolders = groupedResult.availableFolders
         com.xinkong.diary.ui.screen.home.TagAdd(
             onDismiss = { isTagAdd = false },
-            onConfirm = { name, color, background2, border2 ->
-                tagModel.addTag(ChatTag(
-                    name = name,
-                    colorInt = color.toArgb(),
-                    bg2Int = background2.toArgb(),
-                    border2Int = border2.toArgb()
-                ))
+            availableFolders = uniqueFolders,
+            onConfirm = { name, color, background2, border2, folder ->
+                val exists = dbTags.any { it.folder == folder && it.name == name }
+                if (exists) {
+                    android.widget.Toast.makeText(context, "该文件夹下已存在同名分类", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    tagModel.addChatTag(ChatTag(
+                        name = name,
+                        colorInt = color.toArgb(),
+                        bg2Int = background2.toArgb(),
+                        border2Int = border2.toArgb(),
+                        folder = folder
+                    ))
+                }
                 isTagAdd = false
             }
         )

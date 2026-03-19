@@ -57,5 +57,9 @@ sealed class Route {
     @Serializable
     data class ChatSetting(val chatId: Long) : Route()
 
+    // 标签管理页 (type: "diary" 或 "chat")
+    @Serializable
+    data class TagManage(val type: String) : Route()
+
     // 其他页面
 }

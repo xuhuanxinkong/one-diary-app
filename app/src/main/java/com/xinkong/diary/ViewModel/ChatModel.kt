@@ -73,11 +73,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // ========== 对话 CRUD ==========
 
-    fun addChat(title: String, tag: String?): Chat {
+    fun addChat(title: String, tag: String, tagFolder: String): Chat {
         val chat = Chat(
             title = title,
             date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-            tag = tag ?: "未分类"
+            tag = tag,
+            tagFolder = tagFolder
         )
         viewModelScope.launch {
             val chatId = chatDao.insertChat(chat)

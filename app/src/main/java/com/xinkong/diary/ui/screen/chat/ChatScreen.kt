@@ -67,6 +67,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.Checkbox
 import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
 import com.xinkong.diary.ui.screen.home.SearchBarItem
+import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
+import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
 //----------------对话页面总入口--------------------
 @OptIn(ExperimentalFoundationApi::class)
@@ -77,12 +79,13 @@ fun ChatScreen(
     onEnterSelection: (Long) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
     onExitSelection: () -> Unit = {},
+    onManageTags: () -> Unit = {},
     onClick: (Chat) -> Unit
 ) {
     val viewModel: ChatViewModel = viewModel()
     val chatList by viewModel.chatListState.collectAsStateWithLifecycle()
 
-    var selectedTag by rememberSaveable { mutableStateOf("未分类") }
+    var selectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
     
     // ----------- 搜索状态 -------------
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -98,8 +101,7 @@ fun ChatScreen(
         if (isSearchMode && searchQuery.isNotBlank()) {
             searchResults
         } else {
-            if (selectedTag.isEmpty()) chatList
-            else chatList.filter { it.tag == selectedTag }
+            chatList.filter { it.tag == selectedTag.second && it.tagFolder == selectedTag.first }
         }
     }
     // --------------------------------
@@ -136,10 +138,20 @@ fun ChatScreen(
                         isSearchMode = false
                         searchQuery = ""
                     },
+                    onManageTags = onManageTags,
                     onTagsDelete = { deletedTags ->
-                        chatList.filter { it.tag in deletedTags }.forEach { chat ->
-                            viewModel.updateChat(chat.copy(tag = "未分类"))
-                        }
+                        deletedTags.forEach { (folder, tagName) ->
+                            chatList
+                                .filter { it.tag == tagName && it.tagFolder == folder }
+                                .forEach { chat ->
+                                    viewModel.updateChat(
+                                        chat.copy(
+                                            tag = UNCLASSIFIED_TAG_NAME,
+                                            tagFolder = folder
+                                        )
+                                    )
+                                }
+                            }
                     }
                 )
             }
@@ -206,10 +218,11 @@ fun ChatScreen(
 //----------------对话页头部--------------------
 @Composable
 fun ChatHeaderColumn(
-    selectedTag: String,
+    selectedTag: Pair<String, String>,
     chatList: List<Chat>,
-    onTagSelect: (String) -> Unit,
-    onTagsDelete: (List<String>) -> Unit
+    onTagSelect: (Pair<String, String>) -> Unit,
+    onTagsDelete: (List<Pair<String, String>>) -> Unit,
+    onManageTags: () -> Unit = {}
 ) {
     var isRolled by remember { mutableStateOf(false) }
     var showAiSettings by remember { mutableStateOf(false) }
@@ -219,10 +232,11 @@ fun ChatHeaderColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.diaryColors.background2)
-                .padding(20.dp, 60.dp, 20.dp, 20.dp),
+                .padding(20.dp, 60.dp, 20.dp, 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(selectedTag, fontSize = 35.sp, modifier = Modifier.clickable { isRolled = !isRolled })
+            val displayTitle = selectedTag.second
+            Text(displayTitle, fontSize = 35.sp, modifier = Modifier.clickable { isRolled = !isRolled })
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = "展开",
@@ -236,6 +250,9 @@ fun ChatHeaderColumn(
 //                .clickable { showAiSettings = true }
             )
         }
+        Text("当前文件夹：${selectedTag.first}", fontSize = 15.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(start = 20.dp, bottom = 20.dp))
 
         AnimatedVisibility(
             visible = isRolled,
@@ -244,9 +261,14 @@ fun ChatHeaderColumn(
         ) {
             ChatTagSetting(
                 chatList = chatList,
+                selectedTag = selectedTag,
                 onTagSelect = { tag ->
                     onTagSelect(tag)
                     isRolled = false
+                },
+                onManageClick = {
+                    isRolled = false
+                    onManageTags()
                 },
                 onTagsDelete = onTagsDelete
             )
@@ -336,7 +358,7 @@ fun ChatCard(chat: Chat, modifier: Modifier) {
 
 //----------------添加Chat按钮--------------------
 @Composable
-fun AddChatButton(tag: String?) {
+fun AddChatButton(tag: Pair<String, String>) {
     val viewModel: ChatViewModel = viewModel()
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -344,7 +366,7 @@ fun AddChatButton(tag: String?) {
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(MaterialTheme.diaryColors.primary),
         contentPadding = PaddingValues(0.dp),
-        onClick = { viewModel.addChat("新对话", tag) },
+        onClick = { viewModel.addChat("新对话", tag.second, tag.first) },
         interactionSource = interactionSource,
         modifier = Modifier
             .padding(bottom = 20.dp, end = 12.dp)

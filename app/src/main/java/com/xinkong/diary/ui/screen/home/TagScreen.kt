@@ -1,6 +1,5 @@
 package com.xinkong.diary.ui.screen.home
 
-import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -24,12 +22,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -38,7 +35,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,24 +65,52 @@ import androidx.compose.ui.window.Dialog
 import com.xinkong.diary.repository.Diary
 import com.xinkong.diary.ui.theme.ColorPalette
 import com.xinkong.diary.ui.theme.*
-import com.xinkong.diary.ViewModel.DiaryTagModel
+import com.xinkong.diary.ViewModel.TagModel
+import com.xinkong.diary.ViewModel.TagDisplayItem
 import com.xinkong.diary.repository.DiaryTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.lazy.LazyListScope
+import com.xinkong.diary.ui.screen.tag.tagFolderItems
+import com.xinkong.diary.ui.screen.tag.TagFolderListState
+import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
+import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
 // Data representing a Tag for UI
 data class TagUI(
     val name: String,
     val color: Color,
     val background2: Color = ThemeDefault.background2,
-    val border2: Color = ThemeDefault.border2
+    val border2: Color = ThemeDefault.border2,
+    val folder: String = "我的笔记",
+    val displayName: String = name
 )
+
+data class TagListDisplayConfig(
+    val showManageAction: Boolean = true,
+    val showAddAction: Boolean = true,
+    val enableSelection: Boolean = true
+)
+
+private fun TagDisplayItem.toTagUi(): TagUI {
+    return TagUI(
+        name = name,
+        color = Color(colorInt),
+        background2 = Color(bg2Int),
+        border2 = Color(border2Int),
+        folder = folder,
+        displayName = displayName
+    )
+}
 
 @Composable
 fun TagSetting(
     contentList: List<Diary>,
-    onTagSelect: (String) -> Unit = {},
-    onTagsDelete: (List<String>) -> Unit = {}
+    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
+    onTagSelect: (Pair<String, String>) -> Unit = {},
+    onTagsDelete: (List<Pair<String, String>>) -> Unit = {},
+    displayConfig: TagListDisplayConfig = TagListDisplayConfig(),
+    onManageClick: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -92,7 +120,14 @@ fun TagSetting(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
-        TagList(contentList, onTagSelect, onTagsDelete)
+        TagList(
+            contentList = contentList,
+            selectedTag = selectedTag,
+            onTagSelect = onTagSelect,
+            onTagsDelete = onTagsDelete,
+            displayConfig = displayConfig,
+            onManageClick = onManageClick
+        )
     }
 }
 
@@ -100,51 +135,31 @@ fun TagSetting(
 @Composable
 fun TagList(
     contentList: List<Diary>,
-    onTagSelect: (String) -> Unit,
-    onTagsDelete: (List<String>) -> Unit,
-    tagModel: DiaryTagModel = viewModel()
+    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
+    onTagSelect: (Pair<String, String>) -> Unit,
+    onTagsDelete: (List<Pair<String, String>>) -> Unit,
+    displayConfig: TagListDisplayConfig = TagListDisplayConfig(),
+    onManageClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val dbTags by tagModel.tags.collectAsStateWithLifecycle()
+    val tagModel: TagModel = viewModel()
+    val dbTags by tagModel.diaryTags.collectAsStateWithLifecycle()
+    val dbFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
 
-    val customTags = remember(dbTags) {
-        dbTags.map { dbTag ->
-            TagUI(
-                name = dbTag.name,
-                color = Color(dbTag.colorInt),
-                background2 = Color(dbTag.bg2Int),
-                border2 = Color(dbTag.border2Int)
-            )
+    
+    val groupedResult = remember(contentList, dbTags, dbFolders) {
+        tagModel.buildDiaryGroupedTags(contentList)
+    }
+
+    val groupedTags = remember(groupedResult) {
+        groupedResult.groupedTags.mapValues { (_, items) ->
+            items.map { it.toTagUi() }
         }
-    }
-
-    val distinctDiaryTags = remember(contentList) {
-        contentList.mapNotNull { it.tag }.distinct()
-    }
-
-    val mergedTags = remember(distinctDiaryTags, customTags) {
-        val allTagNames = (distinctDiaryTags + customTags.map { it.name }).distinct()
-        allTagNames
-            .filter { it != "未分类" }
-            .map { name ->
-                val custom = customTags.find { it.name == name }
-                if (custom != null) {
-                    custom
-                } else {
-                    val colorIndex = kotlin.math.abs(name.hashCode()) % ColorPalette.size
-                    TagUI(name, ColorPalette[colorIndex])
-                }
-            }
-    }
-
-    //未分类置顶
-    val displayTags = remember(mergedTags) {
-        listOf(TagUI("未分类", Color.Black)) + mergedTags
     }
 
     var isTagAdd by remember { mutableStateOf(false) }
     var isSelectionMode by remember { mutableStateOf(false) }
-    var selectedTags by remember { mutableStateOf(setOf<String>()) }
+    var selectedTags by remember { mutableStateOf(setOf<Pair<String, String>>()) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         LazyColumn(
@@ -165,13 +180,24 @@ fun TagList(
                         fontSize = 24.sp
                     )
                     Spacer(modifier = Modifier.weight(1f))
-                    if (isSelectionMode) {
+                    if (displayConfig.showManageAction) {
+                        Text(
+                            text = "管理",
+                            color = MaterialTheme.diaryColors.primary,
+                            modifier = Modifier
+                                .clickable {
+                                    onManageClick()
+                                }
+                                .padding(end = 16.dp)
+                        )
+                    }
+                    if (displayConfig.enableSelection && isSelectionMode) {
                         IconButton(onClick = {
-                            val tagsToRemove = selectedTags.toList()
-                            dbTags.filter { it.name in tagsToRemove }.forEach {
-                                tagModel.deleteTag(it)
+                            val tagsToRemove = dbTags.filter { (it.folder to it.name) in selectedTags }
+                            tagsToRemove.forEach {
+                                tagModel.deleteDiaryTag(it)
                             }
-                            onTagsDelete(tagsToRemove)
+                            onTagsDelete(tagsToRemove.map { it.folder to it.name })
                             isSelectionMode = false
                             selectedTags = emptySet()
                         }) {
@@ -180,40 +206,35 @@ fun TagList(
                     }
                 }
             }
-            items(displayTags) { tag ->
-                val isUnclassified = tag.name == "未分类"
-                TagCard(
-                    tag = tag,
-                    isSelectionMode = isSelectionMode && !isUnclassified,
-                    isSelected = selectedTags.contains(tag.name),
-                    onLongClick = {
-                        if (!isUnclassified) {
-                            isSelectionMode = true
-                            selectedTags = selectedTags + tag.name
-                        }
-                    },
-                    onClick = {
-                        if (isSelectionMode) {
-                            if (!isUnclassified) {
-                                selectedTags = if (selectedTags.contains(tag.name)) {
-                                    selectedTags - tag.name
-                                } else {
-                                    selectedTags + tag.name
-                                }
-                            }
-                        } else {
-                            onTagSelect(tag.name)
-                            currentDiaryColors.value = currentDiaryColors.value.copy(
-                                background2 = tag.background2,
-                                border2 = tag.border2
-                            )
-                        }
+            tagFolderItems(
+                groupedTags = groupedTags,
+                listState = TagFolderListState(
+                    selectedTag = selectedTag,
+                    isSelectionMode = displayConfig.enableSelection && isSelectionMode,
+                    selectedTags = selectedTags
+                ),
+                onTagClick = { tag ->
+                    if (displayConfig.enableSelection && isSelectionMode) {
+                        val key = tag.folder to tag.name
+                        selectedTags = if (selectedTags.contains(key)) selectedTags - key else selectedTags + key
+                    } else {
+                        onTagSelect(tag.folder to tag.name)
+                        currentDiaryColors.value = currentDiaryColors.value.copy(
+                            background2 = tag.background2,
+                            border2 = tag.border2
+                        )
                     }
-                )
-            }
+                },
+                onTagLongClick = { tag ->
+                    if (displayConfig.enableSelection) {
+                        isSelectionMode = true
+                        selectedTags = selectedTags + (tag.folder to tag.name)
+                    }
+                }
+            )
         }
 
-        if (!isSelectionMode) {
+        if (displayConfig.showAddAction && !isSelectionMode) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -229,16 +250,24 @@ fun TagList(
         }
     }
 
-    if (isTagAdd) {
+    if (displayConfig.showAddAction && isTagAdd) {
+        val uniqueFolders = groupedResult.availableFolders
         TagAdd(
             onDismiss = { isTagAdd = false },
-            onConfirm = { name, color, background2, border2 ->
-                tagModel.addTag(DiaryTag(
-                    name = name,
-                    colorInt = color.toArgb(),
-                    bg2Int = background2.toArgb(),
-                    border2Int = border2.toArgb()
-                ))
+            availableFolders = uniqueFolders,
+            onConfirm = { name, color, background2, border2, folder ->
+                val exists = dbTags.any { it.folder == folder && it.name == name }
+                if (exists) {
+                    android.widget.Toast.makeText(context, "该文件夹下已存在同名分类", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    tagModel.addDiaryTag(DiaryTag(
+                        name = name,
+                        colorInt = color.toArgb(),
+                        bg2Int = background2.toArgb(),
+                        border2Int = border2.toArgb(),
+                        folder = folder
+                    ))
+                }
                 isTagAdd = false
             }
         )
@@ -261,20 +290,14 @@ fun TagCard(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(vertical = 8.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp).padding(start = 14.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(tag.color)
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Text(text = tag.name, fontSize = 18.sp, modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, tint = tag.color)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = tag.displayName, fontSize = 18.sp, modifier = Modifier.weight(1f))
             
             if (isSelectionMode) {
                 Checkbox(
@@ -287,19 +310,30 @@ fun TagCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TagAdd(
+    initialName: String = "",
+    initialColor: Color = ColorPalette[0],
+    initialBackground2: Color = ThemeDefault.background2,
+    initialBorder2: Color = ThemeDefault.border2,
+    initialFolder: String = "我的笔记",
+    availableFolders: List<String> = listOf("我的笔记"),
+    isEditMode: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirm: (String, Color, Color, Color) -> Unit
+    onConfirm: (String, Color, Color, Color, String) -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
-    var tagName by remember { mutableStateOf("") }
-    var selectedColor by remember { mutableStateOf(ColorPalette[0]) }
-    var selectedBackground2 by remember { mutableStateOf(ThemeDefault.background2) }
-    var selectedBorder2 by remember { mutableStateOf(ThemeDefault.border2) }
+    var tagName by remember { mutableStateOf(initialName) }
+    var selectedColor by remember { mutableStateOf(initialColor) }
+    var selectedBackground2 by remember { mutableStateOf(initialBackground2) }
+    var selectedBorder2 by remember { mutableStateOf(initialBorder2) }
+    var selectedFolder by remember { mutableStateOf(initialFolder) }
 
     var showColorPicker by remember { mutableStateOf(false) }
     var showBgPicker by remember { mutableStateOf(false) }
     var showBorderPicker by remember { mutableStateOf(false) }
+    var folderDropdownExpanded by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -315,7 +349,18 @@ fun TagAdd(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("新建分类", fontSize = 20.sp, modifier = Modifier.padding(bottom = 16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(if (isEditMode) "编辑分类" else "新建分类", fontSize = 20.sp)
+                    if (isEditMode && onDelete != null) {
+                        IconButton(onClick = onDelete) {
+                            Icon(Icons.Default.Delete, contentDescription = "删除", tint = Color.Red)
+                        }
+                    }
+                }
 
                 Row(
                    verticalAlignment = Alignment.CenterVertically,
@@ -341,6 +386,38 @@ fun TagAdd(
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Folder drop down
+                ExposedDropdownMenuBox(
+                    expanded = folderDropdownExpanded,
+                    onExpandedChange = { folderDropdownExpanded = !folderDropdownExpanded },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = selectedFolder,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("所属文件夹") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = folderDropdownExpanded) },
+                        modifier = Modifier.menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = folderDropdownExpanded,
+                        onDismissRequest = { folderDropdownExpanded = false }
+                    ) {
+                        availableFolders.forEach { folder ->
+                            DropdownMenuItem(
+                                text = { Text(folder) },
+                                onClick = {
+                                    selectedFolder = folder
+                                    folderDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
                 }
 
                 if (showColorPicker) {
@@ -519,7 +596,7 @@ fun TagAdd(
                     Button(
                         onClick = {
                             if (tagName.isNotBlank()) {
-                                onConfirm(tagName, selectedColor, selectedBackground2, selectedBorder2)
+                                onConfirm(tagName, selectedColor, selectedBackground2, selectedBorder2, selectedFolder)
                             }
                         }
                     ) {
