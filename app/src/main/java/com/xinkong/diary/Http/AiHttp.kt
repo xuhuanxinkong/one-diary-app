@@ -16,32 +16,30 @@ import java.io.IOException
 class AiHttp {
     private val client = OkHttpClient()
     private val mediaType = "application/json".toMediaType()
-    private val readNotesToolSchema = JSONArray().put(
-        JSONObject().apply {
-            put("type", "function")
-            put("function", JSONObject().apply {
-                put("name", "read_notes")
-                put("description", "按关键词读取本地笔记摘要")
-                put("parameters", JSONObject().apply {
-                    put("type", "object")
-                    put("properties", JSONObject().apply {
-                        put("keyword", JSONObject().apply {
-                            put("type", "string")
-                            put("description", "搜索关键词，仅中英文单词")
-                        })
-                        put("limit", JSONObject().apply {
-                            put("type", "integer")
-                            put("description", "返回条数，1 到 5")
-                            put("minimum", 1)
-                            put("maximum", 5)
-                        })
+    private val readNotesToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "read_notes")
+            put("description", "按关键词读取本地笔记摘要")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "搜索关键词，仅中英文单词")
                     })
-                    put("required", JSONArray().put("keyword"))
-                    put("additionalProperties", false)
+                    put("limit", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "返回条数，1 到 5")
+                        put("minimum", 1)
+                        put("maximum", 5)
+                    })
                 })
+                put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
             })
-        }
-    )
+        })
+    }
 
     /**
      * 发送对话请求（无状态，config 由调用方传入）
@@ -49,12 +47,13 @@ class AiHttp {
      */
     suspend fun chatWithAi(
         config: AiChatConfig,
-        messages: List<Map<String, Any>>
+        messages: List<Map<String, Any>>,
+        enabledTools: Set<String> = emptySet()
     ): Result<AiResponse> {
         return withContext(Dispatchers.IO) {
             try {
                 val chatUrl = resolveCompletionsUrl(config.baseUrl)
-                val body = buildRequestBody(config.model, messages)
+                val body = buildRequestBody(config.model, messages, enabledTools)
 
                 val requestBuilder = Request.Builder()
                     .url(chatUrl)
@@ -116,12 +115,18 @@ class AiHttp {
 
     // ---- 私有工具方法 ----
 
-    private fun buildRequestBody(model: String, messages: List<Map<String, Any>>): RequestBody {
+    private fun buildRequestBody(model: String, messages: List<Map<String, Any>>, enabledTools: Set<String>): RequestBody {
         val json = JSONObject().apply {
             put("model", model)
             put("messages", JSONObject.wrap(messages))
-            put("tools", readNotesToolSchema)
-            put("tool_choice", "auto")
+            val toolsArray = JSONArray()
+            if (enabledTools.contains("read_notes")) {
+                toolsArray.put(readNotesToolSchema)
+            }
+            if (toolsArray.length() > 0) {
+                put("tools", toolsArray)
+                put("tool_choice", "auto")
+            }
             put("stream", false)
         }
         return json.toString().toRequestBody(mediaType)

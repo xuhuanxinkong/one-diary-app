@@ -77,6 +77,10 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
         return diaryDao.getByType(type)
     }
 
+    fun searchDiaries(keyword: String): Flow<List<Diary>> {
+        return diaryDao.searchAllByKeyword(keyword)
+    }
+
     // 导入导出
     @Serializable
     data class ExportData(

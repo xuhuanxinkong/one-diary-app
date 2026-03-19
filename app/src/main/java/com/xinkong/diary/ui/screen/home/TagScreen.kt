@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -28,6 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -63,6 +65,10 @@ import androidx.compose.ui.window.Dialog
 import com.xinkong.diary.repository.Diary
 import com.xinkong.diary.ui.theme.ColorPalette
 import com.xinkong.diary.ui.theme.*
+import com.xinkong.diary.ViewModel.DiaryTagModel
+import com.xinkong.diary.repository.DiaryTag
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 // Data representing a Tag for UI
 data class TagUI(
@@ -95,10 +101,22 @@ fun TagSetting(
 fun TagList(
     contentList: List<Diary>,
     onTagSelect: (String) -> Unit,
-    onTagsDelete: (List<String>) -> Unit
+    onTagsDelete: (List<String>) -> Unit,
+    tagModel: DiaryTagModel = viewModel()
 ) {
     val context = LocalContext.current
-    var customTags by remember { mutableStateOf(loadCustomTags(context)) }
+    val dbTags by tagModel.tags.collectAsStateWithLifecycle()
+
+    val customTags = remember(dbTags) {
+        dbTags.map { dbTag ->
+            TagUI(
+                name = dbTag.name,
+                color = Color(dbTag.colorInt),
+                background2 = Color(dbTag.bg2Int),
+                border2 = Color(dbTag.border2Int)
+            )
+        }
+    }
 
     val distinctDiaryTags = remember(contentList) {
         contentList.mapNotNull { it.tag }.distinct()
@@ -150,8 +168,9 @@ fun TagList(
                     if (isSelectionMode) {
                         IconButton(onClick = {
                             val tagsToRemove = selectedTags.toList()
-                            saveTags(context, customTags.filter { it.name !in tagsToRemove })
-                            customTags = loadCustomTags(context)
+                            dbTags.filter { it.name in tagsToRemove }.forEach {
+                                tagModel.deleteTag(it)
+                            }
                             onTagsDelete(tagsToRemove)
                             isSelectionMode = false
                             selectedTags = emptySet()
@@ -214,8 +233,12 @@ fun TagList(
         TagAdd(
             onDismiss = { isTagAdd = false },
             onConfirm = { name, color, background2, border2 ->
-                addTag(context, name, color, background2, border2)
-                customTags = loadCustomTags(context)
+                tagModel.addTag(DiaryTag(
+                    name = name,
+                    colorInt = color.toArgb(),
+                    bg2Int = background2.toArgb(),
+                    border2Int = border2.toArgb()
+                ))
                 isTagAdd = false
             }
         )
@@ -570,49 +593,4 @@ fun ThemeOptionItem(name: String, background2: Color, border2: Color, isSelected
         }
     }
     Divider(color = Color.Gray.copy(alpha = 0.2f))
-}
-
-private const val PREFS_NAME = "tag_prefs"
-private const val KEY_CUSTOM_TAGS = "custom_tags"
-
-private fun loadCustomTags(context: Context): List<TagUI> {
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    val set = prefs.getStringSet(KEY_CUSTOM_TAGS, emptySet()) ?: emptySet()
-    return set.mapNotNull { entry ->
-        val parts = entry.split("|")
-        if (parts.size >= 2) {
-            val name = parts[0]
-            val colorInt = parts[1].toIntOrNull()
-            val bg2Int = if (parts.size > 2) parts[2].toIntOrNull() else null
-            val border2Int = if (parts.size > 3) parts[3].toIntOrNull() else null
-
-            if (colorInt != null) {
-                TagUI(
-                    name = name,
-                    color = Color(colorInt),
-                    background2 = bg2Int?.let { Color(it) } ?: ThemeDefault.background2,
-                    border2 = border2Int?.let { Color(it) } ?: ThemeDefault.border2
-                )
-            } else null
-        } else null
-    }
-}
-
-private fun addTag(context: Context, name: String, color: Color, background2: Color, border2: Color) {
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    val set = prefs.getStringSet(KEY_CUSTOM_TAGS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-
-    set.removeIf { it.startsWith("$name|") }
-    val colorInt = color.toArgb()
-    val bg2Int = background2.toArgb()
-    val border2Int = border2.toArgb()
-    set.add("$name|$colorInt|$bg2Int|$border2Int")
-
-    prefs.edit().putStringSet(KEY_CUSTOM_TAGS, set).apply()
-}
-
-private fun saveTags(context: Context, tags: List<TagUI>) {
-    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    val set = tags.map { "${it.name}|${it.color.toArgb()}|${it.background2.toArgb()}|${it.border2.toArgb()}" }.toSet()
-    prefs.edit().putStringSet(KEY_CUSTOM_TAGS, set).apply()
 }

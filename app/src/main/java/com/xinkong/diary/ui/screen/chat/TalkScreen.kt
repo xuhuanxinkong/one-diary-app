@@ -37,6 +37,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,7 +77,7 @@ fun TalkScreen(
 ) {
     val viewModel: ChatViewModel = viewModel()
     val aiState by viewModel.aiState.collectAsStateWithLifecycle()
-    val pendingDiaryRead by viewModel.pendingDiaryRead.collectAsStateWithLifecycle()
+    val pendingToolUI by viewModel.pendingToolUI.collectAsStateWithLifecycle()
     val messages by viewModel.getMessages(chat.id).collectAsStateWithLifecycle(initialValue = emptyList())
     val aiConfig by viewModel.findAiConfig(chat.id).collectAsStateWithLifecycle(AiChatConfig(chatId = chat.id))
     val userConfig by viewModel.findUserConfig(chat.id).collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
@@ -139,12 +141,17 @@ fun TalkScreen(
         )
     }
 
-    pendingDiaryRead?.let { action ->
-        DiaryReadConfirmDialog(
-            keyword = action.keyword,
-            limit = action.limit,
-            onConfirm = { viewModel.confirmPendingDiaryRead() },
-            onDismiss = { viewModel.cancelPendingDiaryRead() }
+    pendingToolUI?.let { uiState ->
+        var dontAsk by remember { mutableStateOf(false) }
+
+        ToolActionConfirmDialog(
+            title = uiState.title,
+            description = uiState.description,
+            showDontAskAgain = uiState.showDontAskAgain,
+            dontAskState = dontAsk,
+            onDontAskChange = { dontAsk = it },
+            onConfirm = { viewModel.confirmPendingToolAction(dontAsk) },
+            onDismiss = { viewModel.cancelPendingToolAction() }
         )
     }
 }
@@ -442,17 +449,35 @@ fun DeleteMessageDialog(
 }
 
 @Composable
-fun DiaryReadConfirmDialog(
-    keyword: String,
-    limit: Int,
+fun ToolActionConfirmDialog(
+    title: String,
+    description: String,
+    showDontAskAgain: Boolean,
+    dontAskState: Boolean,
+    onDontAskChange: (Boolean) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("允许读取笔记？") },
+        title = { Text(title) },
         text = {
-            Text("AI 请求读取本地笔记（关键词：$keyword，最多 $limit 条）。是否允许本次读取？")
+            Column {
+                Text(description)
+                if (showDontAskAgain) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { onDontAskChange(!dontAskState) }
+                    ) {
+                        Checkbox(
+                            checked = dontAskState,
+                            onCheckedChange = null // handle in row click
+                        )
+                        Text("本次不再提醒", fontSize = 14.sp)
+                    }
+                }
+            }
         },
         confirmButton = {
             Button(onClick = onConfirm) { Text("允许") }

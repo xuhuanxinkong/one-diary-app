@@ -66,7 +66,7 @@ import java.util.Locale
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.Checkbox
 import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
-
+import com.xinkong.diary.ui.screen.home.SearchBarItem
 
 //----------------对话页面总入口--------------------
 @OptIn(ExperimentalFoundationApi::class)
@@ -83,13 +83,29 @@ fun ChatScreen(
     val chatList by viewModel.chatListState.collectAsStateWithLifecycle()
 
     var selectedTag by rememberSaveable { mutableStateOf("未分类") }
-    val filteredList = remember(chatList, selectedTag) {
-        if (selectedTag.isEmpty()) chatList
-        else chatList.filter { it.tag == selectedTag }
+    
+    // ----------- 搜索状态 -------------
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var isSearchMode by rememberSaveable { mutableStateOf(false) }
+
+    val searchFlow = remember(searchQuery) {
+        if (searchQuery.isNotBlank()) viewModel.searchChat(searchQuery)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
     }
+    val searchResults by searchFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val filteredList = remember(chatList, selectedTag, isSearchMode, searchResults) {
+        if (isSearchMode && searchQuery.isNotBlank()) {
+            searchResults
+        } else {
+            if (selectedTag.isEmpty()) chatList
+            else chatList.filter { it.tag == selectedTag }
+        }
+    }
+    // --------------------------------
 
     Scaffold(
-        floatingActionButton = { if (!isSelectionMode) AddChatButton(selectedTag) }
+        floatingActionButton = { if (!isSelectionMode && !isSearchMode) AddChatButton(selectedTag) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -102,11 +118,24 @@ fun ChatScreen(
                     selectedCount = selectedIds.size,
                     onClose = onExitSelection
                 )
+            } else if (isSearchMode) {
+                SelectionModeTopBar(
+                    selectedCount = filteredList.size,
+                    onClose = {
+                        isSearchMode = false
+                        searchQuery = ""
+                    },
+                    title = "搜索结果: ${filteredList.size} 项"
+                )
             } else {
                 ChatHeaderColumn(
                     selectedTag = selectedTag,
                     chatList = chatList,
-                    onTagSelect = { tag -> selectedTag = tag },
+                    onTagSelect = { tag -> 
+                        selectedTag = tag 
+                        isSearchMode = false
+                        searchQuery = ""
+                    },
                     onTagsDelete = { deletedTags ->
                         chatList.filter { it.tag in deletedTags }.forEach { chat ->
                             viewModel.updateChat(chat.copy(tag = "未分类"))
@@ -121,6 +150,22 @@ fun ChatScreen(
                     .fillMaxWidth(),
                 state = rememberLazyListState()
             ) {
+                item {
+                    if (!isSelectionMode) {
+                        SearchBarItem(
+                            searchQuery = searchQuery,
+                            onSearchQueryChange = { 
+                                searchQuery = it 
+                                isSearchMode = true
+                            },
+                            onSearchExecute = { isSearchMode = true },
+                            onClear = { 
+                                searchQuery = ""
+                            }
+                        )
+                    }
+                }
+                
                 items(filteredList, key = { it.id }) { chat ->
                     if (isSelectionMode) {
                         Row(

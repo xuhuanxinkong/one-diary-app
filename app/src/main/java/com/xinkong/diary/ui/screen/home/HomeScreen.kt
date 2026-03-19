@@ -85,7 +85,8 @@ import com.xinkong.diary.ui.theme.currentDiaryColors
 import com.xinkong.diary.ui.theme.diaryColors
 import java.text.SimpleDateFormat
 import java.util.Locale
-import com.xinkong.diary.ViewModel.ChatViewModel
+import com.xinkong.diary.ViewModel.DiaryTagModel
+import com.xinkong.diary.ViewModel.ChatTagModel
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.combinedClickable
@@ -103,14 +104,19 @@ fun HomeScreen(){
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     val diaryViewModel: DiaryViewModel = viewModel()
-    val chatViewModel: ChatViewModel = viewModel()
+    val chatViewModel: com.xinkong.diary.ViewModel.ChatViewModel = viewModel()
+    val diaryTagModel: DiaryTagModel = viewModel()
+    val chatTagModel: ChatTagModel = viewModel()
+    
     val contentList by diaryViewModel.listState.collectAsStateWithLifecycle()
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
+    val diaryTags by diaryTagModel.tags.collectAsStateWithLifecycle()
+    val chatTags by chatTagModel.tags.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
-    val availableTags = remember(contentList, chatList) {
+    val availableTags = remember(contentList, chatList, diaryTags, chatTags) {
         val allTags = (contentList.mapNotNull { it.tag } + chatList.map { it.tag } +
-            getAvailableTags(context)).distinct()
+            diaryTags.map { it.name } + chatTags.map { it.name }).distinct()
         listOf("未分类") + allTags.filter { it != "未分类" }
     }
 
@@ -255,13 +261,32 @@ fun ContentShow(
     val contentList by viewModel.listState.collectAsStateWithLifecycle()
 
     var selectedTag by rememberSaveable{mutableStateOf<String>("未分类")}
-    val tagList = remember(contentList,selectedTag) {
-        if (selectedTag.isEmpty()){
-        contentList
-        }else{contentList.filter { diary -> diary.tag== selectedTag}}}
+
+    // ----------- 搜索状态 -------------
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var isSearchMode by rememberSaveable { mutableStateOf(false) }
+    
+    val searchFlow = remember(searchQuery) {
+        if (searchQuery.isNotBlank()) viewModel.searchDiaries(searchQuery)
+        else kotlinx.coroutines.flow.flowOf(emptyList())
+    }
+    val searchResults by searchFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val displayList = remember(contentList, selectedTag, isSearchMode, searchResults) {
+        if (isSearchMode && searchQuery.isNotBlank()) {
+            searchResults
+        } else {
+            if (selectedTag.isEmpty()) {
+                contentList
+            } else {
+                contentList.filter { diary -> diary.tag == selectedTag }
+            }
+        }
+    }
+    // --------------------------------
 
     Scaffold (
-        floatingActionButton={ if (!isSelectionMode) AddButton(selectedTag) },
+        floatingActionButton={ if (!isSelectionMode && !isSearchMode) AddButton(selectedTag) },
     ){ innerPadding ->
         Column(modifier = modifier
             .fillMaxSize()
@@ -273,11 +298,24 @@ fun ContentShow(
                     selectedCount = selectedIds.size,
                     onClose = onExitSelection
                 )
+            } else if (isSearchMode) {
+                SelectionModeTopBar(
+                    selectedCount = displayList.size,
+                    onClose = {
+                        isSearchMode = false
+                        searchQuery = ""
+                    },
+                    title = "搜索结果: ${displayList.size} 条"
+                )
             } else {
                 HeaderColumn(
                     selectedTag = selectedTag,
                     contentList = contentList,
-                    onTagSelect = { tag -> selectedTag = tag },
+                    onTagSelect = { tag -> 
+                        selectedTag = tag 
+                        isSearchMode = false
+                        searchQuery = ""
+                    },
                     onTagsDelete = { deletedTags ->
                         contentList.filter { it.tag in deletedTags }.forEach { diary ->
                             viewModel.updateDiary(diary.copy(tag = "未分类"))
@@ -291,7 +329,23 @@ fun ContentShow(
                     .fillMaxWidth(),
                 state = rememberLazyListState()
             ) {
-                items(tagList, key = { it.id }) { diary ->
+                item {
+                    if (!isSelectionMode) {
+                        SearchBarItem(
+                            searchQuery = searchQuery,
+                            onSearchQueryChange = { 
+                                searchQuery = it 
+                                isSearchMode = true
+                            },
+                            onSearchExecute = { isSearchMode = true },
+                            onClear = { 
+                                searchQuery = ""
+                            }
+                        )
+                    }
+                }
+                
+                items(displayList, key = { it.id }) { diary ->
                     if (isSelectionMode) {
                         Row(
                             modifier = Modifier

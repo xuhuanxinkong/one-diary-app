@@ -48,5 +48,24 @@ interface DiaryDao {
     suspend fun searchByKeyword(keyword: String, limit: Int): List<Diary>
 
 
+    @Query(
+        """
+        SELECT * FROM diaries
+        WHERE title LIKE '%' || :keyword || '%'
+           OR text LIKE '%' || :keyword || '%'
+           OR content LIKE '%' || :keyword || '%'
+        ORDER BY id DESC
+        """
+    )
+    fun searchAllByKeyword(keyword: String): Flow<List<Diary>>
 
+    // Diary Tag 相关
+    @Insert
+    suspend fun insertDiaryTag(tag: DiaryTag)
+
+    @Delete
+    suspend fun deleteDiaryTag(tag: DiaryTag)
+
+    @Query("SELECT * FROM diary_tags")
+    fun getAllDiaryTags(): Flow<List<DiaryTag>>
 }

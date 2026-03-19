@@ -14,6 +14,7 @@ foundation = "1.10.1"
 nav3 = "1.0.1"
 serialization = "2.2.20"
 serialization-json = "1.7.3"
+material-icons-extended = "1.6.8"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -38,7 +39,7 @@ androidx-compose-foundation = { group = "androidx.compose.foundation", name = "f
 nav3 = {group = "androidx.navigation3",name = "navigation3-ui", version.ref = "nav3"}
 viewmodel-nav3 = {group = "androidx.lifecycle",name = "lifecycle-viewmodel-navigation3",version.ref = "lifecycleCompose"}
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization-json" }
-
+androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "material-icons-extended" }
 
 
 [plugins]

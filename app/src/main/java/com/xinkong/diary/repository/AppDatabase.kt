@@ -7,8 +7,9 @@ import android.content.Context
 
 @Database(
     entities = [Diary::class, Chat::class,
-        ChatMessage::class, AiChatConfig::class, UserChatConfig::class],
-    version = 8,
+        ChatMessage::class, AiChatConfig::class, UserChatConfig::class,
+        DiaryTag::class, ChatTag::class],
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase: RoomDatabase(){

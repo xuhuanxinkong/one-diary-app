@@ -3,10 +3,12 @@ package com.xinkong.diary.ui.screen.chat
 import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -35,7 +37,11 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.xinkong.diary.ViewModel.ChatTagModel
 import com.xinkong.diary.repository.Chat
+import com.xinkong.diary.repository.ChatTag
 import com.xinkong.diary.ui.theme.ColorPalette
 import com.xinkong.diary.ui.theme.SweetBorder
 import com.xinkong.diary.ui.theme.SweetWhite
@@ -72,10 +78,22 @@ fun ChatTagSetting(
 fun ChatTagList(
     chatList: List<Chat>,
     onTagSelect: (String) -> Unit,
-    onTagsDelete: (List<String>) -> Unit
+    onTagsDelete: (List<String>) -> Unit,
+    tagModel: ChatTagModel = viewModel()
 ) {
     val context = LocalContext.current
-    var customTags by remember { mutableStateOf(loadChatCustomTags(context)) }
+    val dbTags by tagModel.tags.collectAsStateWithLifecycle()
+
+    val customTags = remember(dbTags) {
+        dbTags.map { dbTag ->
+            com.xinkong.diary.ui.screen.home.TagUI(
+                name = dbTag.name,
+                color = Color(dbTag.colorInt),
+                background2 = Color(dbTag.bg2Int),
+                border2 = Color(dbTag.border2Int)
+            )
+        }
+    }
 
     val distinctChatTags = remember(chatList) {
         chatList.map { it.tag }.distinct()
@@ -92,7 +110,7 @@ fun ChatTagList(
                     custom
                 } else {
                     val colorIndex = kotlin.math.abs(name.hashCode()) % ColorPalette.size
-                    _root_ide_package_.com.xinkong.diary.ui.screen.home.TagUI(
+                    com.xinkong.diary.ui.screen.home.TagUI(
                         name,
                         ColorPalette[colorIndex]
                     )
@@ -103,7 +121,7 @@ fun ChatTagList(
     // "未分类" 置顶
     val displayTags = remember(mergedTags) {
         listOf(
-            _root_ide_package_.com.xinkong.diary.ui.screen.home.TagUI(
+            com.xinkong.diary.ui.screen.home.TagUI(
                 "未分类",
                 Color.Black,
                 background2 = SweetWhite,
@@ -135,8 +153,9 @@ fun ChatTagList(
                     if (isSelectionMode) {
                         IconButton(onClick = {
                             val tagsToRemove = selectedTags.toList()
-                            saveChatTags(context, customTags.filter { it.name !in tagsToRemove })
-                            customTags = loadChatCustomTags(context)
+                            dbTags.filter { it.name in tagsToRemove }.forEach {
+                                tagModel.deleteTag(it)
+                            }
                             onTagsDelete(tagsToRemove)
                             isSelectionMode = false
                             selectedTags = emptySet()
@@ -149,7 +168,7 @@ fun ChatTagList(
             items(displayTags) { tag ->
                 val isUnclassified = tag.name == "未分类"
                 // 复用 TagScreen 的 TagCard
-                _root_ide_package_.com.xinkong.diary.ui.screen.home.TagCard(
+                com.xinkong.diary.ui.screen.home.TagCard(
                     tag = tag,
                     isSelectionMode = isSelectionMode && !isUnclassified,
                     isSelected = selectedTags.contains(tag.name),
@@ -198,55 +217,17 @@ fun ChatTagList(
 
     // 复用 TagScreen 的 TagAdd 对话框
     if (isTagAdd) {
-        _root_ide_package_.com.xinkong.diary.ui.screen.home.TagAdd(
+        com.xinkong.diary.ui.screen.home.TagAdd(
             onDismiss = { isTagAdd = false },
             onConfirm = { name, color, background2, border2 ->
-                addChatTag(context, name, color, background2, border2)
-                customTags = loadChatCustomTags(context)
+                tagModel.addTag(ChatTag(
+                    name = name,
+                    colorInt = color.toArgb(),
+                    bg2Int = background2.toArgb(),
+                    border2Int = border2.toArgb()
+                ))
                 isTagAdd = false
             }
         )
     }
-}
-
-
-// ========== Chat 分类的 SharedPreferences 存储（独立于 Diary 分类）==========
-
-private const val CHAT_PREFS_NAME = "chat_tag_prefs"
-private const val KEY_CUSTOM_CHAT_TAGS = "custom_chat_tags"
-
-private fun loadChatCustomTags(context: Context): List<com.xinkong.diary.ui.screen.home.TagUI> {
-    val prefs = context.getSharedPreferences(CHAT_PREFS_NAME, Context.MODE_PRIVATE)
-    val set = prefs.getStringSet(KEY_CUSTOM_CHAT_TAGS, emptySet()) ?: emptySet()
-    return set.mapNotNull { entry ->
-        val parts = entry.split("|")
-        if (parts.size >= 2) {
-            val name = parts[0]
-            val colorInt = parts[1].toIntOrNull()
-            val bg2Int = if (parts.size > 2) parts[2].toIntOrNull() else null
-            val border2Int = if (parts.size > 3) parts[3].toIntOrNull() else null
-            if (colorInt != null) {
-                _root_ide_package_.com.xinkong.diary.ui.screen.home.TagUI(
-                    name = name,
-                    color = Color(colorInt),
-                    background2 = bg2Int?.let { Color(it) } ?: ThemeDefault.background2,
-                    border2 = border2Int?.let { Color(it) } ?: ThemeDefault.border2
-                )
-            } else null
-        } else null
-    }
-}
-
-private fun addChatTag(context: Context, name: String, color: Color, background2: Color, border2: Color) {
-    val prefs = context.getSharedPreferences(CHAT_PREFS_NAME, Context.MODE_PRIVATE)
-    val set = prefs.getStringSet(KEY_CUSTOM_CHAT_TAGS, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-    set.removeIf { it.startsWith("$name|") }
-    set.add("$name|${color.toArgb()}|${background2.toArgb()}|${border2.toArgb()}")
-    prefs.edit().putStringSet(KEY_CUSTOM_CHAT_TAGS, set).apply()
-}
-
-private fun saveChatTags(context: Context, tags: List<com.xinkong.diary.ui.screen.home.TagUI>) {
-    val prefs = context.getSharedPreferences(CHAT_PREFS_NAME, Context.MODE_PRIVATE)
-    val set = tags.map { "${it.name}|${it.color.toArgb()}|${it.background2.toArgb()}|${it.border2.toArgb()}" }.toSet()
-    prefs.edit().putStringSet(KEY_CUSTOM_CHAT_TAGS, set).apply()
 }

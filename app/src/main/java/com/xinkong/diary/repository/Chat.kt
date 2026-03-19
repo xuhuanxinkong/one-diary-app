@@ -15,6 +15,16 @@ data class Chat(
     val tag:String = "未分类"
 )
 
+@Entity(tableName = "chat_tags")
+data class ChatTag(
+    @PrimaryKey
+    val name: String,
+    val colorInt: Int,
+    val bg2Int: Int,
+    val border2Int: Int,
+    val bgImage: String? = null
+)
+
 @Entity(
     tableName = "chat_messages",
     foreignKeys = [

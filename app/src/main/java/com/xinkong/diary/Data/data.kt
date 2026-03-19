@@ -21,3 +21,18 @@ data class AiToolCall(
     val functionName: String,
     val arguments: String
 )
+
+sealed interface ToolTask {
+    val toolCall: AiToolCall
+    val title: String
+    val description: String
+
+    data class ReadNotes(
+        override val toolCall: AiToolCall,
+        val keyword: String,
+        val limit: Int
+    ) : ToolTask {
+        override val title = "允许读取笔记？"
+        override val description = "AI 请求读取本地笔记（关键词：$keyword，最多 $limit 条）。是否允许本次读取？"
+    }
+}

@@ -77,6 +77,50 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+
+@Composable
+fun SearchBarItem(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onSearchExecute: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = searchQuery,
+        onValueChange = onSearchQueryChange,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        placeholder = { Text("搜索...") },
+        leadingIcon = {
+            Icon(Icons.Default.Search, contentDescription = "Search")
+        },
+        trailingIcon = {
+            if (searchQuery.isNotEmpty()) {
+                IconButton(onClick = onClear) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                }
+            }
+        },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSearchExecute() }),
+        colors = OutlinedTextFieldDefaults.colors(
+            unfocusedContainerColor = Color.White,
+            focusedContainerColor =Color.White,
+
+            focusedBorderColor = MaterialTheme.diaryColors.primary,
+            unfocusedBorderColor = MaterialTheme.diaryColors.border2.copy(alpha = 0.5f)
+        ),
+        shape = RoundedCornerShape(24.dp)
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FunScreen(onDismiss: () -> Unit) {
@@ -559,7 +603,8 @@ fun ImportDialog(
 @Composable
 fun SelectionModeTopBar(
     selectedCount: Int,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    title: String? = null
 ) {
     Row(
         modifier = Modifier
@@ -570,13 +615,13 @@ fun SelectionModeTopBar(
     ) {
         Icon(
             imageVector = Icons.Default.Close,
-            contentDescription = "退出选择",
+            contentDescription = "退出",
             modifier = Modifier
                 .size(32.dp)
                 .clickable { onClose() }
         )
         Text(
-            text = "已选择 $selectedCount 项",
+            text = title ?: "已选择 $selectedCount 项",
             fontSize = 20.sp,
             modifier = Modifier.padding(start = 16.dp)
         )
@@ -707,14 +752,4 @@ fun BatchDeleteDialog(
             }
         }
     )
-}
-
-fun getAvailableTags(context: Context): List<String> {
-    val prefs = context.getSharedPreferences("tag_prefs", Context.MODE_PRIVATE)
-    val set = prefs.getStringSet("custom_tags", emptySet()) ?: emptySet()
-    val customTags = set.mapNotNull { entry ->
-        val parts = entry.split("|")
-        if (parts.isNotEmpty()) parts[0] else null
-    }
-    return listOf("未分类") + customTags
 }

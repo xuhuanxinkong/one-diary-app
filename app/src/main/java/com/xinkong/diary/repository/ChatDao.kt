@@ -29,6 +29,16 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE tag =:tag")
     fun getChatByTag(tag: String): Flow<List<Chat>>
 
+    @Query(
+        """
+        SELECT * FROM chats
+        WHERE title LIKE '%' || :keyword || '%'
+           OR tag LIKE '%' || :keyword || '%'
+        ORDER BY id DESC
+        """
+    )
+    fun searchAllByKeyword(keyword: String): Flow<List<Chat>>
+
 
     //消息相关 ChatMessage
     @Insert
@@ -72,4 +82,14 @@ interface ChatDao {
 
     @Query("SELECT * FROM user_chat_configs WHERE chatId = :chatId LIMIT 1")
     suspend fun getUserConfigOnce(chatId: Long): UserChatConfig?
+
+    // Chat Tag 相关
+    @Insert
+    suspend fun insertChatTag(tag: ChatTag)
+
+    @Delete
+    suspend fun deleteChatTag(tag: ChatTag)
+
+    @Query("SELECT * FROM chat_tags")
+    fun getAllChatTags(): Flow<List<ChatTag>>
 }

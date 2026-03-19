@@ -19,8 +19,15 @@ data class Diary(
     val type: String="Diary"
 )
 
-
-
+@Entity(tableName = "diary_tags")
+data class DiaryTag(
+    @PrimaryKey
+    val name: String,
+    val colorInt: Int,
+    val bg2Int: Int,
+    val border2Int: Int,
+    val bgImage: String? = null
+)
 
 // 定义 Diary 的 Saver
 val DiarySaver = Saver<Diary, Map<String, Any>>(
