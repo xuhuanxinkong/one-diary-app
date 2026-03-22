@@ -63,7 +63,9 @@ import com.xinkong.diary.ui.theme.diaryColors
 import java.text.SimpleDateFormat
 import java.util.Locale
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Checkbox
+import androidx.compose.ui.graphics.graphicsLayer
 import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
 import com.xinkong.diary.ui.screen.home.SearchBarItem
 import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
@@ -104,6 +106,21 @@ fun ChatScreen(
         }
     }
     // --------------------------------
+
+    val listState = rememberLazyListState()
+    var isCollapsed by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(listState) {
+        androidx.compose.runtime.snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            if (index == 0 && offset < 50) {
+                isCollapsed = false
+            } else if (index > 0 || offset > 200) {
+                isCollapsed = true
+            }
+        }
+    }
 
     Scaffold(
         floatingActionButton = { if (!isSelectionMode && !isSearchMode) AddChatButton(selectedTag) }
@@ -153,7 +170,8 @@ fun ChatScreen(
                                     )
                                 }
                             }
-                    }
+                    },
+                    isCollapsed = isCollapsed
                 )
             }
 
@@ -161,7 +179,7 @@ fun ChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                state = rememberLazyListState()
+                state = listState
             ) {
                 item {
                     if (!isSelectionMode) {
@@ -224,21 +242,27 @@ fun ChatHeaderColumn(
     chatList: List<Chat>,
     onTagSelect: (Pair<String, String>) -> Unit,
     onTagsDelete: (List<Pair<String, String>>) -> Unit,
-    onManageTags: () -> Unit = {}
+    onManageTags: () -> Unit = {},
+    isCollapsed: Boolean = false
 ) {
     var isRolled by remember { mutableStateOf(false) }
     var showAiSettings by remember { mutableStateOf(false) }
+
+    val topPadding by androidx.compose.animation.core.animateDpAsState(targetValue = if (isCollapsed) 10.dp else 40.dp, label = "topPadding")
+    val titleFontSize by androidx.compose.animation.core.animateFloatAsState(targetValue = if (isCollapsed) 24f else 35f, label = "titleFontSize")
+    val subtitleHeight by androidx.compose.animation.core.animateDpAsState(targetValue = if (isCollapsed) 0.dp else 22.dp, label = "subtitleHeight")
+    val subtitleAlpha by androidx.compose.animation.core.animateFloatAsState(targetValue = if (isCollapsed) 0f else 1f, label = "subtitleAlpha")
 
     Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.diaryColors.background3)
-                .padding(20.dp, 60.dp, 20.dp, 0.dp),
+                .padding(20.dp, topPadding, 20.dp, 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val displayTitle = selectedTag.second
-            Text(displayTitle, fontSize = 35.sp, modifier = Modifier.clickable { isRolled = !isRolled })
+            Text(displayTitle, fontSize = titleFontSize.sp, modifier = Modifier.clickable { isRolled = !isRolled })
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = "展开",
@@ -252,9 +276,21 @@ fun ChatHeaderColumn(
 //                .clickable { showAiSettings = true }
             )
         }
-        Text("当前文件夹：${selectedTag.first}", fontSize = 15.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(start = 20.dp, bottom = 20.dp))
+        
+        androidx.compose.foundation.layout.Box(modifier = Modifier
+            .fillMaxWidth()
+            .height(subtitleHeight)
+            .graphicsLayer { alpha = subtitleAlpha }
+            .padding(start = 20.dp)
+        ) {
+            Text(
+                "当前文件夹：${selectedTag.first}",
+                fontSize = 15.sp,
+                color = Color.Gray,
+                modifier = Modifier.align(Alignment.BottomStart)
+            )
+        }
+        Spacer(modifier = Modifier.height(if(isCollapsed) 10.dp else 20.dp))
 
         AnimatedVisibility(
             visible = isRolled,

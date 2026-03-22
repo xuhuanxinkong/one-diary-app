@@ -92,11 +92,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.MarkUnreadChatAlt
 import androidx.compose.material.icons.filled.NoteAlt
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
 import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
@@ -119,16 +122,32 @@ fun HomeScreen(){
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val diaryTags by tagModel.diaryTags.collectAsStateWithLifecycle()
     val chatTags by tagModel.chatTags.collectAsStateWithLifecycle()
+    val tagFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
 
     var homeSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
     var chatSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
 
-    LaunchedEffect(homeSelectedTag, chatSelectedTag, diaryTags, chatTags) {
-        val homeMatched = diaryTags.firstOrNull { it.folder == homeSelectedTag.first && it.name == homeSelectedTag.second }
+    val homeTagDisplayMap = remember(contentList, diaryTags, tagFolders) {
+        tagModel.buildDiaryGroupedTags(contentList)
+            .groupedTags
+            .values
+            .flatten()
+            .associateBy { it.folder to it.name }
+    }
+    val chatTagDisplayMap = remember(chatList, chatTags, tagFolders) {
+        tagModel.buildChatGroupedTags(chatList)
+            .groupedTags
+            .values
+            .flatten()
+            .associateBy { it.folder to it.name }
+    }
+
+    LaunchedEffect(homeSelectedTag, chatSelectedTag, homeTagDisplayMap, chatTagDisplayMap) {
+        val homeMatched = homeTagDisplayMap[homeSelectedTag]
         val homeBg = homeMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background2
         val homeBorder = homeMatched?.let { Color(it.border2Int) } ?: ThemeDefault.border2
 
-        val chatMatched = chatTags.firstOrNull { it.folder == chatSelectedTag.first && it.name == chatSelectedTag.second }
+        val chatMatched = chatTagDisplayMap[chatSelectedTag]
         val chatBg = chatMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background0
         val chatBorder = chatMatched?.let { Color(it.border2Int) } ?: ThemeDefault.sweetBorder
 
@@ -329,6 +348,21 @@ fun ContentShow(
     }
     // --------------------------------
 
+    val listState = rememberLazyListState()
+    var isCollapsed by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(listState) {
+        androidx.compose.runtime.snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            if (index == 0 && offset < 50) {
+                isCollapsed = false
+            } else if (index > 0 || offset > 200) {
+                isCollapsed = true
+            }
+        }
+    }
+
     Scaffold (
         floatingActionButton={ if (!isSelectionMode && !isSearchMode) AddButton(selectedTag) },
     ){ innerPadding ->
@@ -376,14 +410,15 @@ fun ContentShow(
                                     )
                                 }
                             }
-                    }
+                    },
+                    isCollapsed = isCollapsed
                 )
             }
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                state = rememberLazyListState()
+                state = listState
             ) {
                 item {
                     if (!isSelectionMode) {
@@ -445,30 +480,47 @@ fun HeaderColumn(
     contentList: List<Diary>,
     onTagSelect: (Pair<String, String>) -> Unit,
     onTagsDelete: (List<Pair<String, String>>) -> Unit,
-    onManageTags: () -> Unit = {}
+    onManageTags: () -> Unit = {},
+    isCollapsed: Boolean = false
 ) {
     var isRolled by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+
+    val topPadding by androidx.compose.animation.core.animateDpAsState(targetValue = if (isCollapsed) 10.dp else 40.dp, label = "topPadding")
+    val titleFontSize by androidx.compose.animation.core.animateFloatAsState(targetValue = if (isCollapsed) 24f else 35f, label = "titleFontSize")
+    val subtitleHeight by androidx.compose.animation.core.animateDpAsState(targetValue = if (isCollapsed) 0.dp else 22.dp, label = "subtitleHeight")
+    val subtitleAlpha by androidx.compose.animation.core.animateFloatAsState(targetValue = if (isCollapsed) 0f else 1f, label = "subtitleAlpha")
 
     Column() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.diaryColors.background2)
-                .padding(20.dp,60.dp,20.dp,0.dp),
+                .padding(20.dp, topPadding, 20.dp, 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val displayTitle = selectedTag.second
-            Text(displayTitle, fontSize = 35.sp, modifier = Modifier.clickable{isRolled = !isRolled })
+            Text(displayTitle, fontSize = titleFontSize.sp, modifier = Modifier.clickable{isRolled = !isRolled })
             Icon(imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = "展开",
                 modifier = Modifier.padding(top = 5.dp).toggleRotateEffect(isRotated = isRolled))
             Spacer(modifier = Modifier.weight(1f))
             Text("☰", fontSize = 30.sp, modifier=Modifier.padding(8.dp).clickable { showSettings = true })
         }
-        Text("当前文件夹：${selectedTag.first}", fontSize = 15.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(start = 20.dp, bottom = 20.dp))
+        Box(modifier = Modifier
+            .fillMaxWidth()
+            .height(subtitleHeight)
+            .graphicsLayer { alpha = subtitleAlpha }
+            .padding(start = 20.dp)
+        ) {
+            Text(
+                "当前文件夹：${selectedTag.first}",
+                fontSize = 15.sp,
+                color = Color.Gray,
+                modifier = Modifier.align(Alignment.BottomStart)
+            )
+        }
+        Spacer(modifier = Modifier.height(if(isCollapsed) 10.dp else 20.dp))
         AnimatedVisibility(visible = isRolled,
             enter = expandVertically(animationSpec = tween (300)) + fadeIn(),
             exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()

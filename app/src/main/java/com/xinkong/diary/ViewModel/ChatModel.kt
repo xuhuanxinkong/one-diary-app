@@ -326,9 +326,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         history.forEach { messages.add(mapOf("role" to it.role, "content" to it.content)) }
 
         // 当前用户消息
-        messages.add(mapOf("role" to "user", "content" to currentContent))
+        // 为了防止多轮对话后 AI 遗忘或者解释工具，将强制性指令附加在最后一条用户消息之后（仅对 AI 可见，不入库）
+        var finalContent = currentContent
+        val toolInstruction = buildToolInstruction(enabledTools)
+        if (toolInstruction.isNotEmpty()) {
+            finalContent = "$currentContent\n\n【系统提醒】\n$toolInstruction"
+        }
+
+        messages.add(mapOf("role" to "user", "content" to finalContent))
 
         return messages
+    }
+
+    private fun buildToolInstruction(enabledTools: Set<String>): String {
+        return buildString {
+            if ("read_notes" in enabledTools) {
+                append(
+                    """
+    你可使用函数工具 read_notes。当需要查询笔记时，请直接返回标准 tool_calls（由系统注入）。
+    如果不需要查询笔记，直接回复。
+                    """.trimIndent()
+                )
+                append("\n")
+            }
+            if (enabledTools.isNotEmpty()) {
+                append("重要严厉警告：绝对不要在回复的主体文本中向用户解释你的心路历程，也不要提到'read_notes'、'返回tool_calls'等字眼！仅隐式使用工具或直接回复。")
+            }
+        }.trim()
     }
 
     /**
@@ -348,12 +372,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 append(
                     """
     【工具协议】
-    你可使用函数工具 read_notes。参数格式：
+    你可使用函数工具（例如 read_notes）。如果你觉得需要使用工具，必须通过标准的 tool_calls 格式结构返回，不要在对话中用文本或者 markdown 告诉用户你在使用工具。
+    参数格式：
     - keyword: string（中英文关键词，不含标点）
     - limit: integer（1 到 5）
-    
-    当需要查询笔记时，请返回标准 tool_calls（由系统注入），并可同时给出简短说明。
-    若不需要工具，直接给出正常回答。
     """.trimIndent()
                 )
             }
@@ -402,7 +424,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     role = "assistant",
                                     content = response.content,
                                     date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-                                    toolExecutions = Json.encodeToString(executedTools)
+                                    toolExecutions = "[]" // 中间回复不展示工具执行记录，留到最终汇总
                                 )
                                 chatDao.insertMessage(aiMsg)
                             }

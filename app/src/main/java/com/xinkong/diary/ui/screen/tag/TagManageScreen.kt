@@ -189,6 +189,8 @@ fun TagManageRoute(
     val diaryDbTags by tagModel.diaryTags.collectAsStateWithLifecycle()
     val chatDbTags by tagModel.chatTags.collectAsStateWithLifecycle()
     val dbFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
+    val diaryList by diaryViewModel.listState.collectAsStateWithLifecycle()
+    val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
 
     val folderType = if (type == "diary") "Diary" else "Chat"
     val hiddenFolders = dbFolders
@@ -196,39 +198,31 @@ fun TagManageRoute(
         .map { it.name }
         .toSet()
 
-    val dbTags = if (type == "diary") {
-        diaryDbTags.map { dbTag ->
-            TagUI(
-                name = dbTag.name,
-                color = Color(dbTag.colorInt),
-                background2 = Color(dbTag.bg2Int),
-                border2 = Color(dbTag.border2Int),
-                folder = dbTag.folder
-            )
-        }
-    } else {
-        chatDbTags.map { dbTag ->
-            TagUI(
-                name = dbTag.name,
-                color = Color(dbTag.colorInt),
-                background2 = Color(dbTag.bg2Int),
-                border2 = Color(dbTag.border2Int),
-                folder = dbTag.folder
-            )
+    val groupedResult = remember(type, diaryList, chatList, diaryDbTags, chatDbTags, dbFolders) {
+        if (type == "diary") {
+            tagModel.buildDiaryGroupedTags(diaryList)
+        } else {
+            tagModel.buildChatGroupedTags(chatList)
         }
     }
 
-    val uniqueFolders = (
-        dbTags.map { it.folder } +
-            dbFolders.filter { it.type == folderType }.map { it.name } +
-            DEFAULT_TAG_FOLDER
-        ).distinct()
-    
-    val groupedTags = remember(uniqueFolders, dbTags) {
-        uniqueFolders.associateWith { folder ->
-            dbTags.filter { it.folder == folder }
+    val groupedTags = remember(groupedResult) {
+        groupedResult.groupedTags.mapValues { (_, items) ->
+            items.map { item ->
+                TagUI(
+                    name = item.name,
+                    color = Color(item.colorInt),
+                    background2 = Color(item.bg2Int),
+                    border2 = Color(item.border2Int),
+                    folder = item.folder,
+                    displayName = item.displayName,
+                    itemCount = item.itemCount
+                )
+            }
         }
     }
+
+    val uniqueFolders = groupedResult.availableFolders
 
     var showTagAdd by remember { mutableStateOf(false) }
     var editingTag by remember { mutableStateOf<TagUI?>(null) }

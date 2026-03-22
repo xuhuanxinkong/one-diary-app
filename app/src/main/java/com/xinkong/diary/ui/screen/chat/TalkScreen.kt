@@ -62,6 +62,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -99,9 +100,18 @@ fun TalkScreen(
     var showMultiDeleteConfirm by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
+    var initialScrollDone by remember { mutableStateOf(false) }
+
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            if (!initialScrollDone) {
+                // 初次加载时瞬间跳到最底部
+                listState.scrollToItem(messages.size - 1)
+                initialScrollDone = true
+            } else {
+                // 后续收到新消息时带动画平滑滚动过去
+                listState.animateScrollToItem(messages.size - 1)
+            }
         }
     }
 
@@ -440,13 +450,44 @@ fun ToolRequestBubble(
 }
 
 @Composable
+fun ExpandableMessageContent(content: String, textColor: Color = Color.Black) {
+    var isExpanded by remember { mutableStateOf(false) }
+    var showExpandButton by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.animateContentSize()) {
+        SelectionContainer {
+            Text(
+                text = content,
+                fontSize = 15.sp,
+                color = textColor,
+                maxLines = if (isExpanded) Int.MAX_VALUE else 15,
+                onTextLayout = { textLayoutResult ->
+                    if (textLayoutResult.hasVisualOverflow) {
+                        showExpandButton = true
+                    }
+                }
+            )
+        }
+        if (showExpandButton) {
+            Text(
+                text = if (isExpanded) "收起" else "展开全文",
+                color = Color(0xFF5B9BD5),
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .clickable { isExpanded = !isExpanded }
+            )
+        }
+    }
+}
+
+@Composable
 fun ChatMessageMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     onDelete: () -> Unit,
     onQuote: () -> Unit,
     onCopy: () -> Unit,
-    onSelectText: () -> Unit,
     onMultiSelect: () -> Unit
 ) {
     DropdownMenu(
@@ -458,13 +499,6 @@ fun ChatMessageMenu(
             onClick = {
                 onDismissRequest()
                 onCopy()
-            }
-        )
-        DropdownMenuItem(
-            text = { Text("选择部分文本") },
-            onClick = {
-                onDismissRequest()
-                onSelectText()
             }
         )
         DropdownMenuItem(
@@ -511,7 +545,6 @@ fun ChatBubble(
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    var isTextSelectable by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -554,18 +587,12 @@ fun ChatBubble(
                                 .combinedClickable(
                                     enabled = !isMultiSelectMode,
                                     onLongClick = { showMenu = true },
-                                    onClick = { isTextSelectable = false }
+                                    onClick = { }
                                 )
                                 .background(Color(0xFF95EC69), shape = RoundedCornerShape(8.dp))
                                 .padding(12.dp)
                         ) {
-                            if (isTextSelectable) {
-                                SelectionContainer {
-                                    Text(text = content, fontSize = 15.sp, color = Color.Black)
-                                }
-                            } else {
-                                Text(text = content, fontSize = 15.sp, color = Color.Black)
-                            }
+                            ExpandableMessageContent(content = content, textColor = Color.Black)
                         }
                         ChatMessageMenu(
                             expanded = showMenu,
@@ -573,7 +600,6 @@ fun ChatBubble(
                             onDelete = onDelete,
                             onQuote = onQuote,
                             onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                            onSelectText = { isTextSelectable = true },
                             onMultiSelect = onMultiSelect
                         )
                     }
@@ -639,18 +665,12 @@ fun ChatBubble(
                                 .combinedClickable(
                                     enabled = !isMultiSelectMode,
                                     onLongClick = { showMenu = true },
-                                    onClick = { isTextSelectable = false }
+                                    onClick = { }
                                 )
                                 .background(Color.White, shape = RoundedCornerShape(8.dp))
                                 .padding(12.dp)
                         ) {
-                            if (isTextSelectable) {
-                                SelectionContainer {
-                                    Text(text = content, fontSize = 15.sp, color = Color.Black)
-                                }
-                            } else {
-                                Text(text = content, fontSize = 15.sp, color = Color.Black)
-                            }
+                            ExpandableMessageContent(content = content, textColor = Color.Black)
                         }
                         ChatMessageMenu(
                             expanded = showMenu,
@@ -658,7 +678,6 @@ fun ChatBubble(
                             onDelete = onDelete,
                             onQuote = onQuote,
                             onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                            onSelectText = { isTextSelectable = true },
                             onMultiSelect = onMultiSelect
                         )
                     }
