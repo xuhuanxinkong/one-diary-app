@@ -105,16 +105,16 @@ fun DiaryApp() {
             entry<Route.ChatSetting> { route ->
                 val chat by chatViewModel.findChat(route.chatId)
                     .collectAsStateWithLifecycle(initialValue = null)
-                val aiConfig by chatViewModel.findAiConfig(route.chatId)
-                    .collectAsStateWithLifecycle(AiChatConfig(chatId = route.chatId))
                 chat?.let {
                     SettingScreen(
                         chat = it,
-                        aiConfig = aiConfig,
                         onBack = { navViewModel.navigateBack() },
                         onTitleChange = { newTitle ->
                             chatViewModel.updateChat(it.copy(title = newTitle))
-                        }
+                        },
+                        onAvatarClick = { role ->
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, role))
+                        },
                     )
                 }
             }

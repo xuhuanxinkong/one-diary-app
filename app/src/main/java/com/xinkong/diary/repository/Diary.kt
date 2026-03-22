@@ -20,6 +20,11 @@ data class Diary(
     val type: String="Diary"
 )
 
+data class TagAndFolder(
+    val tagFolder: String,
+    val tag: String
+)
+
 // 定义 Diary 的 Saver
 val DiarySaver = Saver<Diary, Map<String, Any>>(
     save = { diary ->

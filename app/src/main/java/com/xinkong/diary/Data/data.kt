@@ -32,7 +32,37 @@ sealed interface ToolTask {
         val keyword: String,
         val limit: Int
     ) : ToolTask {
-        override val title = "允许读取笔记？"
+        override val title = "读取笔记：$keyword"
         override val description = "AI 请求读取本地笔记（关键词：$keyword，最多 $limit 条）。是否允许本次读取？"
+    }
+
+    data class WriteNote(
+        override val toolCall: AiToolCall,
+        val noteTitle: String,
+        val content: String,
+        val folder: String,
+        val tag: String
+    ) : ToolTask {
+        override val title: String = "新增笔记：$noteTitle"
+        override val description = "AI 请求新增笔记《$noteTitle》。"
+    }
+
+    data class EditNote(
+        override val toolCall: AiToolCall,
+        val id: Long,
+        val noteTitle: String?,
+        val content: String?,
+        val folder: String?,
+        val tag: String?
+    ) : ToolTask {
+        override val title: String = "修改笔记 ID:$id"
+        override val description = "AI 请求修改你的笔记 (ID: $id)"
+    }
+
+    data class GetTagsAndFolders(
+        override val toolCall: AiToolCall
+    ) : ToolTask {
+        override val title: String = "读取分类与标签"
+        override val description = "AI 请求读取所有日记的分类与标签"
     }
 }

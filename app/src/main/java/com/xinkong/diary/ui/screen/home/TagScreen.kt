@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -71,6 +72,9 @@ import com.xinkong.diary.repository.DiaryTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.xinkong.diary.ViewModel.DiaryViewModel
 import com.xinkong.diary.ui.screen.tag.tagFolderItems
 import com.xinkong.diary.ui.screen.tag.TagFolderListState
 import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
@@ -83,7 +87,8 @@ data class TagUI(
     val background2: Color = ThemeDefault.background2,
     val border2: Color = ThemeDefault.border2,
     val folder: String = "我的笔记",
-    val displayName: String = name
+    val displayName: String = name,
+    val itemCount: Int = 0
 )
 
 data class TagListDisplayConfig(
@@ -99,7 +104,8 @@ private fun TagDisplayItem.toTagUi(): TagUI {
         background2 = Color(bg2Int),
         border2 = Color(border2Int),
         folder = folder,
-        displayName = displayName
+        displayName = displayName,
+        itemCount = itemCount
     )
 }
 
@@ -160,6 +166,25 @@ fun TagList(
     var isTagAdd by remember { mutableStateOf(false) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedTags by remember { mutableStateOf(setOf<Pair<String, String>>()) }
+    val diaryModel: DiaryViewModel = viewModel()
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val selectedDiaries = contentList.filter { (it.tagFolder to it.tag) in selectedTags }
+            if (selectedDiaries.isNotEmpty()) {
+                diaryModel.exportToJson(selectedDiaries, uri, context) { result ->
+                    result.onSuccess {
+                        android.widget.Toast.makeText(context, "导出成功", android.widget.Toast.LENGTH_SHORT).show()
+                        isSelectionMode = false
+                        selectedTags = emptySet()
+                    }.onFailure { e ->
+                        android.widget.Toast.makeText(context, "导出失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } else {
+                android.widget.Toast.makeText(context, "没有可导出的日记", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         LazyColumn(
@@ -192,6 +217,15 @@ fun TagList(
                         )
                     }
                     if (displayConfig.enableSelection && isSelectionMode) {
+                        IconButton(onClick = {
+                            if (selectedTags.isNotEmpty()) {
+                                exportLauncher.launch("diary_export_${System.currentTimeMillis()}.json")
+                            } else {
+                                android.widget.Toast.makeText(context, "请先选择要导出的分类", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.Upload, contentDescription = "Export")
+                        }
                         IconButton(onClick = {
                             val tagsToRemove = dbTags.filter { (it.folder to it.name) in selectedTags }
                             tagsToRemove.forEach {
@@ -232,6 +266,23 @@ fun TagList(
                     }
                 }
             )
+
+            if (groupedResult.hiddenItemCount > 0) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "有 ${groupedResult.hiddenItemCount} 个文件已隐藏",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
         }
 
         if (displayConfig.showAddAction && !isSelectionMode) {
@@ -298,6 +349,15 @@ fun TagCard(
             Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, tint = tag.color)
             Spacer(modifier = Modifier.width(8.dp))
             Text(text = tag.displayName, fontSize = 18.sp, modifier = Modifier.weight(1f))
+
+            if (tag.itemCount > 0) {
+                Text(
+                    text = "${tag.itemCount}",
+                    fontSize = 14.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
             
             if (isSelectionMode) {
                 Checkbox(

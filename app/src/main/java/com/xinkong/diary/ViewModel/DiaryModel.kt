@@ -1,10 +1,15 @@
 package com.xinkong.diary.ViewModel
 
 import android.app.Application
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xinkong.diary.repository.AppDatabase
+import com.xinkong.diary.repository.ChatTag
 import com.xinkong.diary.repository.Diary
+import com.xinkong.diary.repository.DiaryTag
+import com.xinkong.diary.ui.theme.ColorPalette
+import com.xinkong.diary.ui.theme.ThemeDefault
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +20,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlin.math.abs
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -22,6 +28,7 @@ import java.util.Date
 class DiaryViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
     private val diaryDao = db.diaryDao()
+    private val tagDao = db.tagDao()
     private val _listState = MutableStateFlow(listOf<Diary>())
     val listState: StateFlow<List<Diary>> = _listState.asStateFlow()
 
@@ -95,7 +102,7 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
         ignoreUnknownKeys = true
     }
 
-    fun exportToJson(diaries: List<Diary>, callback: (Result<String>) -> Unit) {
+    fun exportToJson(diaries: List<Diary>, uri: android.net.Uri, context: android.content.Context, callback: (Result<Unit>) -> Unit) {
         viewModelScope.launch {
             try {
                 val exportData = ExportData(
@@ -104,29 +111,47 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                     data = diaries
                 )
                 val jsonString = json.encodeToString(exportData)
-                callback(Result.success(jsonString))
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    java.io.OutputStreamWriter(outputStream).use { writer ->
+                        writer.write(jsonString)
+                    }
+                }
+                callback(Result.success(Unit))
             } catch (e: Exception) {
                 callback(Result.failure(e))
             }
         }
     }
 
-    fun importFromJson(jsonString: String, isDefaultFormat: Boolean, targetTag: String, callback: (Result<Int>) -> Unit) {
+    fun importFromJson(jsonString: String, isDefaultFormat: Boolean, targetTag: String, targetFolder: String, callback: (Result<Int>) -> Unit) {
         viewModelScope.launch {
             try {
                 if (isDefaultFormat) {
                     val exportData = json.decodeFromString<ExportData>(jsonString)
                     var count = 0
+                    val ensuredDiaryTags = mutableSetOf<Pair<String, String>>()
+                    val ensuredChatTags = mutableSetOf<Pair<String, String>>()
                     for (diary in exportData.data) {
+                        val newTag = targetTag.ifBlank { diary.tag }
+                        val newFolder = targetFolder.ifBlank { diary.tagFolder }
                         val newDiary = Diary(
                             title = diary.title,
                             content = diary.content,
                             date = diary.date,
-                            tag = if (targetTag.isNotEmpty()) targetTag else diary.tag,
-                            tagFolder = diary.tagFolder,
+                            tag = newTag,
+                            tagFolder = newFolder,
                             type = diary.type
                         )
                         diaryDao.insert(newDiary)
+
+                        ensureTagExists(
+                            type = diary.type,
+                            tag = newTag,
+                            folder = newFolder,
+                            ensuredDiaryTags = ensuredDiaryTags,
+                            ensuredChatTags = ensuredChatTags
+                        )
+
                         count++
                     }
                     callback(Result.success(count))
@@ -139,20 +164,65 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                         jsonString // 如果不是合法JSON，直接作为文本导入
                     }
 
+                    val newTag = targetTag.ifBlank { "导入" }
+                    val newFolder = targetFolder.ifBlank { "我的笔记" }
+
                     val newDiary = Diary(
                         title = "导入的笔记",
                         content = formattedJson,
                         date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-                        tag = if (targetTag.isNotEmpty()) targetTag else "导入",
-                        tagFolder = "我的笔记"
+                        tag = newTag,
+                        tagFolder = newFolder
                     )
                     diaryDao.insert(newDiary)
+                    tagDao.insertDiaryTagIgnore(buildDiaryTag(newTag, newFolder))
                     callback(Result.success(1))
                 }
             } catch (e: Exception) {
                 callback(Result.failure(e))
             }
         }
+    }
+
+    private suspend fun ensureTagExists(
+        type: String,
+        tag: String,
+        folder: String,
+        ensuredDiaryTags: MutableSet<Pair<String, String>>,
+        ensuredChatTags: MutableSet<Pair<String, String>>
+    ) {
+        val key = tag to folder
+        if (type == "chat") {
+            if (!ensuredChatTags.add(key)) return
+            tagDao.insertChatTagIgnore(buildChatTag(tag, folder))
+        } else {
+            if (!ensuredDiaryTags.add(key)) return
+            tagDao.insertDiaryTagIgnore(buildDiaryTag(tag, folder))
+        }
+    }
+
+    private fun buildDiaryTag(name: String, folder: String): DiaryTag {
+        return DiaryTag(
+            name = name,
+            colorInt = defaultTagColor(name),
+            bg2Int = ThemeDefault.background2.toArgb(),
+            border2Int = ThemeDefault.border2.toArgb(),
+            folder = folder
+        )
+    }
+
+    private fun buildChatTag(name: String, folder: String): ChatTag {
+        return ChatTag(
+            name = name,
+            colorInt = defaultTagColor(name),
+            bg2Int = ThemeDefault.background2.toArgb(),
+            border2Int = ThemeDefault.border2.toArgb(),
+            folder = folder
+        )
+    }
+
+    private fun defaultTagColor(tagName: String): Int {
+        return ColorPalette[abs(tagName.hashCode()) % ColorPalette.size].toArgb()
     }
 }
 

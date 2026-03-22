@@ -26,6 +26,9 @@ interface TagDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDiaryTag(tag: DiaryTag)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDiaryTagIgnore(tag: DiaryTag)
+
     @Delete
     suspend fun deleteDiaryTag(tag: DiaryTag)
 
@@ -35,6 +38,9 @@ interface TagDao {
     // Chat Tag
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertChatTag(tag: ChatTag)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertChatTagIgnore(tag: ChatTag)
 
     @Delete
     suspend fun deleteChatTag(tag: ChatTag)

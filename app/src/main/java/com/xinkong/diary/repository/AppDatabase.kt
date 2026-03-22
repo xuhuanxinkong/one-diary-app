@@ -9,7 +9,7 @@ import android.content.Context
     entities = [Diary::class, Chat::class,
         ChatMessage::class, AiChatConfig::class, UserChatConfig::class,
         DiaryTag::class, ChatTag::class, TagFolder::class],
-    version = 14,
+    version = 18,
     exportSchema = false
 )
 abstract class AppDatabase: RoomDatabase(){

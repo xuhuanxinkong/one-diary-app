@@ -44,7 +44,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +73,8 @@ import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
+    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
+    onSelectedTagChange: (Pair<String, String>) -> Unit = {},
     isSelectionMode: Boolean = false,
     selectedIds: Set<Long> = emptySet(),
     onEnterSelection: (Long) -> Unit = {},
@@ -84,12 +85,10 @@ fun ChatScreen(
 ) {
     val viewModel: ChatViewModel = viewModel()
     val chatList by viewModel.chatListState.collectAsStateWithLifecycle()
-
-    var selectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
     
     // ----------- 搜索状态 -------------
-    var searchQuery by rememberSaveable { mutableStateOf("") }
-    var isSearchMode by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchMode by remember { mutableStateOf(false) }
 
     val searchFlow = remember(searchQuery) {
         if (searchQuery.isNotBlank()) viewModel.searchChat(searchQuery)
@@ -112,16 +111,18 @@ fun ChatScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.diaryColors.background2)
+                .background(MaterialTheme.diaryColors.background3)
                 .padding(innerPadding)
         ) {
             if (isSelectionMode) {
                 SelectionModeTopBar(
+                    isDiary = false,
                     selectedCount = selectedIds.size,
                     onClose = onExitSelection
                 )
             } else if (isSearchMode) {
                 SelectionModeTopBar(
+                    isDiary = false,
                     selectedCount = filteredList.size,
                     onClose = {
                         isSearchMode = false
@@ -134,7 +135,7 @@ fun ChatScreen(
                     selectedTag = selectedTag,
                     chatList = chatList,
                     onTagSelect = { tag -> 
-                        selectedTag = tag 
+                        onSelectedTagChange(tag)
                         isSearchMode = false
                         searchQuery = ""
                     },
@@ -173,7 +174,8 @@ fun ChatScreen(
                             onSearchExecute = { isSearchMode = true },
                             onClear = { 
                                 searchQuery = ""
-                            }
+                            },
+                            isDiary = false
                         )
                     }
                 }
@@ -231,7 +233,7 @@ fun ChatHeaderColumn(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.diaryColors.background2)
+                .background(MaterialTheme.diaryColors.background3)
                 .padding(20.dp, 60.dp, 20.dp, 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -333,7 +335,7 @@ fun ChatCard(chat: Chat, modifier: Modifier) {
     Card(
         elevation = CardDefaults.cardElevation(4.dp),
         shape = RoundedCornerShape(25.dp),
-        border = BorderStroke(1.dp, MaterialTheme.diaryColors.border2),
+        border = BorderStroke(1.dp, MaterialTheme.diaryColors.border3),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFEFEFE)),
         modifier = modifier
     ) {

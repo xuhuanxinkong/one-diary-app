@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,6 +36,8 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -70,6 +73,8 @@ import com.xinkong.diary.ui.screen.home.SettingSectionHeader
 import com.xinkong.diary.ui.theme.diaryColors
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import java.io.File
+import java.io.FileOutputStream
 import kotlin.text.ifEmpty
 
 
@@ -95,7 +100,11 @@ fun AiConfig(chat: Chat,onBack: () -> Unit){
     val config by chatViewModel.findAiConfig(chat.id)
         .collectAsStateWithLifecycle(AiChatConfig(chatId = chat.id))
 
-    var enableAllNotes by remember(config.enableAllNotes) { mutableStateOf(config.enableAllNotes) }
+    var enableReadNotes by remember(config.enableReadNotes) { mutableStateOf(config.enableReadNotes) }
+    var enableWriteNote by remember(config.enableWriteNote) { mutableStateOf(config.enableWriteNote) }
+    var enableEditNote by remember(config.enableEditNote) { mutableStateOf(config.enableEditNote) }
+    var isEditingName by remember { mutableStateOf(false) }
+    var tempName by remember(config.name) { mutableStateOf(config.name) }
 
 
     var configExpanded by remember { mutableStateOf(true) }
@@ -133,11 +142,20 @@ fun AiConfig(chat: Chat,onBack: () -> Unit){
             Spacer(modifier = Modifier.height(8.dp))
 
             // 角色信息
-            Text(
-                text ="AI 助手",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.DarkGray
+            NameEditorRow(
+                name = config.name,
+                isEditing = isEditingName,
+                editingValue = tempName,
+                onEditingValueChange = { tempName = it },
+                onStartEdit = {
+                    tempName = config.name
+                    isEditingName = true
+                },
+                onSave = {
+                    val newName = tempName.trim().ifEmpty { "Ai助手" }
+                    chatViewModel.updateAiConfig(config.copy(name = newName))
+                    isEditingName = false
+                }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -190,17 +208,73 @@ fun AiConfig(chat: Chat,onBack: () -> Unit){
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "是否让AI获取所有笔记类型",
+                            "允许AI读取本地笔记",
                             fontSize = 14.sp,
                             color = Color.DarkGray,
                             modifier = Modifier.weight(1f)
                         )
                         Switch(
-                            checked = enableAllNotes,
+                            checked = enableReadNotes,
                             onCheckedChange = { checked ->
-                                enableAllNotes = checked
+                                enableReadNotes = checked
                                 chatViewModel.updateAiConfig(
-                                    config.copy(enableAllNotes = checked)
+                                    config.copy(enableReadNotes = checked)
+                                )
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "允许AI新增本地笔记",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = enableWriteNote,
+                            onCheckedChange = { checked ->
+                                enableWriteNote = checked
+                                chatViewModel.updateAiConfig(
+                                    config.copy(enableWriteNote = checked)
+                                )
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "允许AI修改本地笔记",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = enableEditNote,
+                            onCheckedChange = { checked ->
+                                enableEditNote = checked
+                                chatViewModel.updateAiConfig(
+                                    config.copy(enableEditNote = checked)
                                 )
                             },
                             colors = SwitchDefaults.colors(
@@ -228,6 +302,8 @@ fun UserConfig(chat: Chat, onBack: () -> Unit) {
         .collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 
     var configExpanded by remember { mutableStateOf(true) }
+    var isEditingName by remember { mutableStateOf(false) }
+    var tempName by remember(config.name) { mutableStateOf(config.name) }
 
     Scaffold(
         topBar = {
@@ -258,11 +334,20 @@ fun UserConfig(chat: Chat, onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
 
             // 角色信息
-            Text(
-                text = "用户",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.DarkGray
+            NameEditorRow(
+                name = config.name,
+                isEditing = isEditingName,
+                editingValue = tempName,
+                onEditingValueChange = { tempName = it },
+                onStartEdit = {
+                    tempName = config.name
+                    isEditingName = true
+                },
+                onSave = {
+                    val newName = tempName.trim().ifEmpty { "用户" }
+                    chatViewModel.updateUserConfig(config.copy(name = newName))
+                    isEditingName = false
+                }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -387,14 +472,21 @@ fun AvatarIcon(role: String,avatarUri: String, onSave:(String)-> Unit){
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            // 持久化 URI 权限
             try {
-                context.contentResolver.takePersistableUriPermission(
-                    it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) { }
-            avatarUri = it.toString()
-            onSave(avatarUri)
+                val avatarsDir = File(context.filesDir, "avatars")
+                if (!avatarsDir.exists()) avatarsDir.mkdirs()
+
+                val avatarFile = File(avatarsDir, "avatar_${System.currentTimeMillis()}.jpg")
+                context.contentResolver.openInputStream(it)?.use { input ->
+                    FileOutputStream(avatarFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                avatarUri = avatarFile.absolutePath
+                onSave(avatarUri)
+            } catch (_: Exception) {
+                // Ignore failed copy and keep previous avatar
+            }
         }
     }
     // ---- 头像区域 ----
@@ -434,6 +526,50 @@ fun AvatarIcon(role: String,avatarUri: String, onSave:(String)-> Unit){
         onClick = { imagePickerLauncher.launch("image/*") }
     ) {
         Text("选择照片", color = MaterialTheme.diaryColors.primary)
+    }
+}
+
+@Composable
+fun NameEditorRow(
+    name: String,
+    isEditing: Boolean,
+    editingValue: String,
+    onEditingValueChange: (String) -> Unit,
+    onStartEdit: () -> Unit,
+    onSave: () -> Unit
+) {
+    if (isEditing) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = editingValue,
+                onValueChange = onEditingValueChange,
+                singleLine = true,
+                label = { Text("名字") },
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            OutlinedButton(modifier = Modifier.padding(top = 5.dp),
+                onClick = {onSave() }) {
+                Text("确认")
+            }
+        }
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Spacer(modifier = Modifier.width(45.dp))
+            Text(
+                text = name,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.DarkGray
+            )
+            IconButton(onClick = onStartEdit) {
+                Icon(Icons.Default.Edit, contentDescription = "编辑名字", tint = Color.Gray)
+            }
+        }
     }
 }
 

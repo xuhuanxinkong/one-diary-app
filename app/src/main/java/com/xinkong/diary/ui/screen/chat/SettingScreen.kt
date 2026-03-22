@@ -49,6 +49,7 @@ import coil.request.ImageRequest
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
+import com.xinkong.diary.repository.UserChatConfig
 import com.xinkong.diary.ui.screen.home.AiSection
 import com.xinkong.diary.ui.screen.home.SettingSectionHeader
 import com.xinkong.diary.ui.theme.diaryColors
@@ -57,14 +58,16 @@ import com.xinkong.diary.ui.theme.diaryColors
 @Composable
 fun SettingScreen(
     chat: Chat,
-    aiConfig: AiChatConfig,
     onBack: () -> Unit,
-    onTitleChange: (String) -> Unit
+    onTitleChange: (String) -> Unit,
+    onAvatarClick: (String) -> Unit = {}
 ) {
     var aiExpanded by remember { mutableStateOf(false) }
     val chatViewModel: ChatViewModel = viewModel()
-    val config by chatViewModel.findAiConfig(chat.id)
+    val aiConfig by chatViewModel.findAiConfig(chat.id)
         .collectAsStateWithLifecycle(AiChatConfig(chatId = chat.id))
+    val userConfig by chatViewModel.findUserConfig(chat.id)
+        .collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 
 
 
@@ -82,7 +85,7 @@ fun SettingScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // AI 头像 + 添加按钮
-            AvatarRow(avatarUri = aiConfig.avatarUri)
+            AvatarRow(aiConfig = aiConfig, userConfig = userConfig, onAvatarClick = onAvatarClick)
 
             Spacer(modifier = Modifier.height(24.dp))
             Divider(color = Color.LightGray, thickness = 0.5.dp)
@@ -109,7 +112,7 @@ fun SettingScreen(
                 )
                 if (aiExpanded) {
                     AiSection(
-                        config = config,
+                        config = aiConfig,
                         onSave = { newConfig -> chatViewModel.updateAiConfig(newConfig) }
                     )
                 }
@@ -150,7 +153,8 @@ fun SettingTopBar(onBack: () -> Unit) {
 
 
 @Composable
-fun AvatarRow(avatarUri: String) {
+fun AvatarRow(aiConfig: AiChatConfig,userConfig: UserChatConfig,
+              onAvatarClick: (String) -> Unit = {}) {
     val context = LocalContext.current
     Row(
         verticalAlignment = Alignment.Top,
@@ -159,18 +163,43 @@ fun AvatarRow(avatarUri: String) {
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
     ) {
+        // 用户 头像
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF5B9BD5))
+                    .clickable{onAvatarClick("user")},
+                contentAlignment = Alignment.Center
+            ) {
+                if (userConfig.avatarUri.isNotEmpty()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context).data(userConfig.avatarUri).crossfade(true).build(),
+                        contentDescription = "用户头像",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text("我", color = Color.White, fontSize = 16.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(16.dp))
         // AI 头像
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 modifier = Modifier
                     .size(60.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF5B9BD5)),
+                    .background(Color(0xFF5B9BD5))
+                    .clickable{onAvatarClick("assistant")},
                 contentAlignment = Alignment.Center
             ) {
-                if (avatarUri.isNotEmpty()) {
+                if (aiConfig.avatarUri.isNotEmpty()) {
                     AsyncImage(
-                        model = ImageRequest.Builder(context).data(avatarUri).crossfade(true).build(),
+                        model = ImageRequest.Builder(context).data(aiConfig.avatarUri).crossfade(true).build(),
                         contentDescription = "AI头像",
                         modifier = Modifier.fillMaxSize().clip(CircleShape),
                         contentScale = ContentScale.Crop

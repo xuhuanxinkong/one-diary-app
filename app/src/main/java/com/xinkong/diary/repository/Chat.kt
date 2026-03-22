@@ -34,7 +34,8 @@ data class ChatMessage(
     val chatId: Long,
     val role: String,
     val content: String,
-    val date: String
+    val date: String,
+    val toolExecutions: String = "[]" // JSON string of List<String>
 )
 
 @Entity(
@@ -53,12 +54,15 @@ data class AiChatConfig(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val chatId: Long,
+    val name: String = "Ai助手",
     val baseUrl: String = "http://10.0.2.2:11434/v1/chat/completions",
     val model: String = "deepseek-r1:7b",
     val apiKey: String = "",
     val avatarUri: String = "",
     val referencedDiaryId:String = "[]",
-    val enableAllNotes: Boolean = false
+    val enableReadNotes: Boolean = true,
+    val enableWriteNote: Boolean = false,
+    val enableEditNote: Boolean = false
 )
 
 
@@ -79,6 +83,7 @@ data class UserChatConfig(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val chatId: Long,
+    val name: String = "用户",
     val avatarUri: String = "",
     val referencedDiaryId: String = ""
 )

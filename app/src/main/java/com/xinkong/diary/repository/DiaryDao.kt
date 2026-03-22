@@ -24,6 +24,12 @@ interface DiaryDao {
     @Query("SELECT * FROM diaries")
     fun getAll(): Flow<List<Diary>>
 
+    @Query("SELECT * FROM diaries WHERE id =:diaryId LIMIT 1")
+    suspend fun getDiaryById(diaryId: Long): Diary?
+
+    @Query("SELECT DISTINCT tagFolder, tag FROM diaries")
+    suspend fun getAllTagsAndFolders(): List<com.xinkong.diary.repository.TagAndFolder>
+
     @Query("SELECT*FROM diaries WHERE id =:diaryId")
     fun getByID(diaryId: Long): Flow<Diary>
 

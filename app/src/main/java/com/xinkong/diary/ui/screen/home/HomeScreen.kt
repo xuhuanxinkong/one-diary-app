@@ -53,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,6 +82,7 @@ import com.xinkong.diary.ui.animation.toggleRotateEffect
 import com.xinkong.diary.ui.screen.chat.ChatScreen
 import com.xinkong.diary.ui.screen.chat.TalkScreen
 import com.xinkong.diary.ui.theme.DiarydTheme
+import com.xinkong.diary.ui.theme.ThemeDefault
 import com.xinkong.diary.ui.theme.currentDiaryColors
 import com.xinkong.diary.ui.theme.diaryColors
 import java.text.SimpleDateFormat
@@ -117,6 +119,26 @@ fun HomeScreen(){
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val diaryTags by tagModel.diaryTags.collectAsStateWithLifecycle()
     val chatTags by tagModel.chatTags.collectAsStateWithLifecycle()
+
+    var homeSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
+    var chatSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
+
+    LaunchedEffect(homeSelectedTag, chatSelectedTag, diaryTags, chatTags) {
+        val homeMatched = diaryTags.firstOrNull { it.folder == homeSelectedTag.first && it.name == homeSelectedTag.second }
+        val homeBg = homeMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background2
+        val homeBorder = homeMatched?.let { Color(it.border2Int) } ?: ThemeDefault.border2
+
+        val chatMatched = chatTags.firstOrNull { it.folder == chatSelectedTag.first && it.name == chatSelectedTag.second }
+        val chatBg = chatMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background0
+        val chatBorder = chatMatched?.let { Color(it.border2Int) } ?: ThemeDefault.sweetBorder
+
+        currentDiaryColors.value = currentDiaryColors.value.copy(
+            background2 = homeBg,
+            border2 = homeBorder,
+            background3 = chatBg,
+            border3 = chatBorder
+        )
+    }
 
     val context = LocalContext.current
 
@@ -158,6 +180,7 @@ fun HomeScreen(){
                         )
                     }
                     SelectionModeBottomBar(
+                        isDiary = selectedTab == Tab.HOME,
                         onMerge = { /* TODO */ },
                         onSplit = { /* TODO */ },
                         onMove = { showMoveBar = !showMoveBar },
@@ -191,6 +214,8 @@ fun HomeScreen(){
             when (tab) {
                 Tab.HOME -> ContentShow(
                     modifier = Modifier.fillMaxSize(),
+                    selectedTag = homeSelectedTag,
+                    onSelectedTagChange = { homeSelectedTag = it },
                     isSelectionMode = isSelectionMode,
                     selectedIds = selectedIds,
                     onEnterSelection = { id ->
@@ -215,6 +240,8 @@ fun HomeScreen(){
                     }
                 )
                 Tab.AI -> ChatScreen(
+                    selectedTag = chatSelectedTag,
+                    onSelectedTagChange = { chatSelectedTag = it },
                     isSelectionMode = isSelectionMode,
                     selectedIds = selectedIds,
                     onEnterSelection = { id ->
@@ -268,6 +295,8 @@ fun HomeScreen(){
 @Composable
 fun ContentShow(
     modifier: Modifier = Modifier,
+    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
+    onSelectedTagChange: (Pair<String, String>) -> Unit = {},
     isSelectionMode: Boolean = false,
     selectedIds: Set<Long> = emptySet(),
     onEnterSelection: (Long) -> Unit = {},
@@ -278,8 +307,6 @@ fun ContentShow(
 ){
     val viewModel: DiaryViewModel=viewModel()
     val contentList by viewModel.listState.collectAsStateWithLifecycle()
-
-    var selectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
 
     // ----------- 搜索状态 -------------
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -312,11 +339,13 @@ fun ContentShow(
         ) {
             if (isSelectionMode) {
                 SelectionModeTopBar(
+                    isDiary = true,
                     selectedCount = selectedIds.size,
                     onClose = onExitSelection
                 )
             } else if (isSearchMode) {
                 SelectionModeTopBar(
+                    isDiary = true,
                     selectedCount = displayList.size,
                     onClose = {
                         isSearchMode = false
@@ -329,7 +358,7 @@ fun ContentShow(
                     selectedTag = selectedTag,
                     contentList = contentList,
                     onTagSelect = { tag ->
-                        selectedTag = tag
+                        onSelectedTagChange(tag)
                         isSearchMode = false
                         searchQuery = ""
                     },
@@ -623,15 +652,13 @@ fun DeleteDialog(
 //----------------底部栏--------------------
 @Composable
 fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
-    val background1 = MaterialTheme.diaryColors.background
-    val background2 = MaterialTheme.diaryColors.background0
-    val border1 = MaterialTheme.diaryColors.border1
-    val border2 = MaterialTheme.diaryColors.sweetBorder
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.diaryColors.background2),
+            .background(
+                if (selectedTab == Tab.HOME) MaterialTheme.diaryColors.background2
+                else MaterialTheme.diaryColors.background3
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly // 均匀分布
     ) {
@@ -645,10 +672,6 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
                     indication = null
                 ) {
                     onTabSelected(Tab.HOME)
-                    currentDiaryColors.value = currentDiaryColors.value.copy(
-                        background2 = background1,
-                        border2 = border1
-                    )
                 }
                 .pressScaleEffect(homeInteractionSource, 0.75f)
         ) {
@@ -670,10 +693,6 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
                     indication = null
                 ) {
                     onTabSelected(Tab.AI)
-                    currentDiaryColors.value = currentDiaryColors.value.copy(
-                        background2 = background2,
-                        border2 = border2
-                    )
                 }
                 .pressScaleEffect(funInteractionSource, 0.75f)
         ) {

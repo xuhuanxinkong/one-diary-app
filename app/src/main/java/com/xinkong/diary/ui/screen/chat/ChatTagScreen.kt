@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -58,7 +59,8 @@ private fun TagDisplayItem.toTagUi(): TagUI {
         background2 = Color(bg2Int),
         border2 = Color(border2Int),
         folder = folder,
-        displayName = displayName
+        displayName = displayName,
+        itemCount = itemCount
     )
 }
 
@@ -152,6 +154,11 @@ fun ChatTagList(
                     }
                     if (displayConfig.enableSelection && isSelectionMode) {
                         IconButton(onClick = {
+                            android.widget.Toast.makeText(context, "对话导出功能待实现", android.widget.Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.Upload, contentDescription = "Export")
+                        }
+                        IconButton(onClick = {
                             val tagsToRemove = dbTags.filter { (it.folder to it.name) in selectedTags }
                             tagsToRemove.forEach {
                                 tagModel.deleteChatTag(it)
@@ -179,8 +186,8 @@ fun ChatTagList(
                     } else {
                         onTagSelect(tag.folder to tag.name)
                         currentDiaryColors.value = currentDiaryColors.value.copy(
-                            background2 = tag.background2,
-                            border2 = tag.border2
+                            background3 = tag.background2,
+                            border3 = tag.border2
                         )
                     }
                 },
@@ -191,6 +198,23 @@ fun ChatTagList(
                     }
                 }
             )
+
+            if (groupedResult.hiddenItemCount > 0) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "有 ${groupedResult.hiddenItemCount} 个文件已隐藏",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
         }
 
         if (displayConfig.showAddAction && !isSelectionMode) {

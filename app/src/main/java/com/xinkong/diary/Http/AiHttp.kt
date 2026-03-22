@@ -14,7 +14,12 @@ import org.json.JSONObject
 import java.io.IOException
 
 class AiHttp {
-    private val client = OkHttpClient()
+    // 可自定义超时时长（如 60 秒）
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
     private val mediaType = "application/json".toMediaType()
     private val readNotesToolSchema = JSONObject().apply {
         put("type", "function")
@@ -36,6 +41,85 @@ class AiHttp {
                     })
                 })
                 put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val writeNoteToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "write_note")
+            put("description", "新增本地笔记")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("title", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "笔记标题")
+                    })
+                    put("content", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "笔记内容")
+                    })
+                    put("folder", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "存放文件夹，如：我的笔记")
+                    })
+                    put("tag", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "笔记标签，如：未分类")
+                    })
+                })
+                put("required", JSONArray().put("title").put("content").put("folder").put("tag"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val editNoteToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "edit_note")
+            put("description", "修改已有的本地笔记")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("id", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "笔记ID")
+                    })
+                    put("title", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "修改后的标题")
+                    })
+                    put("content", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "修改后的内容")
+                    })
+                    put("folder", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "修改后的文件夹")
+                    })
+                    put("tag", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "修改后的标签")
+                    })
+                })
+                put("required", JSONArray().put("id"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val getTagsAndFoldersToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "get_tags_and_folders")
+            put("description", "获取本地所有的文件夹和标签，以了解现有的分类结构")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject())
                 put("additionalProperties", false)
             })
         })
@@ -122,6 +206,13 @@ class AiHttp {
             val toolsArray = JSONArray()
             if (enabledTools.contains("read_notes")) {
                 toolsArray.put(readNotesToolSchema)
+                toolsArray.put(getTagsAndFoldersToolSchema)
+            }
+            if (enabledTools.contains("write_note")) {
+                toolsArray.put(writeNoteToolSchema)
+            }
+            if (enabledTools.contains("edit_note")) {
+                toolsArray.put(editNoteToolSchema)
             }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)

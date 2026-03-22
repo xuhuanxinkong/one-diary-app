@@ -21,10 +21,6 @@ import kotlin.math.abs
 
 /**
  * 标签显示项数据类
- * bgImage 用于支持用户上传照片作为背景，架构如下：
- * - bgImage: 相对路径或URI，存储到数据库
- * - bg2Int: 颜色后备方案（bgImage加载失败时使用）
- * - 使用 coil 库异步加载图片，配合 AsyncImage Composable
  */
 data class TagDisplayItem(
     val folder: String,
@@ -32,13 +28,14 @@ data class TagDisplayItem(
     val colorInt: Int,
     val bg2Int: Int,
     val border2Int: Int,
-    val bgImage: String? = null,  // 背景图片路径
-    val displayName: String = name
+    val displayName: String = name,
+    val itemCount: Int = 0
 )
 
 data class TagGroupedResult(
     val groupedTags: Map<String, List<TagDisplayItem>>,
-    val availableFolders: List<String>
+    val availableFolders: List<String>,
+    val hiddenItemCount: Int = 0
 )
 
 /**
@@ -146,7 +143,7 @@ class TagModel(application: Application) : AndroidViewModel(application) {
         folderType: String,
         tagType: String
     ): TagGroupedResult {
-        // 提取tagIdentities，支持Diary和Chat
+        val tagIdentityCounts = mutableMapOf<Pair<String, String>, Int>()
         val tagIdentities = when (contentList) {
             is List<*> -> {
                 contentList.mapNotNull { item ->
@@ -155,6 +152,9 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                         is Chat -> normalizeTagIdentity(item.tagFolder, item.tag)
                         else -> null
                     }
+                }.onEach { identity ->
+                    val key = identity.folder to identity.name
+                    tagIdentityCounts[key] = (tagIdentityCounts[key] ?: 0) + 1
                 }.distinct()
             }
             else -> emptyList()
@@ -165,6 +165,13 @@ class TagModel(application: Application) : AndroidViewModel(application) {
             .filter { it.type == folderType && it.isHidden }
             .map { it.name }
             .toSet()
+
+        var hiddenItemCount = 0
+        tagIdentityCounts.forEach { (key, count) ->
+            if (key.first in hiddenFolders) {
+                hiddenItemCount += count
+            }
+        }
 
         val folderCandidates = (
             tagIdentities.map { it.folder } +
@@ -189,7 +196,7 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                     colorInt = tag.colorInt,
                     bg2Int = tag.bg2Int,
                     border2Int = tag.border2Int,
-                    bgImage = tag.bgImage
+                    itemCount = tagIdentityCounts[tag.folder to tag.name] ?: 0
                 )
                 is ChatTag -> TagDisplayItem(
                     folder = tag.folder,
@@ -197,7 +204,7 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                     colorInt = tag.colorInt,
                     bg2Int = tag.bg2Int,
                     border2Int = tag.border2Int,
-                    bgImage = tag.bgImage
+                    itemCount = tagIdentityCounts[tag.folder to tag.name] ?: 0
                 )
                 else -> null
             }
@@ -212,14 +219,16 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                         .filter { it.folder == folder }
                         .map { it.name },
                     customTags = customTagsList.filter { it.folder == folder },
-                    tagType = tagType
+                    tagType = tagType,
+                    folderCounts = tagIdentityCounts.filterKeys { it.first == folder }
                 )
             }
         }
 
         return TagGroupedResult(
             groupedTags = grouped,
-            availableFolders = orderedFolders
+            availableFolders = orderedFolders,
+            hiddenItemCount = hiddenItemCount
         )
     }
 
@@ -227,12 +236,14 @@ class TagModel(application: Application) : AndroidViewModel(application) {
         folder: String,
         existingNames: List<String>,
         customTags: List<TagDisplayItem>,
-        tagType: String
+        tagType: String,
+        folderCounts: Map<Pair<String, String>, Int>
     ): List<TagDisplayItem> {
         val customByName = customTags.associateBy { it.name }
         val unclassifiedColor = if (tagType == "diary") UnclassifiedColors.DIARY else UnclassifiedColors.CHAT
 
         val fromExisting = existingNames.map { name ->
+            val count = folderCounts[folder to name] ?: 0
             customByName[name] ?: if (name == UNCLASSIFIED_TAG_NAME) {
                 // 未分类标签使用专门的配色方案
                 TagDisplayItem(
@@ -240,7 +251,8 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                     name = name,
                     colorInt = unclassifiedColor.colorInt,
                     bg2Int = unclassifiedColor.bg2Int,
-                    border2Int = unclassifiedColor.border2Int
+                    border2Int = unclassifiedColor.border2Int,
+                    itemCount = count
                 )
             } else {
                 // 其他标签使用生成的回退色
@@ -249,7 +261,8 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                     name = name,
                     colorInt = generateFallbackColorInt(folder, name),
                     bg2Int = 0xFFFFFFFF.toInt(),
-                    border2Int = 0xFFD9D9D9.toInt()
+                    border2Int = 0xFFD9D9D9.toInt(),
+                    itemCount = count
                 )
             }
         }

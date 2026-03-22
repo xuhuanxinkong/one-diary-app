@@ -159,9 +159,11 @@ data class DiaryColors(
     val secondary: Color = Blue2,               // 次要色
     val tertiary: Color = Pink40,               // 第三色
 
-    val background2: Color = CreamWhite,        // 可调整背景色
-    val border2: Color = SweetBorder2,         // 可调整边框色
+    val background2: Color = CreamWhite,        // 可调整背景色 (Home/Diary)
+    val border2: Color = SweetBorder2,         // 可调整边框色 (Home/Diary)
 
+    val background3: Color = CreamWhite,        // 可调整背景色 (Chat)
+    val border3: Color = SweetBorder2,         // 可调整边框色 (Chat)
 )
 
 val ThemeDefault = DiaryColors()

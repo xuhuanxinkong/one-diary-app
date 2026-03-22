@@ -65,7 +65,6 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import com.xinkong.diary.ViewModel.ChatViewModel
-import java.io.OutputStreamWriter
 import java.io.InputStreamReader
 import java.io.BufferedReader
 import com.xinkong.diary.repository.Diary
@@ -98,7 +97,8 @@ fun SearchBarItem(
     onSearchQueryChange: (String) -> Unit,
     onSearchExecute: () -> Unit,
     onClear: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isDiary: Boolean = true
 ) {
     OutlinedTextField(
         value = searchQuery,
@@ -125,7 +125,7 @@ fun SearchBarItem(
             focusedContainerColor =Color.White,
 
             focusedBorderColor = MaterialTheme.diaryColors.primary,
-            unfocusedBorderColor = MaterialTheme.diaryColors.border2.copy(alpha = 0.5f)
+            unfocusedBorderColor = if (isDiary) MaterialTheme.diaryColors.border2.copy(alpha = 0.5f) else MaterialTheme.diaryColors.border3.copy(alpha = 0.5f)
         ),
         shape = RoundedCornerShape(24.dp)
     )
@@ -151,24 +151,16 @@ fun FunScreen(onDismiss: () -> Unit) {
     var pendingExportDiaries by remember { mutableStateOf<List<Diary>>(emptyList()) }
     var pendingImportFormat by remember { mutableStateOf(true) }
     var pendingImportTag by remember { mutableStateOf("") }
+    var pendingImportFolder by remember { mutableStateOf("") }
 
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri?.let {
-            viewModel.exportToJson(pendingExportDiaries) { result ->
-                result.onSuccess { jsonString ->
-                    try {
-                        context.contentResolver.openOutputStream(it)?.use { outputStream ->
-                            OutputStreamWriter(outputStream).use { writer ->
-                                writer.write(jsonString)
-                            }
-                        }
-                        Toast.makeText(context, "导出成功", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
+            viewModel.exportToJson(pendingExportDiaries, it, context) { result ->
+                result.onSuccess {
+                    Toast.makeText(context, "导出成功", Toast.LENGTH_SHORT).show()
                 }.onFailure { e ->
-                    Toast.makeText(context, "生成数据失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -180,7 +172,7 @@ fun FunScreen(onDismiss: () -> Unit) {
                 context.contentResolver.openInputStream(it)?.use { inputStream ->
                     BufferedReader(InputStreamReader(inputStream)).use { reader ->
                         val jsonString = reader.readText()
-                        viewModel.importFromJson(jsonString, pendingImportFormat, pendingImportTag) { result ->
+                        viewModel.importFromJson(jsonString, pendingImportFormat, pendingImportTag, pendingImportFolder) { result ->
                             result.onSuccess { count ->
                                 Toast.makeText(context, "成功导入 $count 条笔记", Toast.LENGTH_SHORT).show()
                             }.onFailure { e ->
@@ -214,10 +206,11 @@ fun FunScreen(onDismiss: () -> Unit) {
     if (showImportDialog) {
         ImportDialog(
             onDismiss = { showImportDialog = false },
-            onConfirm = { isDefault, tag ->
+            onConfirm = { isDefault, tag, folder ->
                 showImportDialog = false
                 pendingImportFormat = isDefault
                 pendingImportTag = tag
+                pendingImportFolder = folder
                 importLauncher.launch(arrayOf("application/json", "*/*"))
             }
         )
@@ -548,10 +541,11 @@ fun ExportDialog(
 @Composable
 fun ImportDialog(
     onDismiss: () -> Unit,
-    onConfirm: (Boolean, String) -> Unit
+    onConfirm: (Boolean, String, String) -> Unit
 ){
     var isDefaultImportFormat by remember { mutableStateOf(true) }
     var importTargetTag by remember { mutableStateOf("") }
+    var importTargetFolder by remember { mutableStateOf("") }
     
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -590,11 +584,26 @@ fun ImportDialog(
                         unfocusedTextColor = MaterialTheme.diaryColors.sweetText
                     )
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("导入位置 (文件夹):", fontWeight = FontWeight.Bold, color = MaterialTheme.diaryColors.sweetText, modifier = Modifier.padding(bottom = 8.dp))
+                OutlinedTextField(
+                    value = importTargetFolder,
+                    onValueChange = { importTargetFolder = it },
+                    placeholder = { Text("留空则使用原文件夹或默认文件夹", color = Color.Gray, fontSize = 12.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.diaryColors.primary,
+                        unfocusedBorderColor = MaterialTheme.diaryColors.tertiary,
+                        focusedTextColor = MaterialTheme.diaryColors.sweetText,
+                        unfocusedTextColor = MaterialTheme.diaryColors.sweetText
+                    )
+                )
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onConfirm(isDefaultImportFormat, importTargetTag)
+                onConfirm(isDefaultImportFormat, importTargetTag, importTargetFolder)
             }) {
                 Text("选择文件", color = MaterialTheme.diaryColors.primary)
             }
@@ -612,6 +621,7 @@ fun ImportDialog(
 
 @Composable
 fun SelectionModeTopBar(
+    isDiary: Boolean = true,
     selectedCount: Int,
     onClose: () -> Unit,
     title: String? = null
@@ -619,7 +629,7 @@ fun SelectionModeTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.diaryColors.background2)
+            .background(if (isDiary) MaterialTheme.diaryColors.background2 else MaterialTheme.diaryColors.background3)
             .padding(20.dp, 60.dp, 20.dp, 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -640,6 +650,7 @@ fun SelectionModeTopBar(
 
 @Composable
 fun SelectionModeBottomBar(
+    isDiary: Boolean = true,
     onMerge: () -> Unit,
     onSplit: () -> Unit,
     onMove: () -> Unit,
@@ -648,7 +659,7 @@ fun SelectionModeBottomBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.diaryColors.background2)
+            .background(if (isDiary) MaterialTheme.diaryColors.background2 else MaterialTheme.diaryColors.background3)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically

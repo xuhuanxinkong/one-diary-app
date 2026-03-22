@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -58,7 +59,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val baseMessages: List<Map<String, Any>>,
         val assistantMessage: Map<String, Any>,
         val allTasks: List<ToolTask>,
-        val completedResults: List<Map<String, Any>>
+        val completedResults: List<Map<String, Any>>,
+        val executedTools: List<String> = emptyList()
     )
 
     private var currentBatch: ToolBatchContext? = null
@@ -125,7 +127,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // 2. 获取该对话的 AI 配置
             val aiConfig = chatDao.getAiConfigOnce(chatId) ?: AiChatConfig(chatId = chatId)
             val enabledTools = mutableSetOf<String>().apply {
-                if (aiConfig.enableAllNotes) add("read_notes")
+                if (aiConfig.enableReadNotes) add("read_notes")
+                if (aiConfig.enableWriteNote) add("write_note")
+                if (aiConfig.enableEditNote) add("edit_note")
             }
 
             // 3. 构建完整消息列表（system + history + 当前消息）
@@ -192,8 +196,62 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         toolResult = formatDiaryToolResult(diaries)
                     )
                 }
+                is ToolTask.WriteNote -> {
+                    val newDiary = com.xinkong.diary.repository.Diary(
+                        title = currentTask.noteTitle,
+                        text = "",
+                        content = currentTask.content,
+                        date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
+                        tag = currentTask.tag,
+                        tagFolder = currentTask.folder
+                    )
+                    diaryDao.insert(newDiary)
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = "",
+                        toolResult = "笔记新增成功: ${currentTask.noteTitle}"
+                    )
+                }
+                is ToolTask.EditNote -> {
+                    val existing = diaryDao.getDiaryById(currentTask.id)
+                    val resultText = if (existing != null) {
+                        val updated = existing.copy(
+                            title = currentTask.noteTitle ?: existing.title,
+                            content = currentTask.content ?: existing.content,
+                            tagFolder = currentTask.folder ?: existing.tagFolder,
+                            tag = currentTask.tag ?: existing.tag
+                        )
+                        diaryDao.update(updated)
+                        "笔记修改成功: ID=${currentTask.id}"
+                    } else {
+                        "修改失败：找不到 ID=${currentTask.id} 的笔记"
+                    }
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = "",
+                        toolResult = resultText
+                    )
+                }
+                is ToolTask.GetTagsAndFolders -> {
+                    val foldersAndTags = diaryDao.getAllTagsAndFolders()
+                    val grouped = foldersAndTags.groupBy({ it.tagFolder }, { it.tag })
+                    val formatted = "当前所有的分类结构：\n" + grouped.entries.joinToString("\n") { (folder, tags) ->
+                        "- 文件夹：[$folder]，包含标签：${tags.joinToString(", ")}"
+                    }
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = "",
+                        toolResult = formatted
+                    )
+                }
             }
-            currentBatch = batch.copy(completedResults = batch.completedResults + resultMessage)
+            currentBatch = batch.copy(
+                completedResults = batch.completedResults + resultMessage,
+                executedTools = batch.executedTools + currentTask.title
+            )
             processNextToolInBatch()
         }
     }
@@ -209,7 +267,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             keyword = "",
             toolResult = "用户拒绝了该工具调用。"
         )
-        currentBatch = batch.copy(completedResults = batch.completedResults + resultMessage)
+        currentBatch = batch.copy(
+            completedResults = batch.completedResults + resultMessage,
+            executedTools = batch.executedTools + "${currentTask.title} (已拒绝)"
+        )
         processNextToolInBatch()
     }
     
@@ -217,17 +278,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val batch = currentBatch ?: return
         if (batch.completedResults.size == batch.allTasks.size) {
             val finalMessages = batch.baseMessages + listOf(batch.assistantMessage) + batch.completedResults
+            val finalExecutedTools = batch.executedTools
             currentBatch = null
             _aiState.value = AiState.Loading
             viewModelScope.launch {
                 val result = aiHttp.chatWithAi(batch.aiConfig, finalMessages, batch.enabledTools)
-                handleAiResponse(batch.chatId, result, finalMessages, batch.enabledTools)
+                handleAiResponse(batch.chatId, result, finalMessages, batch.enabledTools, finalExecutedTools)
             }
             return
         }
 
         val nextTask = batch.allTasks[batch.completedResults.size]
-        if (autoConfirmTools) {
+        if (autoConfirmTools || nextTask is ToolTask.GetTagsAndFolders) {
             confirmPendingToolAction(dontAskAgain = false)
         } else {
             // Show UI
@@ -319,7 +381,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         chatId: Long,
         result: Result<AiResponse>,
         messages: List<Map<String, Any>>,
-        enabledTools: Set<String>
+        enabledTools: Set<String>,
+        executedTools: List<String> = emptyList()
     ) {
         result.fold(
             onSuccess = { response ->
@@ -338,7 +401,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     chatId = chatId,
                                     role = "assistant",
                                     content = response.content,
-                                    date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date())
+                                    date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
+                                    toolExecutions = Json.encodeToString(executedTools)
                                 )
                                 chatDao.insertMessage(aiMsg)
                             }
@@ -351,18 +415,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 baseMessages = messages,
                                 assistantMessage = assistantToolCallMessage,
                                 allTasks = tasks,
-                                completedResults = emptyList()
+                                completedResults = emptyList(),
+                                executedTools = executedTools
                             )
                             processNextToolInBatch()
                             return@fold
                         }
 
                         val displayContent = response.content.ifBlank { "(空回复)" }
+                        val toolExecutionsStr = Json.encodeToString(executedTools)
                         val aiMsg = ChatMessage(
                             chatId = chatId,
                             role = "assistant",
                             content = displayContent,
-                            date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date())
+                            date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
+                            toolExecutions = toolExecutionsStr
                         )
                         chatDao.insertMessage(aiMsg)
                         _aiState.value = AiState.Success(result = displayContent)
@@ -370,11 +437,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             },
             onFailure = { error ->
+                val toolExecutionsStr = Json.encodeToString(executedTools)
                 val errMsg = ChatMessage(
                     chatId = chatId,
                     role = "assistant",
                     content = error.message ?: "AI回复失败",
-                    date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date())
+                    date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
+                    toolExecutions = toolExecutionsStr
                 )
                 chatDao.insertMessage(errMsg)
                 _aiState.value = AiState.Error(message = error.message ?: "AI回复失败")
@@ -384,19 +453,45 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun parseToolTasks(toolCalls: List<AiToolCall>, enabledTools: Set<String>): List<ToolTask> {
         val tasks = mutableListOf<ToolTask>()
-        if ("read_notes" !in enabledTools) return tasks
-        
         for (call in toolCalls) {
-            if (call.type == "function" && call.functionName == "read_notes") {
-                try {
-                    val json = JSONObject(call.arguments)
-                    val keyword = json.optString("keyword").trim()
-                    if (keyword.isNotEmpty() && keyword.matches(Regex("^[\\w\\u4e00-\\u9fa5]+$"))) {
-                        val limit = json.optInt("limit", 3).coerceIn(1, 5)
-                        tasks.add(ToolTask.ReadNotes(call, keyword, limit))
-                    }
-                } catch (e: Exception) {
-                    // Ignore parse errors for single tools
+            when {
+                call.type == "function" && call.functionName == "read_notes" && "read_notes" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val keyword = json.optString("keyword").trim()
+                        if (keyword.isNotEmpty() && keyword.matches(Regex("^[\\w\\u4e00-\\u9fa5]+$"))) {
+                            val limit = json.optInt("limit", 3).coerceIn(1, 5)
+                            tasks.add(ToolTask.ReadNotes(call, keyword, limit))
+                        }
+                    } catch (e: Exception) {}
+                }
+                call.type == "function" && call.functionName == "write_note" && "write_note" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val title = json.optString("title").trim()
+                        val content = json.optString("content").trim()
+                        val folder = json.optString("folder", "我的笔记").trim()
+                        val tag = json.optString("tag", "未分类").trim()
+                        if (title.isNotEmpty() && content.isNotEmpty()) {
+                            tasks.add(ToolTask.WriteNote(call, title, content, folder, tag))
+                        }
+                    } catch (e: Exception) {}
+                }
+                call.type == "function" && call.functionName == "edit_note" && "edit_note" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        if (json.has("id")) {
+                            val id = json.getLong("id")
+                            val title = if (json.has("title")) json.getString("title") else null
+                            val content = if (json.has("content")) json.getString("content") else null
+                            val folder = if (json.has("folder")) json.getString("folder") else null
+                            val tag = if (json.has("tag")) json.getString("tag") else null
+                            tasks.add(ToolTask.EditNote(call, id, title, content, folder, tag))
+                        }
+                    } catch (e: Exception) {}
+                }
+                call.type == "function" && call.functionName == "get_tags_and_folders" && "read_notes" in enabledTools -> {
+                    tasks.add(ToolTask.GetTagsAndFolders(call))
                 }
             }
         }

@@ -1,7 +1,6 @@
 package com.xinkong.diary.repository
 
 import androidx.room.Entity
-import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "tag_folders",
@@ -22,7 +21,6 @@ data class DiaryTag(
     val colorInt: Int,
     val bg2Int: Int,
     val border2Int: Int,
-    val bgImage: String? = null,
     val folder: String = "我的笔记"
 )
 
@@ -35,6 +33,5 @@ data class ChatTag(
     val colorInt: Int,
     val bg2Int: Int,
     val border2Int: Int,
-    val bgImage: String? = null,
     val folder: String = "我的笔记"
 )
