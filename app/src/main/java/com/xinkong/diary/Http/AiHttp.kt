@@ -149,17 +149,28 @@ class AiHttp {
                 }
 
                 val response = client.newCall(requestBuilder.build()).execute()
+                val responseBody = response.body?.string() ?: ""
+                
                 if (response.isSuccessful) {
-                    val json = JSONObject(response.body?.string() ?: "")
-                    val message = json
-                        .getJSONArray("choices")
-                        .getJSONObject(0)
-                        .getJSONObject("message")
-                    val content = message.optString("content", "")
-                    val toolCalls = parseToolCalls(message.optJSONArray("tool_calls"))
-                    Result.success(AiResponse.Message(content = content, toolCalls = toolCalls))
+                    val json = JSONObject(responseBody)
+                    val choicesArray = json.optJSONArray("choices")
+                    if (choicesArray != null && choicesArray.length() > 0) {
+                        val message = choicesArray.getJSONObject(0).optJSONObject("message")
+                        if (message != null) {
+                            val content = message.optString("content", "")
+                            val toolCalls = parseToolCalls(message.optJSONArray("tool_calls"))
+                            Result.success(AiResponse.Message(content = content, toolCalls = toolCalls))
+                        } else {
+                            Result.failure(IOException("解析失败：message 字段为空"))
+                        }
+                    } else {
+                        // 尝试读取 error 信息
+                        val errorObj = json.optJSONObject("error")
+                        val errorMsg = errorObj?.optString("message") ?: "API 未返回有效的 choices 数据"
+                        Result.failure(IOException("响应异常：$errorMsg"))
+                    }
                 } else {
-                    Result.failure(IOException("请求失败${response.code}"))
+                    Result.failure(IOException("请求失败 ${response.code}：$responseBody"))
                 }
             } catch (e: Exception) {
                 Result.failure(e)

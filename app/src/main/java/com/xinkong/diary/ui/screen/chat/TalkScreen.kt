@@ -56,10 +56,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -442,12 +445,28 @@ fun ChatMessageMenu(
     onDismissRequest: () -> Unit,
     onDelete: () -> Unit,
     onQuote: () -> Unit,
+    onCopy: () -> Unit,
+    onSelectText: () -> Unit,
     onMultiSelect: () -> Unit
 ) {
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest
     ) {
+        DropdownMenuItem(
+            text = { Text("复制") },
+            onClick = {
+                onDismissRequest()
+                onCopy()
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("选择部分文本") },
+            onClick = {
+                onDismissRequest()
+                onSelectText()
+            }
+        )
         DropdownMenuItem(
             text = { Text("删除") },
             onClick = {
@@ -491,6 +510,8 @@ fun ChatBubble(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    var isTextSelectable by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -533,18 +554,26 @@ fun ChatBubble(
                                 .combinedClickable(
                                     enabled = !isMultiSelectMode,
                                     onLongClick = { showMenu = true },
-                                    onClick = { }
+                                    onClick = { isTextSelectable = false }
                                 )
                                 .background(Color(0xFF95EC69), shape = RoundedCornerShape(8.dp))
                                 .padding(12.dp)
                         ) {
-                            Text(text = content, fontSize = 15.sp, color = Color.Black)
+                            if (isTextSelectable) {
+                                SelectionContainer {
+                                    Text(text = content, fontSize = 15.sp, color = Color.Black)
+                                }
+                            } else {
+                                Text(text = content, fontSize = 15.sp, color = Color.Black)
+                            }
                         }
                         ChatMessageMenu(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false },
                             onDelete = onDelete,
                             onQuote = onQuote,
+                            onCopy = { clipboardManager.setText(AnnotatedString(content)) },
+                            onSelectText = { isTextSelectable = true },
                             onMultiSelect = onMultiSelect
                         )
                     }
@@ -610,18 +639,26 @@ fun ChatBubble(
                                 .combinedClickable(
                                     enabled = !isMultiSelectMode,
                                     onLongClick = { showMenu = true },
-                                    onClick = { }
+                                    onClick = { isTextSelectable = false }
                                 )
                                 .background(Color.White, shape = RoundedCornerShape(8.dp))
                                 .padding(12.dp)
                         ) {
-                            Text(text = content, fontSize = 15.sp, color = Color.Black)
+                            if (isTextSelectable) {
+                                SelectionContainer {
+                                    Text(text = content, fontSize = 15.sp, color = Color.Black)
+                                }
+                            } else {
+                                Text(text = content, fontSize = 15.sp, color = Color.Black)
+                            }
                         }
                         ChatMessageMenu(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false },
                             onDelete = onDelete,
                             onQuote = onQuote,
+                            onCopy = { clipboardManager.setText(AnnotatedString(content)) },
+                            onSelectText = { isTextSelectable = true },
                             onMultiSelect = onMultiSelect
                         )
                     }
