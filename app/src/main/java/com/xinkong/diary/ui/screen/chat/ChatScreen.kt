@@ -66,6 +66,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Checkbox
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextOverflow
 import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
 import com.xinkong.diary.ui.screen.home.SearchBarItem
 import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
@@ -378,16 +379,21 @@ fun ChatCard(chat: Chat, modifier: Modifier) {
         Column(verticalArrangement = Arrangement.Center) {
             Text(
                 "对话:${chat.title}",
-                fontSize = 22.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(15.dp, 20.dp, 0.dp, 0.dp)
+                    .padding(15.dp,16.dp,0.dp, 0.dp)
             )
             Text(
-                formattedDate,
-                fontSize = 15.sp,
+                formattedDate+" | ",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp,
                 color = Color.Gray,
-                modifier = Modifier.padding(20.dp, 0.dp)
+                modifier = Modifier.padding(15.dp,0.dp,0.dp, 8.dp)
             )
         }
     }

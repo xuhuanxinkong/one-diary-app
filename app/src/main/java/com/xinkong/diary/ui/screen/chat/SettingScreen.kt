@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -60,12 +62,11 @@ fun SettingScreen(
     chat: Chat,
     onBack: () -> Unit,
     onTitleChange: (String) -> Unit,
-    onAvatarClick: (String) -> Unit = {}
+    onAvatarClick: (String, Long?) -> Unit = {_, _ ->}
 ) {
-    var aiExpanded by remember { mutableStateOf(false) }
     val chatViewModel: ChatViewModel = viewModel()
-    val aiConfig by chatViewModel.findAiConfig(chat.id)
-        .collectAsStateWithLifecycle(AiChatConfig(chatId = chat.id))
+    val aiConfigs by chatViewModel.findAiConfig(chat.id)
+        .collectAsStateWithLifecycle(emptyList())
     val userConfig by chatViewModel.findUserConfig(chat.id)
         .collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 
@@ -85,11 +86,16 @@ fun SettingScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // AI 头像 + 添加按钮
-            AvatarRow(aiConfig = aiConfig, userConfig = userConfig, onAvatarClick = onAvatarClick)
+            AvatarRow(
+                aiConfigs = aiConfigs,
+                userConfig = userConfig,
+                onAvatarClick = onAvatarClick,
+                onAddAiClick = { chatViewModel.addAiConfig(chat.id) }
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
             Divider(color = Color.LightGray, thickness = 0.5.dp)
-            //      AI设置
+            // 对话名称设置
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -102,22 +108,6 @@ fun SettingScreen(
                     title = chat.title,
                     onTitleChange = onTitleChange
                 )
-                    Divider(color = MaterialTheme.diaryColors.tertiary.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 8.dp))
-
-
-                SettingSectionHeader(
-                    title = "AI 设置",
-                    isExpanded = aiExpanded,
-                    onClick = { aiExpanded = !aiExpanded }
-                )
-                if (aiExpanded) {
-                    AiSection(
-                        config = aiConfig,
-                        onSave = { newConfig -> chatViewModel.updateAiConfig(newConfig) }
-                    )
-                }
-
-                Divider(color = MaterialTheme.diaryColors.tertiary.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 8.dp))
             }
         }
     }
@@ -153,81 +143,92 @@ fun SettingTopBar(onBack: () -> Unit) {
 
 
 @Composable
-fun AvatarRow(aiConfig: AiChatConfig,userConfig: UserChatConfig,
-              onAvatarClick: (String) -> Unit = {}) {
+fun AvatarRow(
+    aiConfigs: List<AiChatConfig>,
+    userConfig: UserChatConfig,
+    onAvatarClick: (String, Long?) -> Unit = {_, _ ->},
+    onAddAiClick: () -> Unit = {}
+) {
     val context = LocalContext.current
-    Row(
+    LazyRow(
         verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.Center,
+        horizontalArrangement = Arrangement.Start,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
     ) {
-        // 用户 头像
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF5B9BD5))
-                    .clickable{onAvatarClick("user")},
-                contentAlignment = Alignment.Center
-            ) {
-                if (userConfig.avatarUri.isNotEmpty()) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context).data(userConfig.avatarUri).crossfade(true).build(),
-                        contentDescription = "用户头像",
-                        modifier = Modifier.fillMaxSize().clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Text("我", color = Color.White, fontSize = 16.sp)
+        item {
+            // 用户 头像
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF5B9BD5))
+                        .clickable{onAvatarClick("user", null)},
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (userConfig.avatarUri.isNotEmpty()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context).data(userConfig.avatarUri).crossfade(true).build(),
+                            contentDescription = "用户头像",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text("我", color = Color.White, fontSize = 16.sp)
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.width(16.dp))
         }
 
-        Spacer(modifier = Modifier.width(16.dp))
-        // AI 头像
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF5B9BD5))
-                    .clickable{onAvatarClick("assistant")},
-                contentAlignment = Alignment.Center
-            ) {
-                if (aiConfig.avatarUri.isNotEmpty()) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context).data(aiConfig.avatarUri).crossfade(true).build(),
-                        contentDescription = "AI头像",
-                        modifier = Modifier.fillMaxSize().clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Text("AI", color = Color.White, fontSize = 16.sp)
+        items(aiConfigs) { aiConfig ->
+            // AI 头像
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF5B9BD5))
+                        .clickable{onAvatarClick("assistant", aiConfig.id)},
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (aiConfig.avatarUri.isNotEmpty()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context).data(aiConfig.avatarUri).crossfade(true).build(),
+                            contentDescription = "AI头像",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text("AI", color = Color.White, fontSize = 16.sp)
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.width(16.dp))
         }
 
-        Spacer(modifier = Modifier.width(16.dp))
-
-        // 添加按钮（功能暂不实现）
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFE0E0E0))
-                    .clickable { /* 暂不实现 */ },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "添加",
-                    tint = Color.Gray,
-                    modifier = Modifier.size(28.dp)
-                )
+        item {
+            // 添加按钮
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE0E0E0))
+                        .clickable { onAddAiClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = "添加",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
     }

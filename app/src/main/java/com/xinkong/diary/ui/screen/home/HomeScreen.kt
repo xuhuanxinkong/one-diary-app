@@ -98,8 +98,10 @@ import androidx.compose.material.icons.filled.MarkUnreadChatAlt
 import androidx.compose.material.icons.filled.NoteAlt
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextOverflow
 import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
 import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
@@ -351,8 +353,8 @@ fun ContentShow(
     val listState = rememberLazyListState()
     var isCollapsed by remember { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(listState) {
-        androidx.compose.runtime.snapshotFlow {
+    LaunchedEffect(listState) {
+        snapshotFlow {
             listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
         }.collect { (index, offset) ->
             if (index == 0 && offset < 50) {
@@ -649,7 +651,7 @@ fun DiaryCard(diary: Diary,modifier: Modifier) {
     }
     Card(
         elevation = CardDefaults.cardElevation(4.dp),
-        shape = RoundedCornerShape(25.dp), // 圆角
+        shape = RoundedCornerShape(20.dp), // 圆角
         border = BorderStroke(1.dp, MaterialTheme.diaryColors.border2), // 边框
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFEFEFE)), // 背景
         modifier = modifier
@@ -657,16 +659,21 @@ fun DiaryCard(diary: Diary,modifier: Modifier) {
         Column(verticalArrangement = Arrangement.Center) {
             Text(
                 "笔记:${diary.title}",
-                fontSize = 22.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(15.dp,20.dp,0.dp, 0.dp)
+                    .padding(15.dp,16.dp,0.dp, 0.dp)
             )
-            Text(formattedDate,
-                fontSize = 15.sp,
+            Text("$formattedDate | ${diary.text}",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp,
                 color = Color.Gray,
                 modifier = Modifier
-                    .padding(20.dp,0.dp)
+                    .padding(15.dp,0.dp,0.dp, 8.dp)
                 )
         }
     }
@@ -683,6 +690,7 @@ fun DeleteDialog(
         onDismissRequest = onDismiss,
         title = { Text("确认删除") },
         text = { Text("确定要删除这篇日记吗？") },
+        containerColor = Color.White,
         confirmButton = {
             Button(
                 onClick = {
@@ -718,7 +726,7 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .padding(end = 30.dp)
+                .padding(end = 30.dp, top = 6.dp, bottom = 4.dp)
                 .clickable(
                     interactionSource = homeInteractionSource,
                     indication = null
@@ -732,6 +740,7 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
                 contentDescription = "笔记",
                 modifier = Modifier.size(24.dp)
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text("笔记", fontSize = 10.sp)
         }
 
@@ -739,7 +748,7 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .padding(start = 30.dp)
+                .padding(start = 30.dp, top = 6.dp, bottom = 4.dp)
                 .clickable(
                     interactionSource = funInteractionSource,
                     indication = null
@@ -753,6 +762,7 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
                 contentDescription = "对话",
                 modifier = Modifier.size(24.dp)
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text("对话", fontSize = 10.sp)
         }
     }

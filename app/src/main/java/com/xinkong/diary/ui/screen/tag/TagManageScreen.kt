@@ -200,9 +200,9 @@ fun TagManageRoute(
 
     val groupedResult = remember(type, diaryList, chatList, diaryDbTags, chatDbTags, dbFolders) {
         if (type == "diary") {
-            tagModel.buildDiaryGroupedTags(diaryList)
+            tagModel.buildDiaryGroupedTags(diaryList, includeHidden = true)
         } else {
-            tagModel.buildChatGroupedTags(chatList)
+            tagModel.buildChatGroupedTags(chatList, includeHidden = true)
         }
     }
 
@@ -434,6 +434,7 @@ fun TagManageRoute(
         var newFolderName by remember { mutableStateOf(editingFolder!!) }
         AlertDialog(
             onDismissRequest = { editingFolder = null },
+            containerColor = Color.White,
             title = { Text("编辑文件夹") },
             text = {
                 OutlinedTextField(
@@ -489,11 +490,12 @@ fun TagManageRoute(
             },
             dismissButton = {
                 TextButton(onClick = {
+                    val folderToDelete = editingFolder ?: return@TextButton
                     // Delete folder
                     if (type == "diary") {
-                        tagModel.diaryTags.value.filter { it.folder == editingFolder }.forEach { dbTag ->
+                        tagModel.diaryTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
                             diaryViewModel.listState.value
-                                .filter { it.tag == dbTag.name && it.tagFolder == editingFolder }
+                                .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
                                 .forEach { diary ->
                                     diaryViewModel.updateDiary(
                                         diary.copy(
@@ -505,9 +507,9 @@ fun TagManageRoute(
                             tagModel.deleteDiaryTag(dbTag)
                         }
                     } else {
-                        tagModel.chatTags.value.filter { it.folder == editingFolder }.forEach { dbTag ->
+                        tagModel.chatTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
                             chatViewModel.chatListState.value
-                                .filter { it.tag == dbTag.name && it.tagFolder == editingFolder }
+                                .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
                                 .forEach { chat ->
                                     chatViewModel.updateChat(
                                         chat.copy(
@@ -519,6 +521,10 @@ fun TagManageRoute(
                             tagModel.deleteChatTag(dbTag)
                         }
                     }
+                    val folderEntity = tagModel.tagFolders.value.firstOrNull {
+                        it.name == folderToDelete && it.type == folderType
+                    } ?: TagFolder(name = folderToDelete, type = folderType, isHidden = false)
+                    tagModel.deleteTagFolder(folderEntity)
                     editingFolder = null
                 }) {
                     Text("删除", color = Color.Red)

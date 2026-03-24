@@ -64,12 +64,13 @@ interface ChatDao {
 
     @Update
     suspend fun updateAiConfig(config: AiChatConfig)
+    @Delete
+    suspend fun deleteAiConfig(config: AiChatConfig)
+    @Query("SELECT * FROM ai_chat_configs WHERE chatId = :chatId")
+    fun findAiConfig(chatId: Long): Flow<List<AiChatConfig>>
 
     @Query("SELECT * FROM ai_chat_configs WHERE chatId = :chatId")
-    fun findAiConfig(chatId: Long): Flow<AiChatConfig>
-
-    @Query("SELECT * FROM ai_chat_configs WHERE chatId = :chatId LIMIT 1")
-    suspend fun getAiConfigOnce(chatId: Long): AiChatConfig?
+    suspend fun getAiConfigOnce(chatId: Long): List<AiChatConfig>
 
     //配置相关 UserChatConfig
     @Insert

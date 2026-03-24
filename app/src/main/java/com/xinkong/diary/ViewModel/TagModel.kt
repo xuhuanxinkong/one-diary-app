@@ -120,12 +120,12 @@ class TagModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { tagDao.deleteTagFolder(folder) }
     }
 
-    fun buildDiaryGroupedTags(contentList: List<Diary>): TagGroupedResult {
-        return buildGroupedTags(contentList, _diaryTags.value, _tagFolders.value, "Diary", "diary")
+    fun buildDiaryGroupedTags(contentList: List<Diary>, includeHidden: Boolean = false): TagGroupedResult {
+        return buildGroupedTags(contentList, _diaryTags.value, _tagFolders.value, "Diary", "diary", includeHidden)
     }
 
-    fun buildChatGroupedTags(chatList: List<Chat>): TagGroupedResult {
-        return buildGroupedTags(chatList, _chatTags.value, _tagFolders.value, "Chat", "chat")
+    fun buildChatGroupedTags(chatList: List<Chat>, includeHidden: Boolean = false): TagGroupedResult {
+        return buildGroupedTags(chatList, _chatTags.value, _tagFolders.value, "Chat", "chat", includeHidden)
     }
 
     /**
@@ -135,13 +135,15 @@ class TagModel(application: Application) : AndroidViewModel(application) {
      * @param currentFolders 所有文件夹
      * @param folderType 文件夹类型过滤："Diary" 或 "Chat"
      * @param tagType 标签类型标识："diary" 或 "chat"，用于未分类配色
+     * @param includeHidden 是否包含被隐藏的文件夹
      */
     private fun <T : Any> buildGroupedTags(
         contentList: T,
         currentTags: List<Any>,
         currentFolders: List<TagFolder>,
         folderType: String,
-        tagType: String
+        tagType: String,
+        includeHidden: Boolean
     ): TagGroupedResult {
         val tagIdentityCounts = mutableMapOf<Pair<String, String>, Int>()
         val tagIdentities = when (contentList) {
@@ -212,7 +214,7 @@ class TagModel(application: Application) : AndroidViewModel(application) {
 
         val grouped = linkedMapOf<String, List<TagDisplayItem>>()
         orderedFolders.forEach { folder ->
-            if (folder !in hiddenFolders) {
+            if (includeHidden || folder !in hiddenFolders) {
                 grouped[folder] = buildDisplayItemsForFolder(
                     folder = folder,
                     existingNames = tagIdentities

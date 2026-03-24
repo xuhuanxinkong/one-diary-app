@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
@@ -82,23 +83,26 @@ import kotlin.text.ifEmpty
 fun DetailScreen(
     chat: Chat,
     role: String,
+    aiId: Long? = null,
     onBack: () -> Unit
 ) {
     if (role == "user") {
         UserConfig(chat = chat, onBack = onBack)
     } else {
-        AiConfig(chat = chat, onBack = onBack)
+        AiConfig(chat = chat, aiId = aiId, onBack = onBack)
     }
 }
 
 
 
 @Composable
-fun AiConfig(chat: Chat,onBack: () -> Unit){
+fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
 
     val chatViewModel: ChatViewModel = viewModel()
-    val config by chatViewModel.findAiConfig(chat.id)
-        .collectAsStateWithLifecycle(AiChatConfig(chatId = chat.id))
+    val configs by chatViewModel.findAiConfig(chat.id)
+        .collectAsStateWithLifecycle(emptyList())
+    val config = configs.find { it.id == aiId } ?: configs.firstOrNull() ?: AiChatConfig(chatId = chat.id)
+    val isFirstAi = configs.firstOrNull()?.id == config.id
 
     var enableReadNotes by remember(config.enableReadNotes) { mutableStateOf(config.enableReadNotes) }
     var enableWriteNote by remember(config.enableWriteNote) { mutableStateOf(config.enableWriteNote) }
@@ -108,6 +112,7 @@ fun AiConfig(chat: Chat,onBack: () -> Unit){
 
 
     var configExpanded by remember { mutableStateOf(true) }
+    var contextExpanded by remember { mutableStateOf(true) }
     var functionExpanded by remember { mutableStateOf(true) }
 
 
@@ -116,7 +121,12 @@ fun AiConfig(chat: Chat,onBack: () -> Unit){
         topBar = {
             DetailTopBar(
                 title ="AI 信息",
-                onBack = onBack
+                onBack = onBack,
+                showDelete = !isFirstAi,
+                onDelete = {
+                    chatViewModel.deleteAiConfig(config)
+                    onBack()
+                }
             )
         }
     ) { innerPadding ->
@@ -131,8 +141,9 @@ fun AiConfig(chat: Chat,onBack: () -> Unit){
             Spacer(modifier = Modifier.height(32.dp))
 
             //头像设置
-            AvatarIcon(role = "AI", avatarUri = config.avatarUri,
-                onSave = {avatarUri ->
+            AvatarIcon(
+                role = "AI", avatarUri = config.avatarUri,
+                onSave = { avatarUri ->
                     chatViewModel.updateAiConfig(
                         config.copy(avatarUri = avatarUri)
                     )
@@ -169,128 +180,139 @@ fun AiConfig(chat: Chat,onBack: () -> Unit){
                     .padding(16.dp)
             ) {
 
-
-
-                //      上下文设置
+                //      AI设置
                 SettingSectionHeader(
-                    title = "配置栏",
+                    title = "AI 设置",
                     isExpanded = configExpanded,
                     onClick = { configExpanded = !configExpanded }
                 )
                 if (configExpanded) {
-                    ContextConfig(config)
+                    AiSection(
+                        config = config,
+                        onSave = { newConfig -> chatViewModel.updateAiConfig(newConfig) }
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Divider(color = Color.LightGray.copy(alpha = 0.5f))
 
-
-
-
-
-
-
-                // ========== 功能栏 ==========
+                //      上下文设置
                 SettingSectionHeader(
-                    title = "功能栏",
-                    isExpanded = functionExpanded,
-                    onClick = { functionExpanded = !functionExpanded }
+                    title = "配置栏 (上下文)",
+                    isExpanded = contextExpanded,
+                    onClick = { contextExpanded = !contextExpanded }
                 )
+                if (contextExpanded) {
+                    ContextConfig(config)
+                }
 
-                if (functionExpanded) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                // 判断是否是该会话下的首个 AI
+                val isFirstAi = configs.firstOrNull()?.id == config.id
+                if (isFirstAi) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Divider(color = Color.LightGray.copy(alpha = 0.5f))
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "允许AI读取本地笔记",
-                            fontSize = 14.sp,
-                            color = Color.DarkGray,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = enableReadNotes,
-                            onCheckedChange = { checked ->
-                                enableReadNotes = checked
-                                chatViewModel.updateAiConfig(
-                                    config.copy(enableReadNotes = checked)
-                                )
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                    // ========== 功能栏 (仅首个 AI 显示) ==========
+                    SettingSectionHeader(
+                        title = "功能栏",
+                        isExpanded = functionExpanded,
+                        onClick = { functionExpanded = !functionExpanded }
+                    )
+
+                    if (functionExpanded) {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "允许AI读取本地笔记",
+                                fontSize = 14.sp,
+                                color = Color.DarkGray,
+                                modifier = Modifier.weight(1f)
                             )
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "允许AI新增本地笔记",
-                            fontSize = 14.sp,
-                            color = Color.DarkGray,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = enableWriteNote,
-                            onCheckedChange = { checked ->
-                                enableWriteNote = checked
-                                chatViewModel.updateAiConfig(
-                                    config.copy(enableWriteNote = checked)
+                            Switch(
+                                checked = enableReadNotes,
+                                onCheckedChange = { checked ->
+                                    enableReadNotes = checked
+                                    chatViewModel.updateAiConfig(
+                                        config.copy(enableReadNotes = checked)
+                                    )
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaterialTheme.diaryColors.primary
                                 )
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = MaterialTheme.diaryColors.primary
                             )
-                        )
-                    }
+                        }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "允许AI修改本地笔记",
-                            fontSize = 14.sp,
-                            color = Color.DarkGray,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = enableEditNote,
-                            onCheckedChange = { checked ->
-                                enableEditNote = checked
-                                chatViewModel.updateAiConfig(
-                                    config.copy(enableEditNote = checked)
-                                )
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "允许AI新增本地笔记",
+                                fontSize = 14.sp,
+                                color = Color.DarkGray,
+                                modifier = Modifier.weight(1f)
                             )
-                        )
+                            Switch(
+                                checked = enableWriteNote,
+                                onCheckedChange = { checked ->
+                                    enableWriteNote = checked
+                                    chatViewModel.updateAiConfig(
+                                        config.copy(enableWriteNote = checked)
+                                    )
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaterialTheme.diaryColors.primary
+                                )
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "允许AI修改本地笔记",
+                                fontSize = 14.sp,
+                                color = Color.DarkGray,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = enableEditNote,
+                                onCheckedChange = { checked ->
+                                    enableEditNote = checked
+                                    chatViewModel.updateAiConfig(
+                                        config.copy(enableEditNote = checked)
+                                    )
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaterialTheme.diaryColors.primary
+                                )
+                            )
+                        }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(32.dp))
             }
-
-            Spacer(modifier = Modifier.height(32.dp))
         }
+
     }
-
-
 }
 
 
@@ -635,28 +657,41 @@ fun DiaryColumn(referencedDiaries: List<Diary>,onDismiss:(Diary)-> Unit){
 @Composable
 fun DetailTopBar(
     title: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    showDelete: Boolean = false,
+    onDelete: () -> Unit = {}
 ) {
     Column {
         Row(
-            horizontalArrangement = Arrangement.Start,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .background(Color.White)
                 .fillMaxWidth()
                 .padding(0.dp, 36.dp, 0.dp, 4.dp)
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "返回"
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "返回"
+                    )
+                }
+                Text(
+                    text = title,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
-            Text(
-                text = title,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium
-            )
+            if (showDelete) {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = Color.Red
+                    )
+                }
+            }
         }
         Divider(color = Color.LightGray, thickness = 0.5.dp)
     }

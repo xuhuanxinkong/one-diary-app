@@ -37,7 +37,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- AI 状态 ----
     private val _aiState = MutableStateFlow<AiState>(AiState.Idle)
-    val aiState: StateFlow<AiState> = _aiState.asStateFlow()
+    val aiState: StateFlow<AiState> = _aiState
+
+    private val _currentTypingAi = MutableStateFlow<AiChatConfig?>(null)
+    val currentTypingAi: StateFlow<AiChatConfig?> = _currentTypingAi.asStateFlow()
 
     data class PendingToolUIState(
         val title: String,
@@ -49,6 +52,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val pendingToolUI: StateFlow<PendingToolUIState?> = _pendingToolUI.asStateFlow()
 
     private var autoConfirmTools = false
+
+    private val userRole = "user"
+    private val assistantRole = "assistant"
 
 
 
@@ -112,9 +118,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * 发送消息并调用 AI
      * 自动从 DB 读取该对话的 AI 配置、历史消息和上下文
      */
-    fun sendMessage(chatId: Long, content: String) {
+    fun sendMessage(chatId: Long, content: String, selectedAIs: List<AiChatConfig>) {
+        if (selectedAIs.isEmpty()) return
         viewModelScope.launch {
             autoConfirmTools = false
+            saveReplySelection(chatId, selectedAIs)
+            
             // 1. 保存用户消息
             val userMsg = ChatMessage(
                 chatId = chatId,
@@ -124,37 +133,54 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
             chatDao.insertMessage(userMsg)
 
-            // 2. 获取该对话的 AI 配置
-            val aiConfig = chatDao.getAiConfigOnce(chatId) ?: AiChatConfig(chatId = chatId)
-            val enabledTools = mutableSetOf<String>().apply {
-                if (aiConfig.enableReadNotes) add("read_notes")
-                if (aiConfig.enableWriteNote) add("write_note")
-                if (aiConfig.enableEditNote) add("edit_note")
+            // 获取当前对话的首个 AI，只有他拥有操作笔记工具的权限
+            val firstAiId = chatDao.getAiConfigOnce(chatId).firstOrNull()?.id
+
+            // 2. 轮流调用 AI
+            for (config in selectedAIs) {
+                _aiState.value = AiState.Loading
+                _currentTypingAi.value = config
+
+                val enabledTools = mutableSetOf<String>().apply {
+                    // 只有第一个 AI 才有笔记工具权限
+                    if (config.id == firstAiId) {
+                        if (config.enableReadNotes) add("read_notes")
+                        if (config.enableWriteNote) add("write_note")
+                        if (config.enableEditNote) add("edit_note")
+                    }
+                }
+
+                // 构加上当前最新上下文，每个 AI 都能看见前面 AI 发送的消息
+                val messages = buildContextMessages(chatId, config, enabledTools)
+                val result = try {
+                    if (config.baseUrl.isBlank()) throw Exception("AI请求地址未配置或无效")
+                    aiHttp.chatWithAi(config, messages, enabledTools)
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+                
+                // 处理并保证入库完成，再走下一个循环
+                handleAiResponse(chatId, result, messages, enabledTools, config = config)
+                _currentTypingAi.value = null
             }
-
-            // 3. 构建完整消息列表（system + history + 当前消息）
-            val messages = buildMessages(chatId, content, enabledTools)
-
-            // 4. 调用 AI
-            _aiState.value = AiState.Loading
-            val result = aiHttp.chatWithAi(aiConfig, messages, enabledTools)
-
-            // 5. 处理响应
-            handleAiResponse(
-                chatId = chatId,
-                result = result,
-                messages = messages,
-                enabledTools = enabledTools
-            )
+            _aiState.value = AiState.Idle
         }
     }
 
     // ========== 配置 ==========
 
-    fun findAiConfig(chatId: Long): Flow<AiChatConfig> = chatDao.findAiConfig(chatId)
+    fun findAiConfig(chatId: Long): Flow<List<AiChatConfig>> = chatDao.findAiConfig(chatId)
+
+    fun addAiConfig(chatId: Long) {
+        viewModelScope.launch { chatDao.insertAiConfig(AiChatConfig(chatId = chatId)) }
+    }
 
     fun updateAiConfig(config: AiChatConfig) {
         viewModelScope.launch { chatDao.updateAiConfig(config) }
+    }
+
+    fun deleteAiConfig(config: AiChatConfig) {
+        viewModelScope.launch { chatDao.deleteAiConfig(config) }
     }
 
     fun findUserConfig(chatId: Long): Flow<UserChatConfig> = chatDao.findUserConfig(chatId)
@@ -283,7 +309,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _aiState.value = AiState.Loading
             viewModelScope.launch {
                 val result = aiHttp.chatWithAi(batch.aiConfig, finalMessages, batch.enabledTools)
-                handleAiResponse(batch.chatId, result, finalMessages, batch.enabledTools, finalExecutedTools)
+                handleAiResponse(
+                    chatId = batch.chatId, 
+                    result = result, 
+                    messages = finalMessages, 
+                    enabledTools = batch.enabledTools,
+                    config = batch.aiConfig,
+                    executedTools = finalExecutedTools
+                )
             }
             return
         }
@@ -310,30 +343,52 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 构建发送给 AI 的完整消息列表：
-     * [system(上下文)] + [历史消息] + [当前用户消息]
+     * [system(上下文)] + [带名称格式的全部历史消息]
      */
-    private suspend fun buildMessages(chatId: Long, currentContent: String, enabledTools: Set<String>): List<Map<String, Any>> {
+    private suspend fun buildContextMessages(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>): List<Map<String, Any>> {
         val messages = mutableListOf<Map<String, Any>>()
 
-        // system 消息：上下文资料
-        val systemContent = buildSystemMessage(chatId, enabledTools)
+        // system 消息：上下文资料和身份设定
+        val systemContent = buildSystemMessage(chatId, currentAiConfig, enabledTools)
         if (systemContent.isNotEmpty()) {
             messages.add(mapOf("role" to "system", "content" to systemContent))
         }
 
-        // 历史消息（不含刚插入的当前消息）
-        val history = chatDao.getMessagesOnce(chatId).dropLast(1)
-        history.forEach { messages.add(mapOf("role" to it.role, "content" to it.content)) }
+        // 获取全部配置用于映射名字
+        val userConfig = chatDao.getUserConfigOnce(chatId)
+        val aiConfigs = chatDao.getAiConfigOnce(chatId)
 
-        // 当前用户消息
-        // 为了防止多轮对话后 AI 遗忘或者解释工具，将强制性指令附加在最后一条用户消息之后（仅对 AI 可见，不入库）
-        var finalContent = currentContent
-        val toolInstruction = buildToolInstruction(enabledTools)
-        if (toolInstruction.isNotEmpty()) {
-            finalContent = "$currentContent\n\n【系统提醒】\n$toolInstruction"
+        // 历史消息（此时已经包含了最新的用户消息或者其他 AI 的回复）
+        val history = chatDao.getMessagesOnce(chatId)
+        history.forEach { msg ->
+            val isUserMessage = msg.role == userRole
+            val isCurrentAiMessage =
+                msg.role == assistantRole &&
+                    msg.aiId == currentAiConfig.id
+
+            val senderName = if (isUserMessage) {
+                userConfig?.name ?: "我"
+            } else {
+                aiConfigs.find { it.id == msg.aiId }?.name ?: "AI"
+            }
+            
+            // 使得当前 AI 认为其他 AI 的消息也是以不同名字发送的 user 消息
+            val actualRole = if (isCurrentAiMessage) {
+                assistantRole
+            } else {
+                userRole
+            }
+            
+            // 将每条消息格式化为 $name: message 的形式
+            val formattedContent = "${senderName}: ${msg.content}"
+            messages.add(mapOf("role" to actualRole, "content" to formattedContent))
         }
 
-        messages.add(mapOf("role" to "user", "content" to finalContent))
+        val toolInstruction = buildToolInstruction(enabledTools)
+        if (toolInstruction.isNotEmpty()) {
+            // 将强制性指令附加在最后作为临时 system，不写入数据库历史
+            messages.add(mapOf("role" to "system", "content" to "【系统提醒】\n$toolInstruction"))
+        }
 
         return messages
     }
@@ -358,16 +413,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 构建 system 消息：用户资料 + AI 资料
      */
-    private suspend fun buildSystemMessage(chatId: Long, enabledTools: Set<String>): String {
+    private suspend fun buildSystemMessage(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>): String {
         val userContext = buildContextFromConfig(
             chatDao.getUserConfigOnce(chatId)?.referencedDiaryId
         )
-        val aiContext = buildContextFromConfig(
-            chatDao.getAiConfigOnce(chatId)?.referencedDiaryId
-        )
+        val aiContext = buildContextFromConfig(currentAiConfig.referencedDiaryId)
+        
         return buildString {
+            append("你现在的身份是：${currentAiConfig.name}。在接下来的对话记录中，所有发送的消息会以“发送者名称: 消息内容”的格式提供，请根据此多角色群聊记录进行回复。请严格用你的身份做出对应的反应，不要扮演其他角色。\n\n")
             if (userContext.isNotEmpty()) append("【用户资料】\n$userContext\n\n")
-            if (aiContext.isNotEmpty()) append("【AI资料】\n$aiContext\n\n")
+            if (aiContext.isNotEmpty()) append("【你的背景资料】\n$aiContext\n\n")
             if ("read_notes" in enabledTools) {
                 append(
                     """
@@ -404,6 +459,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         result: Result<AiResponse>,
         messages: List<Map<String, Any>>,
         enabledTools: Set<String>,
+        config: AiChatConfig? = null,
         executedTools: List<String> = emptyList()
     ) {
         result.fold(
@@ -424,12 +480,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     role = "assistant",
                                     content = response.content,
                                     date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-                                    toolExecutions = "[]" // 中间回复不展示工具执行记录，留到最终汇总
+                                    toolExecutions = "[]", // 中间回复不展示工具执行记录，留到最终汇总
+                                    aiId = config?.id
                                 )
                                 chatDao.insertMessage(aiMsg)
                             }
     
-                            val aiConfig = chatDao.getAiConfigOnce(chatId) ?: AiChatConfig(chatId = chatId)
+                            val aiConfig = chatDao.getAiConfigOnce(chatId).firstOrNull() ?: AiChatConfig(chatId = chatId)
                             currentBatch = ToolBatchContext(
                                 chatId = chatId,
                                 aiConfig = aiConfig,
@@ -451,7 +508,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             role = "assistant",
                             content = displayContent,
                             date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-                            toolExecutions = toolExecutionsStr
+                            toolExecutions = toolExecutionsStr,
+                            aiId = config?.id
                         )
                         chatDao.insertMessage(aiMsg)
                         _aiState.value = AiState.Success(result = displayContent)
@@ -465,7 +523,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     role = "assistant",
                     content = error.message ?: "AI回复失败",
                     date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-                    toolExecutions = toolExecutionsStr
+                    toolExecutions = toolExecutionsStr,
+                    aiId = config?.id
                 )
                 chatDao.insertMessage(errMsg)
                 _aiState.value = AiState.Error(message = error.message ?: "AI回复失败")
@@ -556,5 +615,59 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "content" to displayStr
         )
     }
+
+    // 保存多 AI 回复的模式与启用顺序
+    fun saveReplySelection(chatId: Long, selectedAIs: List<AiChatConfig>) {
+        viewModelScope.launch {
+            // 这里我们更新所有在这个 chatId 下的 AiChatConfig 的 isEnabled 和 replyOrder
+            val allConfigs = chatDao.getAiConfigOnce(chatId)
+            allConfigs.forEach { config ->
+                val index = selectedAIs.indexOfFirst { it.id == config.id }
+                val updatedConfig = config.copy(
+                    isEnabled = index != -1,
+                    replyOrder = if (index != -1) index + 1 else 0
+                )
+                chatDao.updateAiConfig(updatedConfig)
+            }
+        }
+    }
+
+    // 直接回复：让选中的 AI 直接根据当前对话历史生成回复，而不需要用户发送新消息
+    fun directReply(chatId: Long, selectedAIs: List<AiChatConfig>) {
+        if (selectedAIs.isEmpty()) return
+        viewModelScope.launch {
+            saveReplySelection(chatId, selectedAIs)
+
+            // 获取当前对话的首个 AI
+            val firstAiId = chatDao.getAiConfigOnce(chatId).firstOrNull()?.id
+            
+            // 轮流回复：等待上一个 AI 回复完成后再请求下一个
+            for (config in selectedAIs) {
+                    _aiState.value = AiState.Loading
+                    _currentTypingAi.value = config
+
+                    val enabledTools = mutableSetOf<String>().apply {
+                        if (config.id == firstAiId) {
+                            if (config.enableReadNotes) add("read_notes")
+                            if (config.enableWriteNote) add("write_note")
+                            if (config.enableEditNote) add("edit_note")
+                        }
+                    }
+                    val messages = buildContextMessages(chatId, config, enabledTools)
+                    val result = try {
+                        if (config.baseUrl.isBlank()) throw Exception("AI请求地址未配置或无效")
+                        aiHttp.chatWithAi(config, messages, enabledTools)
+                    } catch (e: Exception) {
+                        Result.failure(e)
+                    }
+                    // TODO: 若需要等待工具调用完全结束，此处可能要调整为观察状态
+                    handleAiResponse(chatId, result, messages, enabledTools, config = config)
+                    _currentTypingAi.value = null
+            }
+            _aiState.value = AiState.Idle
+        }
+    }
+
+    // （已移除 buildMessagesForDirectReply 和 buildMessages）
 }
 

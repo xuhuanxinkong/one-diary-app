@@ -35,7 +35,8 @@ data class ChatMessage(
     val role: String,
     val content: String,
     val date: String,
-    val toolExecutions: String = "[]" // JSON string of List<String>
+    val toolExecutions: String = "[]", // JSON string of List<String>
+    val aiId: Long? = null // 用于记录是哪个 AI 发送的消息
 )
 
 @Entity(
@@ -55,14 +56,16 @@ data class AiChatConfig(
     val id: Long = 0,
     val chatId: Long,
     val name: String = "Ai助手",
-    val baseUrl: String = "http://10.0.2.2:11434/v1/chat/completions",
-    val model: String = "deepseek-r1:7b",
+    val baseUrl: String = "",
+    val model: String = "",
     val apiKey: String = "",
     val avatarUri: String = "",
     val referencedDiaryId:String = "[]",
     val enableReadNotes: Boolean = true,
     val enableWriteNote: Boolean = false,
-    val enableEditNote: Boolean = false
+    val enableEditNote: Boolean = false,
+    val isEnabled: Boolean = true,
+    val replyOrder: Int = 0
 )
 
 

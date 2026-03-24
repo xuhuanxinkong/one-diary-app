@@ -51,7 +51,7 @@ sealed class Route {
 
     // 角色详情页（从对话中点击头像进入）
     @Serializable
-    data class RoleDetail(val chatId: Long, val role: String) : Route()
+    data class RoleDetail(val chatId: Long, val role: String, val aiId: Long? = null) : Route()
 
     // 对话设置页
     @Serializable

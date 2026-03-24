@@ -82,8 +82,8 @@ fun DiaryApp() {
                     TalkScreen(
                         chat = it,
                         onBack = { navViewModel.navigateBack() },
-                        onAvatarClick = { role ->
-                            navViewModel.navigateTo(Route.RoleDetail(it.id, role))
+                        onAvatarClick = { role, aiId ->
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId))
                         },
                         onSetting = {
                             navViewModel.navigateTo(Route.ChatSetting(it.id))
@@ -98,6 +98,7 @@ fun DiaryApp() {
                     DetailScreen(
                         chat = it,
                         role = route.role,
+                        aiId = route.aiId,
                         onBack = { navViewModel.navigateBack() }
                     )
                 }
@@ -112,8 +113,8 @@ fun DiaryApp() {
                         onTitleChange = { newTitle ->
                             chatViewModel.updateChat(it.copy(title = newTitle))
                         },
-                        onAvatarClick = { role ->
-                            navViewModel.navigateTo(Route.RoleDetail(it.id, role))
+                        onAvatarClick = { role, aiId ->
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId))
                         },
                     )
                 }

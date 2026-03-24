@@ -44,6 +44,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,6 +55,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -63,7 +67,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -77,18 +85,20 @@ import com.xinkong.diary.repository.UserChatConfig
 import com.xinkong.diary.ui.animation.ExpandableAnim
 import kotlinx.serialization.json.Json
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TalkScreen(
     chat: Chat,
     onBack: () -> Unit,
-    onAvatarClick: (String) -> Unit = {},
+    onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
     onSetting: () -> Unit = {}
 ) {
     val viewModel: ChatViewModel = viewModel()
     val aiState by viewModel.aiState.collectAsStateWithLifecycle()
     val pendingToolUI by viewModel.pendingToolUI.collectAsStateWithLifecycle()
     val messages by viewModel.getMessages(chat.id).collectAsStateWithLifecycle(initialValue = emptyList())
-    val aiConfig by viewModel.findAiConfig(chat.id).collectAsStateWithLifecycle(AiChatConfig(chatId = chat.id))
+    val aiConfigs by viewModel.findAiConfig(chat.id).collectAsStateWithLifecycle(emptyList())
+    val currentTypingAi by viewModel.currentTypingAi.collectAsStateWithLifecycle()
     val userConfig by viewModel.findUserConfig(chat.id).collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 
     var inputText by remember { mutableStateOf("") }
@@ -143,6 +153,9 @@ fun TalkScreen(
                     }
                 )
             } else {
+                var showExpandPanel by remember { mutableStateOf(false) }
+                var showAiReplySheet by remember { mutableStateOf(false) }
+
                 TalkBottomBar(
                     inputText = inputText,
                     onInputChange = { inputText = it },
@@ -150,19 +163,49 @@ fun TalkScreen(
                         if (inputText.isNotBlank()) {
                             val msg = inputText.trim()
                             inputText = ""
-                            viewModel.sendMessage(chat.id, msg)
+                            val selectedAIs = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
+                            val targetAIs = if (selectedAIs.isNotEmpty()) selectedAIs else aiConfigs.take(1)
+                            viewModel.sendMessage(chat.id, msg, targetAIs)
                         }
                     },
-                    onPhoto = { }
+                    onAddClick = { showExpandPanel = !showExpandPanel },
+                    showExpandPanel = showExpandPanel,
+                    onShowAiReply = { showAiReplySheet = true }
                 )
+
+                if (showAiReplySheet) {
+                    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    ModalBottomSheet(
+                        onDismissRequest = { showAiReplySheet = false },
+                        sheetState = sheetState
+                    ) {
+                        AiReplyBottomSheetContent(
+                            aiConfigs = aiConfigs,
+                            onDismiss = { showAiReplySheet = false },
+                            onDirectReply = { selectedAIs ->
+                                viewModel.directReply(chat.id, selectedAIs)
+                            },
+                            onSaveSelection = { selectedAIs ->
+                                viewModel.saveReplySelection(chat.id, selectedAIs)
+                            }
+                        )
+                    }
+                }
             }
         }
     ) { innerPadding ->
+        if (isMultiSelectMode) {
+            BackHandler {
+                isMultiSelectMode = false
+                selectedMessages.clear()
+            }
+        }
         ChatMessageShow(
             messages = messages,
             listState = listState,
             isLoading = aiState is AiState.Loading,
-            aiConfig = aiConfig,
+            aiConfigs = aiConfigs,
+            currentTypingAi = currentTypingAi,
             userConfig = userConfig,
             onAvatarClick = onAvatarClick,
             onMessageLongPress = { messageToDelete = it },
@@ -251,9 +294,10 @@ fun ChatMessageShow(
     messages: List<ChatMessage>,
     listState: LazyListState,
     isLoading: Boolean,
-    aiConfig: AiChatConfig,
+    aiConfigs: List<AiChatConfig>,
+    currentTypingAi: AiChatConfig?,
     userConfig: UserChatConfig,
-    onAvatarClick: (String) -> Unit = {},
+    onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
     onMessageLongPress: (ChatMessage) -> Unit = {},
     isMultiSelectMode: Boolean = false,
     selectedMessages: List<ChatMessage> = emptyList(),
@@ -264,10 +308,11 @@ fun ChatMessageShow(
     onCancelTool: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val aiName = aiConfig.name
     val userName = userConfig.name
-    val aiAvatarUri = aiConfig.avatarUri
     val userAvatarUri = userConfig.avatarUri
+    val activeAiConfig = currentTypingAi ?: aiConfigs.firstOrNull()
+    val activeAiName = activeAiConfig?.name ?: "AI"
+    val activeAiAvatarUri = activeAiConfig?.avatarUri ?: ""
 
     LazyColumn(
         state = listState,
@@ -277,20 +322,31 @@ fun ChatMessageShow(
         items(messages, key = { it.id }) { message ->
             var showDelete by remember { mutableStateOf(false) }
             val isSelected = selectedMessages.contains(message)
+            val isUserMessage = message.role == "user"
+            val isAiMessage = message.role == "assistant"
 
             val tools = try {
                 Json.decodeFromString<List<String>>(message.toolExecutions)
             } catch (e: Exception) {
                 emptyList()
             }
+            
+            val currentAiConfig = if (isAiMessage) {
+                aiConfigs.find { it.id == message.aiId } ?: aiConfigs.firstOrNull()
+            } else null
+            
+            val aiName = currentAiConfig?.name ?: "AI"
+            val aiAvatarUri = currentAiConfig?.avatarUri ?: ""
 
             ChatBubble(
                 content = message.content,
-                isUser = message.role == "user",
-                avatarUri = if (message.role == "user") userAvatarUri else aiAvatarUri,
-                name = if (message.role == "user") userName else aiName,
+                isUser = isUserMessage,
+                avatarUri = if (isUserMessage) userAvatarUri else aiAvatarUri,
+                name = if (isUserMessage) userName else aiName,
                 toolExecutions = tools,
-                onAvatarClick = { if (!isMultiSelectMode) onAvatarClick(message.role) },
+                onAvatarClick = {
+                    if (!isMultiSelectMode) onAvatarClick(if (isUserMessage) "user" else "assistant", message.aiId)
+                },
                 showDelete = showDelete,
                 onDelete = { onMessageLongPress(message) },
                 onQuote = { },
@@ -315,15 +371,15 @@ fun ChatMessageShow(
                             .background(Color(0xFF5B9BD5)),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (aiAvatarUri.isNotEmpty()) {
+                        if (activeAiAvatarUri.isNotEmpty()) {
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current).data(aiAvatarUri).crossfade(true).build(),
+                                model = ImageRequest.Builder(LocalContext.current).data(activeAiAvatarUri).crossfade(true).build(),
                                 contentDescription = "AI头像",
                                 modifier = Modifier.fillMaxSize().clip(CircleShape),
                                 contentScale = ContentScale.Crop
                             )
                         } else {
-                            Text(aiName.take(2), color = Color.White, fontSize = 14.sp)
+                            Text(activeAiName.take(2), color = Color.White, fontSize = 14.sp)
                         }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
@@ -342,8 +398,8 @@ fun ChatMessageShow(
             item {
                 ToolRequestBubble(
                     uiState = pendingToolUI,
-                    aiAvatarUri = aiAvatarUri,
-                    aiName = aiName,
+                    aiAvatarUri = activeAiAvatarUri,
+                    aiName = activeAiName,
                     onConfirm = onConfirmTool,
                     onCancel = onCancelTool
                 )
@@ -455,19 +511,17 @@ fun ExpandableMessageContent(content: String, textColor: Color = Color.Black) {
     var showExpandButton by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.animateContentSize()) {
-        SelectionContainer {
-            Text(
-                text = content,
-                fontSize = 15.sp,
-                color = textColor,
-                maxLines = if (isExpanded) Int.MAX_VALUE else 15,
-                onTextLayout = { textLayoutResult ->
-                    if (textLayoutResult.hasVisualOverflow) {
-                        showExpandButton = true
-                    }
+        Text(
+            text = content,
+            fontSize = 15.sp,
+            color = textColor,
+            maxLines = if (isExpanded) Int.MAX_VALUE else 15,
+            onTextLayout = { textLayoutResult ->
+                if (textLayoutResult.hasVisualOverflow) {
+                    showExpandButton = true
                 }
-            )
-        }
+            }
+        )
         if (showExpandButton) {
             Text(
                 text = if (isExpanded) "收起" else "展开全文",
@@ -725,61 +779,137 @@ fun TalkBottomBar(
     inputText: String,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
-    onPhoto: () -> Unit
+    onAddClick: () -> Unit,
+    showExpandPanel: Boolean,
+    onShowAiReply: () -> Unit
 ) {
     Column {
         Divider(color = Color.LightGray, thickness = 0.5.dp)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFFF7F7F7))
-                .padding(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 30.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BasicTextField(
-                value = inputText,
-                onValueChange = onInputChange,
-                textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
-                modifier = Modifier
-                    .weight(1f)
-                    .background(Color.White, shape = RoundedCornerShape(6.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                decorationBox = { innerTextField ->
-                    Box(contentAlignment = Alignment.CenterStart) {
-                        if (inputText.isEmpty()) {
-                            Text("输入消息...", color = Color.Gray, fontSize = 16.sp)
-                        }
-                        innerTextField()
-                    }
-                }
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(onClick = onPhoto, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Photo,
-                    contentDescription = "照片",
-                    tint = Color.DarkGray,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(
-                onClick = onSend,
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(
-                        if (inputText.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
-                        shape = RoundedCornerShape(6.dp)
-                    )
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "发送",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+        TalkInputRow(
+            inputText = inputText,
+            onInputChange = onInputChange,
+            onSend = onSend,
+            onAddClick = onAddClick,
+            onShowAiReply = onShowAiReply
+        )
+        if (showExpandPanel) {
+            TalkExpandablePanel()
         }
+    }
+}
+
+@Composable
+fun TalkInputRow(
+    inputText: String,
+    onInputChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onAddClick: () -> Unit,
+    onShowAiReply: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF7F7F7))
+            .padding(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BasicTextField(
+            value = inputText,
+            onValueChange = onInputChange,
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
+            modifier = Modifier
+                .weight(1f)
+                .background(Color.White, shape = RoundedCornerShape(6.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (inputText.isEmpty()) {
+                        Text("输入消息...", color = Color.Gray, fontSize = 16.sp)
+                    }
+                    innerTextField()
+                }
+            }
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        IconButton(onClick = onShowAiReply, modifier = Modifier.size(40.dp)) {
+            Icon(
+                imageVector = Icons.Default.StarBorder,
+                contentDescription = "AI",
+                tint = Color.DarkGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        IconButton(onClick = onAddClick, modifier = Modifier.size(40.dp)) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "添加",
+                tint = Color.DarkGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        IconButton(
+            onClick = onSend,
+            modifier = Modifier
+                .size(40.dp)
+                .background(
+                    if (inputText.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
+                    shape = RoundedCornerShape(6.dp)
+                )
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Send,
+                contentDescription = "发送",
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun TalkExpandablePanel() {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF7F7F7))
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceAround
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
+            .padding(5.dp)
+            .clickable { Toast.makeText(context, "相册功能开发中", Toast.LENGTH_SHORT).show() }) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color.White, shape = RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = Icons.Default.Photo, contentDescription = "相册", tint = Color.Gray, modifier = Modifier.size(32.dp))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("相册", fontSize = 12.sp, color = Color.DarkGray)
+        }
+        
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
+            .padding(5.dp)
+            .clickable { Toast.makeText(context, "分享功能开发中", Toast.LENGTH_SHORT).show() }) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color.White, shape = RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = Icons.Default.Share, contentDescription = "分享", tint = Color.Gray, modifier = Modifier.size(32.dp))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("分享", fontSize = 12.sp, color = Color.DarkGray)
+        }
+
+        // 可以继续添加更多功能按钮
+        Spacer(modifier = Modifier.weight(1f))
     }
 }
 
@@ -853,5 +983,91 @@ fun MultiSelectBottomBar(
                 Icon(imageVector = Icons.Default.MoreHoriz, contentDescription = "更多", tint = Color.DarkGray)
             }
         }
+    }
+}
+
+@Composable
+fun AiReplyBottomSheetContent(
+    aiConfigs: List<AiChatConfig>,
+    onDismiss: () -> Unit,
+    onDirectReply: (selectedOrder: List<AiChatConfig>) -> Unit,
+    onSaveSelection: (selectedOrder: List<AiChatConfig>) -> Unit
+) {
+    val selectedAIs = remember { mutableStateListOf<AiChatConfig>() }
+
+    LaunchedEffect(aiConfigs) {
+        if (selectedAIs.isEmpty()) {
+            val enabled = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
+            selectedAIs.addAll(enabled)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(16.dp)
+    ) {
+        // AI 列表
+        Text("选择要回复的 AI 及顺序：", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
+        Divider(modifier = Modifier.padding(bottom = 12.dp))
+
+        LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+            items(aiConfigs) { config ->
+                val index = selectedAIs.indexOf(config)
+                val isSelected = index != -1
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        if (isSelected) {
+                            selectedAIs.remove(config)
+                        } else {
+                            selectedAIs.add(config)
+                        }
+                    }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF5B9BD5)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(config.name.take(2), color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(text = config.name, modifier = Modifier.weight(1f))
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .border(1.dp, if (isSelected) Color(0xFF07C160) else Color.Gray, CircleShape)
+                            .background(if (isSelected) Color(0xFF07C160) else Color.Transparent, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Text((index + 1).toString(), color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 底部按钮
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Button(
+                onClick = { onDirectReply(selectedAIs); onDismiss() },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5B9BD5))
+            ) {
+                Text("直接回复")
+            }
+            Button(
+                onClick = { onSaveSelection(selectedAIs); onDismiss() },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160))
+            ) {
+                Text("保存选择")
+            }
+        }
+        Spacer(modifier = Modifier.height(30.dp))
     }
 }
