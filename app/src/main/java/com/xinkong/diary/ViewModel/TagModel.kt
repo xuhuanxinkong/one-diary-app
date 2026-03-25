@@ -185,6 +185,7 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                     }
                 } } +
                 currentFolders.filter { it.type == folderType }.map { it.name } +
+                tagIdentities.filter { it.name == UNCLASSIFIED_TAG_NAME }.map { it.folder } +
                 DEFAULT_TAG_FOLDER
             ).toSet()
 

@@ -71,6 +71,10 @@ import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -84,6 +88,7 @@ import com.xinkong.diary.repository.ChatMessage
 import com.xinkong.diary.repository.UserChatConfig
 import com.xinkong.diary.ui.animation.ExpandableAnim
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,7 +106,7 @@ fun TalkScreen(
     val currentTypingAi by viewModel.currentTypingAi.collectAsStateWithLifecycle()
     val userConfig by viewModel.findUserConfig(chat.id).collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 
-    var inputText by remember { mutableStateOf("") }
+    var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val listState = rememberLazyListState()
     var messageToDelete by remember { mutableStateOf<ChatMessage?>(null) }
 
@@ -109,11 +114,27 @@ fun TalkScreen(
     val selectedMessages = remember { mutableStateListOf<ChatMessage>() }
     var showMultiDeleteConfirm by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+
+    DisposableEffect(Unit) {
+        onDispose {
+            focusManager.clearFocus()
+        }
+    }
 
     var initialScrollDone by remember { mutableStateOf(false) }
 
+    var animatingMessageId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var previousMessageCount by rememberSaveable { mutableStateOf(0) }
+
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+        if (messages.size > previousMessageCount) {
+            if (previousMessageCount > 0) {
+                val lastMsg = messages.lastOrNull()
+                if (lastMsg?.role == "assistant") {
+                    animatingMessageId = lastMsg.id
+                }
+            }
             if (!initialScrollDone) {
                 // 初次加载时瞬间跳到最底部
                 listState.scrollToItem(messages.size - 1)
@@ -123,6 +144,7 @@ fun TalkScreen(
                 listState.animateScrollToItem(messages.size - 1)
             }
         }
+        previousMessageCount = messages.size
     }
 
     Scaffold(
@@ -160,9 +182,9 @@ fun TalkScreen(
                     inputText = inputText,
                     onInputChange = { inputText = it },
                     onSend = {
-                        if (inputText.isNotBlank()) {
-                            val msg = inputText.trim()
-                            inputText = ""
+                        if (inputText.text.isNotBlank()) {
+                            val msg = inputText.text.trim()
+                            inputText = TextFieldValue("")
                             val selectedAIs = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
                             val targetAIs = if (selectedAIs.isNotEmpty()) selectedAIs else aiConfigs.take(1)
                             viewModel.sendMessage(chat.id, msg, targetAIs)
@@ -200,32 +222,51 @@ fun TalkScreen(
                 selectedMessages.clear()
             }
         }
-        ChatMessageShow(
-            messages = messages,
-            listState = listState,
-            isLoading = aiState is AiState.Loading,
-            aiConfigs = aiConfigs,
-            currentTypingAi = currentTypingAi,
-            userConfig = userConfig,
-            onAvatarClick = onAvatarClick,
-            onMessageLongPress = { messageToDelete = it },
-            isMultiSelectMode = isMultiSelectMode,
-            selectedMessages = selectedMessages,
-            onToggleSelect = { msg ->
-                if (selectedMessages.contains(msg)) selectedMessages.remove(msg) else selectedMessages.add(msg)
-            },
-            onEnterMultiSelect = { msg ->
-                isMultiSelectMode = true
-                if (!selectedMessages.contains(msg)) selectedMessages.add(msg)
-            },
-            pendingToolUI = pendingToolUI,
-            onConfirmTool = { dontAsk -> viewModel.confirmPendingToolAction(dontAsk) },
-            onCancelTool = { viewModel.cancelPendingToolAction() },
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(Color(0xFFEDEDED))
-        )
+        ) {
+            if (chat.backgroundUri.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(chat.backgroundUri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "聊天背景",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            ChatMessageShow(
+                messages = messages,
+                listState = listState,
+                isLoading = aiState is AiState.Loading,
+                aiConfigs = aiConfigs,
+                currentTypingAi = currentTypingAi,
+                userConfig = userConfig,
+                animatingMessageId = animatingMessageId,
+                onAnimationEnd = { animatingMessageId = null },
+                onAvatarClick = onAvatarClick,
+                onMessageLongPress = { messageToDelete = it },
+                isMultiSelectMode = isMultiSelectMode,
+                selectedMessages = selectedMessages,
+                onToggleSelect = { msg ->
+                    if (selectedMessages.contains(msg)) selectedMessages.remove(msg) else selectedMessages.add(msg)
+                },
+                onEnterMultiSelect = { msg ->
+                    isMultiSelectMode = true
+                    if (!selectedMessages.contains(msg)) selectedMessages.add(msg)
+                },
+                pendingToolUI = pendingToolUI,
+                onConfirmTool = { dontAsk -> viewModel.confirmPendingToolAction(dontAsk) },
+                onCancelTool = { viewModel.cancelPendingToolAction() },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(if (chat.backgroundUri.isEmpty()) Color(0xFFEDEDED) else Color.Transparent)
+            )
+        }
     }
 
     if (showMultiDeleteConfirm) {
@@ -297,6 +338,8 @@ fun ChatMessageShow(
     aiConfigs: List<AiChatConfig>,
     currentTypingAi: AiChatConfig?,
     userConfig: UserChatConfig,
+    animatingMessageId: Long? = null,
+    onAnimationEnd: () -> Unit = {},
     onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
     onMessageLongPress: (ChatMessage) -> Unit = {},
     isMultiSelectMode: Boolean = false,
@@ -353,7 +396,9 @@ fun ChatMessageShow(
                 onMultiSelect = { onEnterMultiSelect(message) },
                 isMultiSelectMode = isMultiSelectMode,
                 isSelected = isSelected,
-                onToggleSelect = { onToggleSelect(message) }
+                onToggleSelect = { onToggleSelect(message) },
+                isAnimating = (animatingMessageId == message.id),
+                onAnimationEnd = onAnimationEnd
             )
         }
 
@@ -506,22 +551,71 @@ fun ToolRequestBubble(
 }
 
 @Composable
-fun ExpandableMessageContent(content: String, textColor: Color = Color.Black) {
+fun ExpandableMessageContent(
+    content: String,
+    textColor: Color = Color.Black,
+    isAnimating: Boolean = false,
+    onAnimationEnd: () -> Unit = {}
+) {
     var isExpanded by remember { mutableStateOf(false) }
     var showExpandButton by remember { mutableStateOf(false) }
+    var animationCompleted by remember(content) { mutableStateOf(!isAnimating) }
 
-    Column(modifier = Modifier.animateContentSize()) {
-        Text(
-            text = content,
-            fontSize = 15.sp,
-            color = textColor,
-            maxLines = if (isExpanded) Int.MAX_VALUE else 15,
-            onTextLayout = { textLayoutResult ->
-                if (textLayoutResult.hasVisualOverflow) {
-                    showExpandButton = true
-                }
+    var displayedText by remember(isAnimating, content) {
+        mutableStateOf(if (isAnimating) "" else content)
+    }
+
+    LaunchedEffect(isAnimating, content) {
+        if (isAnimating) {
+            animationCompleted = false
+            showExpandButton = false
+            val length = content.length
+            val step = when {
+                length > 800 -> 12
+                length > 300 -> 6
+                length > 120 -> 3
+                else -> 1
             }
-        )
+            var index = 0
+            while (index < length) {
+                index = (index + step).coerceAtMost(length)
+                displayedText = content.substring(0, index)
+                delay(24)
+            }
+            displayedText = content
+            animationCompleted = true
+            onAnimationEnd()
+        } else {
+            displayedText = content
+            animationCompleted = true
+        }
+    }
+
+    val containerModifier = if (isAnimating && !animationCompleted) Modifier else Modifier.animateContentSize()
+
+    Column(modifier = containerModifier) {
+        if (!animationCompleted) {
+            Text(
+                text = displayedText,
+                fontSize = 15.sp,
+                color = textColor,
+                maxLines = if (isExpanded) Int.MAX_VALUE else 15
+            )
+        } else {
+            SelectionContainer {
+                Text(
+                    text = displayedText,
+                    fontSize = 15.sp,
+                    color = textColor,
+                    maxLines = if (isExpanded) Int.MAX_VALUE else 15,
+                    onTextLayout = { textLayoutResult ->
+                        if (textLayoutResult.hasVisualOverflow) {
+                            showExpandButton = true
+                        }
+                    }
+                )
+            }
+        }
         if (showExpandButton) {
             Text(
                 text = if (isExpanded) "收起" else "展开全文",
@@ -594,11 +688,20 @@ fun ChatBubble(
     onMultiSelect: () -> Unit = {},
     isMultiSelectMode: Boolean = false,
     isSelected: Boolean = false,
-    onToggleSelect: () -> Unit = {}
+    onToggleSelect: () -> Unit = {},
+    isAnimating: Boolean = false,
+    onAnimationEnd: () -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val focusManager = LocalFocusManager.current
+
+    DisposableEffect(Unit) {
+        onDispose {
+            focusManager.clearFocus()
+        }
+    }
 
     Row(
         modifier = Modifier
@@ -646,7 +749,7 @@ fun ChatBubble(
                                 .background(Color(0xFF95EC69), shape = RoundedCornerShape(8.dp))
                                 .padding(12.dp)
                         ) {
-                            ExpandableMessageContent(content = content, textColor = Color.Black)
+                            ExpandableMessageContent(content = content, textColor = Color.Black, isAnimating = false)
                         }
                         ChatMessageMenu(
                             expanded = showMenu,
@@ -724,7 +827,12 @@ fun ChatBubble(
                                 .background(Color.White, shape = RoundedCornerShape(8.dp))
                                 .padding(12.dp)
                         ) {
-                            ExpandableMessageContent(content = content, textColor = Color.Black)
+                            ExpandableMessageContent(
+                                content = content,
+                                textColor = Color.Black,
+                                isAnimating = isAnimating,
+                                onAnimationEnd = onAnimationEnd
+                            )
                         }
                         ChatMessageMenu(
                             expanded = showMenu,
@@ -776,8 +884,8 @@ fun DeleteIcon(onClick: () -> Unit, modifier: Modifier = Modifier) {
 
 @Composable
 fun TalkBottomBar(
-    inputText: String,
-    onInputChange: (String) -> Unit,
+    inputText: TextFieldValue,
+    onInputChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     onAddClick: () -> Unit,
     showExpandPanel: Boolean,
@@ -800,8 +908,8 @@ fun TalkBottomBar(
 
 @Composable
 fun TalkInputRow(
-    inputText: String,
-    onInputChange: (String) -> Unit,
+    inputText: TextFieldValue,
+    onInputChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     onAddClick: () -> Unit,
     onShowAiReply: () -> Unit
@@ -823,7 +931,7 @@ fun TalkInputRow(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (inputText.isEmpty()) {
+                    if (inputText.text.isEmpty()) {
                         Text("输入消息...", color = Color.Gray, fontSize = 16.sp)
                     }
                     innerTextField()
@@ -854,7 +962,7 @@ fun TalkInputRow(
             modifier = Modifier
                 .size(40.dp)
                 .background(
-                    if (inputText.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
+                    if (inputText.text.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
                     shape = RoundedCornerShape(6.dp)
                 )
         ) {

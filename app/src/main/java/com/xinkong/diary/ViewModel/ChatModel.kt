@@ -142,6 +142,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _currentTypingAi.value = config
 
                 val enabledTools = mutableSetOf<String>().apply {
+                    add("query_chat_history")
                     // 只有第一个 AI 才有笔记工具权限
                     if (config.id == firstAiId) {
                         if (config.enableReadNotes) add("read_notes")
@@ -273,6 +274,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         toolResult = formatted
                     )
                 }
+                is ToolTask.QueryChatHistory -> {
+                    val messages = chatDao.getMessagesOnce(batch.chatId)
+                    val matched = if (currentTask.keyword.isNotEmpty()) {
+                        messages.filter { it.content.contains(currentTask.keyword, ignoreCase = true) }
+                    } else messages
+                    
+                    val results = matched.takeLast(currentTask.limit)
+                    val resultText = if (results.isEmpty()) {
+                        val k = currentTask.keyword.ifEmpty { "任意" }
+                        "未找到包含关键词 '${k}' 的历史对话记录。"
+                    } else {
+                        results.joinToString("\n\n") { "(${it.date}) ${it.role}: ${it.content}" }
+                    }
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = currentTask.keyword,
+                        toolResult = resultText
+                    )
+                }
             }
             currentBatch = batch.copy(
                 completedResults = batch.completedResults + resultMessage,
@@ -322,7 +343,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val nextTask = batch.allTasks[batch.completedResults.size]
-        if (autoConfirmTools || nextTask is ToolTask.GetTagsAndFolders) {
+        if (autoConfirmTools || nextTask is ToolTask.GetTagsAndFolders || nextTask is ToolTask.QueryChatHistory) {
             confirmPendingToolAction(dontAskAgain = false)
         } else {
             // Show UI
@@ -359,7 +380,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val aiConfigs = chatDao.getAiConfigOnce(chatId)
 
         // 历史消息（此时已经包含了最新的用户消息或者其他 AI 的回复）
-        val history = chatDao.getMessagesOnce(chatId)
+        val history = chatDao.getMessagesOnce(chatId).takeLast(13)
         history.forEach { msg ->
             val isUserMessage = msg.role == userRole
             val isCurrentAiMessage =
@@ -475,10 +496,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             )
     
                             if (response.content.isNotBlank()) {
+                                var tempContent = response.content
+                                val aiNameTemp = config?.name ?: "AI"
+                                val prefixRegex = Regex("^(?:(?:(?i)${Regex.escape(aiNameTemp)})|(?i)ai)[:：]\\s*")
+                                while (prefixRegex.containsMatchIn(tempContent)) {
+                                    tempContent = tempContent.replaceFirst(prefixRegex, "").trimStart()
+                                }
+                                
                                 val aiMsg = ChatMessage(
                                     chatId = chatId,
                                     role = "assistant",
-                                    content = response.content,
+                                    content = tempContent,
                                     date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                                     toolExecutions = "[]", // 中间回复不展示工具执行记录，留到最终汇总
                                     aiId = config?.id
@@ -501,7 +529,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             return@fold
                         }
 
-                        val displayContent = response.content.ifBlank { "(空回复)" }
+                        var displayContent = response.content.ifBlank { "(空回复)" }
+                        val aiNameTemp = config?.name ?: "AI"
+                        val prefixRegex = Regex("^(?:(?:(?i)${Regex.escape(aiNameTemp)})|(?i)ai)[:：]\\s*")
+                        while (prefixRegex.containsMatchIn(displayContent)) {
+                            displayContent = displayContent.replaceFirst(prefixRegex, "").trimStart()
+                        }
+                        
                         val toolExecutionsStr = Json.encodeToString(executedTools)
                         val aiMsg = ChatMessage(
                             chatId = chatId,
@@ -569,6 +603,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             val tag = if (json.has("tag")) json.getString("tag") else null
                             tasks.add(ToolTask.EditNote(call, id, title, content, folder, tag))
                         }
+                    } catch (e: Exception) {}
+                }
+                call.type == "function" && call.functionName == "query_chat_history" && "query_chat_history" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val keyword = json.optString("keyword").trim()
+                        val limit = json.optInt("limit", 20).coerceIn(1, 50)
+                        tasks.add(ToolTask.QueryChatHistory(call, keyword, limit))
                     } catch (e: Exception) {}
                 }
                 call.type == "function" && call.functionName == "get_tags_and_folders" && "read_notes" in enabledTools -> {
@@ -647,6 +689,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _currentTypingAi.value = config
 
                     val enabledTools = mutableSetOf<String>().apply {
+                        add("query_chat_history")
                         if (config.id == firstAiId) {
                             if (config.enableReadNotes) add("read_notes")
                             if (config.enableWriteNote) add("write_note")

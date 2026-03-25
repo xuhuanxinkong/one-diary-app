@@ -13,7 +13,8 @@ data class Chat(
     val title: String ="",
     val date: String = "",
     val tag:String = "未分类",
-    val tagFolder: String = "我的笔记"
+    val tagFolder: String = "我的笔记",
+    val backgroundUri: String = ""
 )
 
 @Entity(
@@ -105,7 +106,8 @@ val ChatSaver = Saver<Chat, Map<String, Any>>(
             "title" to chat.title,
             "date" to chat.date,
             "tag" to chat.tag,
-            "tagFolder" to chat.tagFolder
+            "tagFolder" to chat.tagFolder,
+            "backgroundUri" to chat.backgroundUri
         )
     },
     restore = { map ->
@@ -114,7 +116,8 @@ val ChatSaver = Saver<Chat, Map<String, Any>>(
             title = map["title"] as String,
             date = map["date"] as String,
             tag = map["tag"] as String,
-            tagFolder = map["tagFolder"] as? String ?: "我的笔记"
+            tagFolder = map["tagFolder"] as? String ?: "我的笔记",
+            backgroundUri = map["backgroundUri"] as? String ?: ""
         )
     }
 )

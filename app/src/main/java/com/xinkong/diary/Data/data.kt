@@ -65,4 +65,13 @@ sealed interface ToolTask {
         override val title: String = "读取分类与标签"
         override val description = "AI 请求读取所有日记的分类与标签"
     }
+
+    data class QueryChatHistory(
+        override val toolCall: AiToolCall,
+        val keyword: String,
+        val limit: Int
+    ) : ToolTask {
+        override val title: String = "查询对话记录"
+        override val description: String = "AI 正在自动查询历史对话：$keyword"
+    }
 }

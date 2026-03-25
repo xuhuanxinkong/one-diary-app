@@ -113,6 +113,9 @@ fun DiaryApp() {
                         onTitleChange = { newTitle ->
                             chatViewModel.updateChat(it.copy(title = newTitle))
                         },
+                        onBackgroundChange = { backgroundUri ->
+                            chatViewModel.updateChat(it.copy(backgroundUri = backgroundUri))
+                        },
                         onAvatarClick = { role, aiId ->
                             navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId))
                         },

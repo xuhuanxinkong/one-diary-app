@@ -125,6 +125,30 @@ class AiHttp {
         })
     }
 
+    private val queryChatHistoryToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "query_chat_history")
+            put("description", "自动查询此对话中之前的历史记录（提供超长记忆上下文）。支持按关键词查询，获取由于限制未被带入当前的历史信息。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "要搜索的聊天记录关键词，可以为空字符串以获取最近的历史。")
+                    })
+                    put("limit", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "返回最多几条。")
+                        put("default", 20)
+                    })
+                })
+                put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
     /**
      * 发送对话请求（无状态，config 由调用方传入）
      * 群聊场景下，每个 AI 可传入各自的 config
@@ -224,6 +248,9 @@ class AiHttp {
             }
             if (enabledTools.contains("edit_note")) {
                 toolsArray.put(editNoteToolSchema)
+            }
+            if (enabledTools.contains("query_chat_history")) {
+                toolsArray.put(queryChatHistoryToolSchema)
             }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)

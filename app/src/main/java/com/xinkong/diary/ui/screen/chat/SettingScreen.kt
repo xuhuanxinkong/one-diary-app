@@ -1,5 +1,8 @@
 package com.xinkong.diary.ui.screen.chat
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -62,6 +65,7 @@ fun SettingScreen(
     chat: Chat,
     onBack: () -> Unit,
     onTitleChange: (String) -> Unit,
+    onBackgroundChange: (String) -> Unit,
     onAvatarClick: (String, Long?) -> Unit = {_, _ ->}
 ) {
     val chatViewModel: ChatViewModel = viewModel()
@@ -69,6 +73,12 @@ fun SettingScreen(
         .collectAsStateWithLifecycle(emptyList())
     val userConfig by chatViewModel.findUserConfig(chat.id)
         .collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
+
+    val backgroundPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.toString()?.let(onBackgroundChange)
+    }
 
 
 
@@ -107,6 +117,11 @@ fun SettingScreen(
                 EditableTitleRow(
                     title = chat.title,
                     onTitleChange = onTitleChange
+                )
+                Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                BackgroundSettingRow(
+                    hasBackground = chat.backgroundUri.isNotEmpty(),
+                    onClick = { backgroundPicker.launch("image/*") }
                 )
             }
         }
@@ -296,4 +311,27 @@ fun EditTitleDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
+}
+
+@Composable
+fun BackgroundSettingRow(
+    hasBackground: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .background(Color.White)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("自定义背景", fontSize = 16.sp)
+        Text(
+            text = if (hasBackground) "已设置 >" else ">",
+            fontSize = 16.sp,
+            color = Color.Gray
+        )
+    }
 }
