@@ -4,6 +4,7 @@ package com.xinkong.diary.Data
 sealed class AiState{
     object Idle: AiState()
     object Loading: AiState()
+    data class Streaming(val partialContent: String): AiState()
     data class Success(val result:String): AiState()
     data class Error(val message: String): AiState()
 }
@@ -13,6 +14,12 @@ sealed class AiResponse {
         val content: String,
         val toolCalls: List<AiToolCall>
     ) : AiResponse()
+
+    sealed class StreamChunk {
+        data class Content(val text: String) : StreamChunk()
+        data class ToolCalls(val toolCalls: List<AiToolCall>) : StreamChunk()
+        object End : StreamChunk()
+    }
 }
 
 data class AiToolCall(
@@ -40,7 +47,6 @@ sealed interface ToolTask {
         override val toolCall: AiToolCall,
         val noteTitle: String,
         val content: String,
-        val folder: String,
         val tag: String
     ) : ToolTask {
         override val title: String = "新增笔记：$noteTitle"
@@ -52,11 +58,10 @@ sealed interface ToolTask {
         val id: Long,
         val noteTitle: String?,
         val content: String?,
-        val folder: String?,
         val tag: String?
     ) : ToolTask {
-        override val title: String = "修改笔记 ID:$id"
-        override val description = "AI 请求修改你的笔记 (ID: $id)"
+        override val title: String = "修改笔记 ID:$id;标题：$noteTitle"
+        override val description = "AI 请求修改你的笔记 (ID: $id;标题：$noteTitle)"
     }
 
     data class GetTagsAndFolders(
@@ -69,9 +74,19 @@ sealed interface ToolTask {
     data class QueryChatHistory(
         override val toolCall: AiToolCall,
         val keyword: String,
-        val limit: Int
+        val limit: Int,
+        val startDate: String? = null,
+        val endDate: String? = null
     ) : ToolTask {
         override val title: String = "查询对话记录"
         override val description: String = "AI 正在自动查询历史对话：$keyword"
+    }
+
+    data class WebSearchBaidu(
+        override val toolCall: AiToolCall,
+        val keyword: String
+    ) : ToolTask {
+        override val title: String = "网络搜索：$keyword"
+        override val description: String = "AI 请求通过百度智能云进行网络搜索：$keyword"
     }
 }

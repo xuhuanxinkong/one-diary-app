@@ -107,6 +107,7 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
     var enableReadNotes by remember(config.enableReadNotes) { mutableStateOf(config.enableReadNotes) }
     var enableWriteNote by remember(config.enableWriteNote) { mutableStateOf(config.enableWriteNote) }
     var enableEditNote by remember(config.enableEditNote) { mutableStateOf(config.enableEditNote) }
+    var enableStream by remember(config.enableStream) { mutableStateOf(config.enableStream) } // 流式开关
     var isEditingName by remember { mutableStateOf(false) }
     var tempName by remember(config.name) { mutableStateOf(config.name) }
 
@@ -258,6 +259,57 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
+                                "开启真流式回答",
+                                fontSize = 14.sp,
+                                color = Color.DarkGray,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = enableStream,
+                                onCheckedChange = { checked ->
+                                    enableStream = checked
+                                    chatViewModel.updateAiConfig(
+                                        config.copy(enableStream = checked)
+                                    )
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaterialTheme.diaryColors.primary
+                                )
+                            )
+                        }
+
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("开启网页搜索",
+                                    fontSize = 14.sp,
+                                    color = Color.DarkGray,
+                                    modifier = Modifier.weight(1f))
+                                Switch(
+                                    checked = config.enableWebSearch,
+                                    onCheckedChange = { chatViewModel.updateAiConfig(config.copy(enableWebSearch = it)) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = MaterialTheme.diaryColors.primary
+                                    )
+                                )
+                            }
+
+
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
                                 "允许AI新增本地笔记",
                                 fontSize = 14.sp,
                                 color = Color.DarkGray,
@@ -313,7 +365,7 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
         }
 
     }
-}
+
 
 
 @Composable

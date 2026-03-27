@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xinkong.diary.Http.AiHttp
+import kotlinx.coroutines.flow.collect
 import com.xinkong.diary.Data.AiResponse
 import com.xinkong.diary.Data.AiState
 import com.xinkong.diary.Data.AiToolCall
@@ -22,10 +23,15 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import org.json.JSONObject
+import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Date
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    companion object {
+        private const val TAG = "ChatViewModel"
+    }
+
     private val db = AppDatabase.getDatabase(application)
     private val chatDao = db.chatDao()
     private val diaryDao = db.diaryDao()
@@ -52,6 +58,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val pendingToolUI: StateFlow<PendingToolUIState?> = _pendingToolUI.asStateFlow()
 
     private var autoConfirmTools = false
+
+    var aiCurrentFolder: String = "我的笔记"
 
     private val userRole = "user"
     private val assistantRole = "assistant"
@@ -81,7 +89,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // ========== 对话 CRUD ==========
 
-    fun addChat(title: String, tag: String, tagFolder: String): Chat {
+    fun addChat(title: String, tag: String, tagFolder: String = "我的笔记"): Chat {
         val chat = Chat(
             title = title,
             date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
@@ -118,18 +126,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * 发送消息并调用 AI
      * 自动从 DB 读取该对话的 AI 配置、历史消息和上下文
      */
-    fun sendMessage(chatId: Long, content: String, selectedAIs: List<AiChatConfig>) {
+    fun sendMessage(chatId: Long, content: String, selectedAIs: List<AiChatConfig>, imageBase64: String? = null, imageUriString: String? = null) {
         if (selectedAIs.isEmpty()) return
         viewModelScope.launch {
             autoConfirmTools = false
             saveReplySelection(chatId, selectedAIs)
             
             // 1. 保存用户消息
+            val photoUris = if (imageUriString != null) Json.encodeToString(listOf(imageUriString)) else "[]"
             val userMsg = ChatMessage(
                 chatId = chatId,
                 role = "user",
                 content = content,
-                date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date())
+                date = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(Date()),
+                photoUris = photoUris
             )
             chatDao.insertMessage(userMsg)
 
@@ -142,23 +152,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _currentTypingAi.value = config
 
                 val enabledTools = mutableSetOf<String>().apply {
-                    add("query_chat_history")
-                    // 只有第一个 AI 才有笔记工具权限
-                    if (config.id == firstAiId) {
-                        if (config.enableReadNotes) add("read_notes")
-                        if (config.enableWriteNote) add("write_note")
-                        if (config.enableEditNote) add("edit_note")
+                    if (!config.enableStream) {
+                        add("query_chat_history")
+                        if (config.enableWebSearch) add("web_search_baidu")
+                        if (config.enableImageSupport) add("image_recognition")
+                        // 只有第一个 AI 才有笔记工具权限
+                        if (config.id == firstAiId) {
+                            if (config.enableReadNotes) add("read_notes")
+                            if (config.enableWriteNote) add("write_note")
+                            if (config.enableEditNote) add("edit_note")
+                        }
                     }
                 }
 
                 // 构加上当前最新上下文，每个 AI 都能看见前面 AI 发送的消息
-                val messages = buildContextMessages(chatId, config, enabledTools)
-                val result = try {
-                    if (config.baseUrl.isBlank()) throw Exception("AI请求地址未配置或无效")
-                    aiHttp.chatWithAi(config, messages, enabledTools)
-                } catch (e: Exception) {
-                    Result.failure(e)
+                val messages = buildContextMessages(chatId, config, enabledTools).toMutableList()
+                
+                // 若携带图片，替换最近一条用户消息为多模态 content（text + image_url）
+                if (imageBase64 != null && config.enableImageSupport && messages.isNotEmpty()) {
+                    val userMsgIndex = messages.indexOfLast { it["role"] == userRole }
+                    if (userMsgIndex >= 0) {
+                        val current = messages[userMsgIndex].toMutableMap()
+                        val textContent = (current["content"] as? String)?.ifBlank { "请识别这张图片。" }
+                            ?: "请识别这张图片。"
+                        current["content"] = listOf(
+                            mapOf("type" to "text", "text" to textContent),
+                            mapOf("type" to "image_url", "image_url" to mapOf("url" to "data:image/jpeg;base64,$imageBase64"))
+                        )
+                        messages[userMsgIndex] = current
+                    }
                 }
+
+                val result = requestAiResponse(config, messages, enabledTools)
                 
                 // 处理并保证入库完成，再走下一个循环
                 handleAiResponse(chatId, result, messages, enabledTools, config = config)
@@ -206,6 +231,77 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return aiHttp.getModels(baseUrl, apiKey)
     }
 
+    private fun buildStreamingDisplayContent(fullContent: String, config: AiChatConfig): String {
+        val aiNameTemp = config.name
+        val prefixRegex = Regex("^(?:(?:(?i)${Regex.escape(aiNameTemp)})|(?i)ai)[:：]\\s*")
+        var displayContent = fullContent
+        while (prefixRegex.containsMatchIn(displayContent)) {
+            displayContent = displayContent.replaceFirst(prefixRegex, "")
+        }
+        return displayContent
+    }
+
+    private suspend fun requestAiResponse(
+        config: AiChatConfig,
+        messages: List<Map<String, Any>>,
+        enabledTools: Set<String>
+    ): Result<AiResponse> {
+        if (config.baseUrl.isBlank()) return Result.failure(Exception("AI请求地址未配置或无效"))
+        if (!config.enableStream) {
+            Log.d(TAG, "requestAiResponse: stream disabled, use non-stream directly")
+            return aiHttp.chatWithAi(config, messages, enabledTools)
+        }
+
+        var fullContent = ""
+        var capturedToolCalls = listOf<AiToolCall>()
+        var chunkCount = 0
+
+        return try {
+            Log.d(TAG, "requestAiResponse: start stream request, enabledTools=$enabledTools")
+            aiHttp.chatWithAiStream(config, messages, enabledTools).collect { chunk ->
+                chunkCount++
+                when (chunk) {
+                    is AiResponse.StreamChunk.Content -> {
+                        if (chunk.text.isNotEmpty()) {
+                            fullContent += chunk.text
+                            _aiState.value = AiState.Streaming(buildStreamingDisplayContent(fullContent, config))
+                        }
+                    }
+                    is AiResponse.StreamChunk.ToolCalls -> {
+                        capturedToolCalls = chunk.toolCalls
+                    }
+                    AiResponse.StreamChunk.End -> {}
+                }
+            }
+            Log.d(
+                TAG,
+                "requestAiResponse: stream finished, chunks=$chunkCount, contentLen=${fullContent.length}, toolCalls=${capturedToolCalls.size}"
+            )
+            if (fullContent.isBlank() && capturedToolCalls.isEmpty()) {
+                // Some providers ignore stream mode and return non-SSE payload; fallback in that case.
+                Log.w(TAG, "requestAiResponse: stream yielded no content/toolCalls, fallback to non-stream")
+                aiHttp.chatWithAi(config, messages, enabledTools)
+            } else {
+                Log.d(TAG, "requestAiResponse: use stream result directly")
+                Result.success(AiResponse.Message(content = fullContent, toolCalls = capturedToolCalls))
+            }
+        } catch (e: Exception) {
+            // If we already got stream chunks, prefer partial stream result and avoid duplicate requests.
+            if (fullContent.isNotBlank() || capturedToolCalls.isNotEmpty()) {
+                Log.w(
+                    TAG,
+                    "stream ended with exception but has partial result, use partial stream output: ${e.message}",
+                    e
+                )
+                Result.success(AiResponse.Message(content = fullContent, toolCalls = capturedToolCalls))
+            } else {
+                // Some providers fail on stream mode or tool+stream combinations; fallback improves reliability.
+                Log.e(TAG, "stream request failed, fallback to non-stream: ${e.message}", e)
+                aiHttp.chatWithAi(config, messages, enabledTools)
+            }
+        }
+    }
+
     fun confirmPendingToolAction(dontAskAgain: Boolean = false) {
         if (dontAskAgain) autoConfirmTools = true
         _pendingToolUI.value = null
@@ -216,6 +312,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val resultMessage = when (currentTask) {
                 is ToolTask.ReadNotes -> {
                     val diaries = diaryDao.searchByKeyword(currentTask.keyword, currentTask.limit)
+                        .filter { it.tagFolder == aiCurrentFolder }
                     buildToolResultMessage(
                         toolName = currentTask.toolCall.functionName,
                         toolCallId = currentTask.toolCall.id,
@@ -230,7 +327,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         content = currentTask.content,
                         date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                         tag = currentTask.tag,
-                        tagFolder = currentTask.folder
+                        tagFolder = aiCurrentFolder
                     )
                     diaryDao.insert(newDiary)
                     buildToolResultMessage(
@@ -246,7 +343,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val updated = existing.copy(
                             title = currentTask.noteTitle ?: existing.title,
                             content = currentTask.content ?: existing.content,
-                            tagFolder = currentTask.folder ?: existing.tagFolder,
                             tag = currentTask.tag ?: existing.tag
                         )
                         diaryDao.update(updated)
@@ -276,14 +372,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is ToolTask.QueryChatHistory -> {
                     val messages = chatDao.getMessagesOnce(batch.chatId)
+                    val format = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                    val startTimeDate = currentTask.startDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
+                    val endTimeDate = currentTask.endDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
+                    
+                    val timeFiltered = messages.filter { msg ->
+                        try {
+                            val msgDate = format.parse(msg.date)
+                            val passStart = startTimeDate == null || msgDate == null || !msgDate.before(startTimeDate)
+                            val passEnd = endTimeDate == null || msgDate == null || !msgDate.after(endTimeDate)
+                            passStart && passEnd
+                        } catch (e: Exception) {
+                            true
+                        }
+                    }
+                    
                     val matched = if (currentTask.keyword.isNotEmpty()) {
-                        messages.filter { it.content.contains(currentTask.keyword, ignoreCase = true) }
-                    } else messages
+                        timeFiltered.filter { it.content.contains(currentTask.keyword, ignoreCase = true) }
+                    } else timeFiltered
                     
                     val results = matched.takeLast(currentTask.limit)
                     val resultText = if (results.isEmpty()) {
                         val k = currentTask.keyword.ifEmpty { "任意" }
-                        "未找到包含关键词 '${k}' 的历史对话记录。"
+                        "未找到符合条件(时间和关键词 '${k}') 的历史对话记录。"
                     } else {
                         results.joinToString("\n\n") { "(${it.date}) ${it.role}: ${it.content}" }
                     }
@@ -292,6 +403,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         toolCallId = currentTask.toolCall.id,
                         keyword = currentTask.keyword,
                         toolResult = resultText
+                    )
+                }
+                is ToolTask.WebSearchBaidu -> {
+                    val prefs = getApplication<Application>().getSharedPreferences("api_keys", android.content.Context.MODE_PRIVATE)
+                    val apiKey = prefs.getString("baidu_api_key", "") ?: ""
+                    
+                    val res = if (apiKey.isEmpty()) {
+                        Result.success("说明：由于用户未配置百度千帆大模型API Key，联网搜索请求失败。")
+                    } else {
+                        aiHttp.performBaiduWebSearch(currentTask.keyword, apiKey)
+                    }
+                    
+                    val resultStr = res.getOrElse { "搜索出错: ${it.message}" }
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = currentTask.keyword,
+                        toolResult = "网络搜索结果：\n$resultStr"
                     )
                 }
             }
@@ -329,7 +458,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             currentBatch = null
             _aiState.value = AiState.Loading
             viewModelScope.launch {
-                val result = aiHttp.chatWithAi(batch.aiConfig, finalMessages, batch.enabledTools)
+                val result = requestAiResponse(batch.aiConfig, finalMessages, batch.enabledTools)
+
                 handleAiResponse(
                     chatId = batch.chatId, 
                     result = result, 
@@ -343,7 +473,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val nextTask = batch.allTasks[batch.completedResults.size]
-        if (autoConfirmTools || nextTask is ToolTask.GetTagsAndFolders || nextTask is ToolTask.QueryChatHistory) {
+        if (autoConfirmTools || nextTask is ToolTask.GetTagsAndFolders || nextTask is ToolTask.QueryChatHistory || nextTask is ToolTask.ReadNotes) {
             confirmPendingToolAction(dontAskAgain = false)
         } else {
             // Show UI
@@ -400,8 +530,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 userRole
             }
             
-            // 将每条消息格式化为 $name: message 的形式
-            val formattedContent = "${senderName}: ${msg.content}"
+            // 将每条消息格式化为 [时间] $name: message 的形式
+            val formattedContent = "[时间: ${msg.date}] ${senderName}: ${msg.content}"
             messages.add(mapOf("role" to actualRole, "content" to formattedContent))
         }
 
@@ -439,9 +569,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             chatDao.getUserConfigOnce(chatId)?.referencedDiaryId
         )
         val aiContext = buildContextFromConfig(currentAiConfig.referencedDiaryId)
+        val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())
         
         return buildString {
-            append("你现在的身份是：${currentAiConfig.name}。在接下来的对话记录中，所有发送的消息会以“发送者名称: 消息内容”的格式提供，请根据此多角色群聊记录进行回复。请严格用你的身份做出对应的反应，不要扮演其他角色。\n\n")
+            append("当前系统时间：$currentTime\n")
+            append("你现在的身份是：${currentAiConfig.name}。在接下来的对话记录中，所有发送的消息会以“发送者名称: 消息内容”的格式提供，如果消息带有[时间:xxx]标识，代表该消息发送的时间。请根据此多角色群聊记录进行回复。请严格用你的身份做出对应的反应，不要扮演其他角色。\n\n")
             if (userContext.isNotEmpty()) append("【用户资料】\n$userContext\n\n")
             if (aiContext.isNotEmpty()) append("【你的背景资料】\n$aiContext\n\n")
             if ("read_notes" in enabledTools) {
@@ -585,10 +717,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val json = JSONObject(call.arguments)
                         val title = json.optString("title").trim()
                         val content = json.optString("content").trim()
-                        val folder = json.optString("folder", "我的笔记").trim()
                         val tag = json.optString("tag", "未分类").trim()
                         if (title.isNotEmpty() && content.isNotEmpty()) {
-                            tasks.add(ToolTask.WriteNote(call, title, content, folder, tag))
+                            tasks.add(ToolTask.WriteNote(call, title, content, tag))
                         }
                     } catch (e: Exception) {}
                 }
@@ -599,9 +730,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             val id = json.getLong("id")
                             val title = if (json.has("title")) json.getString("title") else null
                             val content = if (json.has("content")) json.getString("content") else null
-                            val folder = if (json.has("folder")) json.getString("folder") else null
                             val tag = if (json.has("tag")) json.getString("tag") else null
-                            tasks.add(ToolTask.EditNote(call, id, title, content, folder, tag))
+                            tasks.add(ToolTask.EditNote(call, id, title, content, tag))
                         }
                     } catch (e: Exception) {}
                 }
@@ -610,7 +740,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val json = JSONObject(call.arguments)
                         val keyword = json.optString("keyword").trim()
                         val limit = json.optInt("limit", 20).coerceIn(1, 50)
-                        tasks.add(ToolTask.QueryChatHistory(call, keyword, limit))
+                        val startDate = json.optString("startDate").takeIf { it.isNotBlank() }
+                        val endDate = json.optString("endDate").takeIf { it.isNotBlank() }
+                        tasks.add(ToolTask.QueryChatHistory(call, keyword, limit, startDate, endDate))
+                    } catch (e: Exception) {}
+                }
+                call.type == "function" && call.functionName == "web_search_baidu" && "web_search_baidu" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val keyword = json.optString("keyword").trim()
+                        if (keyword.isNotEmpty()) {
+                            tasks.add(ToolTask.WebSearchBaidu(call, keyword))
+                        }
                     } catch (e: Exception) {}
                 }
                 call.type == "function" && call.functionName == "get_tags_and_folders" && "read_notes" in enabledTools -> {
@@ -644,7 +785,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return "未找到匹配笔记。"
         }
         return diaries.joinToString("\n\n") { diary ->
-            "[id=${diary.id}] ${diary.title}\n${diary.text.ifEmpty { diary.content }}"
+            "[id=${diary.id}] 标题：${diary.title}\n时间：${diary.date}\n标签：${diary.tag}\n正文：\n${diary.text.ifEmpty { diary.content }}"
         }
     }
 
@@ -689,20 +830,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _currentTypingAi.value = config
 
                     val enabledTools = mutableSetOf<String>().apply {
-                        add("query_chat_history")
-                        if (config.id == firstAiId) {
-                            if (config.enableReadNotes) add("read_notes")
-                            if (config.enableWriteNote) add("write_note")
-                            if (config.enableEditNote) add("edit_note")
+                        if (!config.enableStream) {
+                            add("query_chat_history")
+                            add("web_search_baidu")
+                            if (config.id == firstAiId) {
+                                if (config.enableReadNotes) add("read_notes")
+                                if (config.enableWriteNote) add("write_note")
+                                if (config.enableEditNote) add("edit_note")
+                            }
                         }
                     }
                     val messages = buildContextMessages(chatId, config, enabledTools)
-                    val result = try {
-                        if (config.baseUrl.isBlank()) throw Exception("AI请求地址未配置或无效")
-                        aiHttp.chatWithAi(config, messages, enabledTools)
-                    } catch (e: Exception) {
-                        Result.failure(e)
-                    }
+                    val result = requestAiResponse(config, messages, enabledTools)
                     // TODO: 若需要等待工具调用完全结束，此处可能要调整为观察状态
                     handleAiResponse(chatId, result, messages, enabledTools, config = config)
                     _currentTypingAi.value = null

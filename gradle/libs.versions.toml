@@ -15,6 +15,7 @@ nav3 = "1.0.1"
 serialization = "2.2.20"
 serialization-json = "1.7.3"
 material-icons-extended = "1.6.8"
+richEditor = "1.0.0-rc13"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

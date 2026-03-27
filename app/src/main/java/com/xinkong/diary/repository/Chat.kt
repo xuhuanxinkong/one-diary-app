@@ -36,6 +36,7 @@ data class ChatMessage(
     val role: String,
     val content: String,
     val date: String,
+    val photoUris: String = "[]", // To store local file paths of images
     val toolExecutions: String = "[]", // JSON string of List<String>
     val aiId: Long? = null // 用于记录是哪个 AI 发送的消息
 )
@@ -65,6 +66,9 @@ data class AiChatConfig(
     val enableReadNotes: Boolean = true,
     val enableWriteNote: Boolean = false,
     val enableEditNote: Boolean = false,
+    val enableStream: Boolean = true,
+    val enableImageSupport: Boolean = false,
+    val enableWebSearch: Boolean = false, // Add web search config
     val isEnabled: Boolean = true,
     val replyOrder: Int = 0
 )

@@ -708,7 +708,8 @@ fun MoveToCategoryDialog(
     isDiary: Boolean,
     diaryList: List<Diary> = emptyList(),
     chatList: List<Chat> = emptyList(),
-    onTagSelected: (Pair<String, String>) -> Unit,
+    onDiaryTagSelected: (Pair<String, String>) -> Unit = {},
+    onChatTagSelected: (String) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -733,7 +734,7 @@ fun MoveToCategoryDialog(
             if (isDiary) {
                 TagList(
                     contentList = diaryList,
-                    onTagSelect = { onTagSelected(it) },
+                    onTagSelect = { onDiaryTagSelected(it) },
                     displayConfig = TagListDisplayConfig(
                         showManageAction = false,
                         showAddAction = false,
@@ -744,7 +745,7 @@ fun MoveToCategoryDialog(
             } else {
                 ChatTagList(
                     chatList = chatList,
-                    onTagSelect = { onTagSelected(it) },
+                    onTagSelect = { onChatTagSelected(it) },
                     displayConfig = TagListDisplayConfig(
                         showManageAction = false,
                         showAddAction = false,

@@ -5,6 +5,9 @@ import com.xinkong.diary.Data.AiResponse
 import com.xinkong.diary.Data.AiToolCall
 import com.xinkong.diary.repository.AiChatConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -12,13 +15,18 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import android.util.Log
 
 class AiHttp {
+    companion object {
+        private const val TAG = "AiHttp"
+    }
+
     // 可自定义超时时长（如 60 秒）
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(180, java.util.concurrent.TimeUnit.SECONDS)
         .build()
     private val mediaType = "application/json".toMediaType()
     private val readNotesToolSchema = JSONObject().apply {
@@ -62,16 +70,12 @@ class AiHttp {
                         put("type", "string")
                         put("description", "笔记内容")
                     })
-                    put("folder", JSONObject().apply {
-                        put("type", "string")
-                        put("description", "存放文件夹，如：我的笔记")
-                    })
                     put("tag", JSONObject().apply {
                         put("type", "string")
                         put("description", "笔记标签，如：未分类")
                     })
                 })
-                put("required", JSONArray().put("title").put("content").put("folder").put("tag"))
+                put("required", JSONArray().put("title").put("content").put("tag"))
                 put("additionalProperties", false)
             })
         })
@@ -96,10 +100,6 @@ class AiHttp {
                     put("content", JSONObject().apply {
                         put("type", "string")
                         put("description", "修改后的内容")
-                    })
-                    put("folder", JSONObject().apply {
-                        put("type", "string")
-                        put("description", "修改后的文件夹")
                     })
                     put("tag", JSONObject().apply {
                         put("type", "string")
@@ -142,6 +142,33 @@ class AiHttp {
                         put("description", "返回最多几条。")
                         put("default", 20)
                     })
+                    put("startDate", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "指定时间范围的开始日期，格式如 'yyyy-MM-dd HH:mm'")
+                    })
+                    put("endDate", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "指定时间范围的结束日期，格式如 'yyyy-MM-dd HH:mm'")
+                    })
+                })
+                put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val webSearchBaiduToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "web_search_baidu")
+            put("description", "使用百度智能云进行搜索，获取最新的网页信息。当你需要了解超出训练数据截止日期的事情、实时动态或检索具体资料时使用。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "要搜索的关键词")
+                    })
                 })
                 put("required", JSONArray().put("keyword"))
                 put("additionalProperties", false)
@@ -161,7 +188,11 @@ class AiHttp {
         return withContext(Dispatchers.IO) {
             try {
                 val chatUrl = resolveCompletionsUrl(config.baseUrl)
+                val requestPayload = buildRequestJson(config.model, messages, enabledTools)
                 val body = buildRequestBody(config.model, messages, enabledTools)
+
+                Log.d(TAG, "[chatWithAi] url=$chatUrl, model=${config.model}, stream=false, messages=$messages, enabledTools=$enabledTools")
+                Log.d(TAG, "[chatWithAi] request payload: $requestPayload")
 
                 val requestBuilder = Request.Builder()
                     .url(chatUrl)
@@ -174,7 +205,8 @@ class AiHttp {
 
                 val response = client.newCall(requestBuilder.build()).execute()
                 val responseBody = response.body?.string() ?: ""
-                
+                Log.d(TAG, "[chatWithAi] response code=${response.code}, body=$responseBody")
+
                 if (response.isSuccessful) {
                     val json = JSONObject(responseBody)
                     val choicesArray = json.optJSONArray("choices")
@@ -201,6 +233,101 @@ class AiHttp {
             }
         }
     }
+
+    suspend fun chatWithAiStream(
+        config: AiChatConfig,
+        messages: List<Map<String, Any>>,
+        enabledTools: Set<String> = emptySet()
+    ): Flow<AiResponse.StreamChunk> = flow {
+        val chatUrl = resolveCompletionsUrl(config.baseUrl)
+        val requestPayload = buildRequestJson(config.model, messages, enabledTools, isStream = true)
+        val body = buildRequestBody(config.model, messages, enabledTools, isStream = true)
+
+        Log.d(TAG, "[chatWithAiStream] url=$chatUrl, model=${config.model}, stream=true, messages=$messages, enabledTools=$enabledTools")
+        Log.d(TAG, "[chatWithAiStream] request payload: $requestPayload")
+
+        val requestBuilder = Request.Builder()
+            .url(chatUrl)
+            .post(body)
+            .header("Content-Type", "application/json")
+
+        if (config.apiKey.isNotEmpty()) {
+            requestBuilder.header("Authorization", "Bearer ${config.apiKey}")
+        }
+
+        val request = requestBuilder.build()
+
+        client.newCall(request).execute().use { response ->
+            Log.d(TAG, "[chatWithAiStream] response code=${response.code}")
+            if (!response.isSuccessful) {
+                val errBody = response.body?.string() ?: ""
+                Log.e(TAG, "[chatWithAiStream] error body: $errBody")
+                throw IOException("请求失败 ${response.code}：$errBody")
+            }
+
+            val reader = response.body?.source()?.inputStream()?.bufferedReader()
+            val toolCallsBuffer = mutableMapOf<Int, JSONObject>()
+
+            reader?.use { br ->
+                var line: String?
+                while (br.readLine().also { line = it } != null) {
+                    Log.v(TAG, "[chatWithAiStream] SSE line: $line")
+                    if (line!!.startsWith("data:")) {
+                        val data = line!!.removePrefix("data:").trim()
+                        if (data == "[DONE]") break
+
+                        try {
+                            val json = JSONObject(data)
+                            val choicesArray = json.optJSONArray("choices") ?: continue
+                            if (choicesArray.length() == 0) continue
+                            val delta = choicesArray.getJSONObject(0).optJSONObject("delta") ?: continue
+
+                            // 1. Text Content
+                            if (delta.has("content") && !delta.isNull("content")) {
+                                emit(AiResponse.StreamChunk.Content(delta.optString("content", "")))
+                            }
+
+                            // 2. Tool Calls
+                            if (delta.has("tool_calls")) {
+                                val tcArray = delta.getJSONArray("tool_calls")
+                                for (i in 0 until tcArray.length()) {
+                                    val tc = tcArray.getJSONObject(i)
+                                    val index = tc.optInt("index")
+                                    val existing = toolCallsBuffer.getOrPut(index) { JSONObject() }
+
+                                    if (tc.has("id")) existing.put("id", tc.getString("id"))
+                                    if (tc.has("type")) existing.put("type", tc.getString("type"))
+                                    if (tc.has("function")) {
+                                        val func = tc.getJSONObject("function")
+                                        val existingFunc = if (existing.has("function")) {
+                                            existing.getJSONObject("function")
+                                        } else {
+                                            JSONObject().also { existing.put("function", it) }
+                                        }
+                                        if (func.has("name")) existingFunc.put("name", func.getString("name"))
+                                        if (func.has("arguments")) {
+                                            val currentArgs = existingFunc.optString("arguments", "")
+                                            existingFunc.put("arguments", currentArgs + func.getString("arguments"))
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "[chatWithAiStream] SSE parse error: ${e.message}")
+                        }
+                    }
+                }
+            }
+
+            if (toolCallsBuffer.isNotEmpty()) {
+                val finalToolCalls = JSONArray()
+                toolCallsBuffer.keys.sorted().forEach { finalToolCalls.put(toolCallsBuffer[it]) }
+                emit(AiResponse.StreamChunk.ToolCalls(parseToolCalls(finalToolCalls)))
+            }
+
+            emit(AiResponse.StreamChunk.End)
+        }
+    }.flowOn(Dispatchers.IO)
 
     suspend fun getModels(baseUrl: String, apiKey: String): Result<List<String>> {
         return withContext(Dispatchers.IO) {
@@ -232,10 +359,56 @@ class AiHttp {
         }
     }
 
+    suspend fun performBaiduWebSearch(keyword: String, apiKey: String): Result<String> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val url = "https://qianfan.baidubce.com/v2/ai_search/web_search"
+                
+                val reqJson = JSONObject().apply {
+                    put("messages", JSONArray().put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", keyword)
+                    }))
+                    put("search_source", "baidu_search_v2")
+                    put("resource_type_filter", JSONArray().put(JSONObject().apply {
+                        put("type", "web")
+                        put("top_k", 20)
+                    }))
+                    put("search_recency_filter", "year")
+                }
+                
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Authorization", "Bearer $apiKey")
+                    .post(reqJson.toString().toRequestBody(mediaType))
+                    .build()
+                    
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val respJson = JSONObject(response.body?.string() ?: "")
+                    val content = respJson.optJSONArray("choices")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("message")
+                        ?.optString("content", "未返回结果")
+                    Result.success(content ?: "未返回结果")
+                } else {
+                    Result.failure(IOException("搜索请求失败: ${response.code}"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
     // ---- 私有工具方法 ----
 
-    private fun buildRequestBody(model: String, messages: List<Map<String, Any>>, enabledTools: Set<String>): RequestBody {
-        val json = JSONObject().apply {
+    private fun buildRequestJson(
+        model: String,
+        messages: List<Map<String, Any>>,
+        enabledTools: Set<String>,
+        isStream: Boolean = false
+    ): JSONObject {
+        return JSONObject().apply {
             put("model", model)
             put("messages", JSONObject.wrap(messages))
             val toolsArray = JSONArray()
@@ -252,12 +425,19 @@ class AiHttp {
             if (enabledTools.contains("query_chat_history")) {
                 toolsArray.put(queryChatHistoryToolSchema)
             }
+            if (enabledTools.contains("web_search_baidu")) {
+                toolsArray.put(webSearchBaiduToolSchema)
+            }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)
                 put("tool_choice", "auto")
             }
-            put("stream", false)
+            put("stream", isStream)
         }
+    }
+
+    private fun buildRequestBody(model: String, messages: List<Map<String, Any>>, enabledTools: Set<String>, isStream: Boolean = false): RequestBody {
+        val json = buildRequestJson(model, messages, enabledTools, isStream)
         return json.toString().toRequestBody(mediaType)
     }
 

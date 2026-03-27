@@ -157,8 +157,11 @@ fun TagList(
         tagModel.buildDiaryGroupedTags(contentList)
     }
 
-    val groupedTags = remember(groupedResult) {
-        groupedResult.groupedTags.mapValues { (_, items) ->
+    val diaryModel: DiaryViewModel = viewModel()
+    val currentFolder by diaryModel.currentFolder.collectAsStateWithLifecycle()
+
+    val groupedTags = remember(groupedResult, currentFolder) {
+        groupedResult.groupedTags.filterKeys { it == currentFolder }.mapValues { (_, items) ->
             items.map { it.toTagUi() }
         }
     }
@@ -166,7 +169,6 @@ fun TagList(
     var isTagAdd by remember { mutableStateOf(false) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedTags by remember { mutableStateOf(setOf<Pair<String, String>>()) }
-    val diaryModel: DiaryViewModel = viewModel()
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             val selectedDiaries = contentList.filter { (it.tagFolder to it.tag) in selectedTags }
@@ -266,23 +268,6 @@ fun TagList(
                     }
                 }
             )
-
-            if (groupedResult.hiddenItemCount > 0) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "有 ${groupedResult.hiddenItemCount} 个文件已隐藏",
-                            fontSize = 12.sp,
-                            color = Color.Gray
-                        )
-                    }
-                }
-            }
         }
 
         if (displayConfig.showAddAction && !isSelectionMode) {
@@ -380,6 +365,7 @@ fun TagAdd(
     initialFolder: String = "我的笔记",
     availableFolders: List<String> = listOf("我的笔记"),
     isEditMode: Boolean = false,
+    showFolderSelection: Boolean = true,
     onDismiss: () -> Unit,
     onConfirm: (String, Color, Color, Color, String) -> Unit,
     onDelete: (() -> Unit)? = null
@@ -450,32 +436,34 @@ fun TagAdd(
 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // Folder drop down
-                ExposedDropdownMenuBox(
-                    expanded = folderDropdownExpanded,
-                    onExpandedChange = { folderDropdownExpanded = !folderDropdownExpanded },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    OutlinedTextField(
-                        value = selectedFolder,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("所属文件夹") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = folderDropdownExpanded) },
-                        modifier = Modifier.menuAnchor()
-                    )
-                    ExposedDropdownMenu(
+                if (showFolderSelection) {
+                    // Folder drop down
+                    ExposedDropdownMenuBox(
                         expanded = folderDropdownExpanded,
-                        onDismissRequest = { folderDropdownExpanded = false }
+                        onExpandedChange = { folderDropdownExpanded = !folderDropdownExpanded },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        availableFolders.forEach { folder ->
-                            DropdownMenuItem(
-                                text = { Text(folder) },
-                                onClick = {
-                                    selectedFolder = folder
-                                    folderDropdownExpanded = false
-                                }
-                            )
+                        OutlinedTextField(
+                            value = selectedFolder,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("所属文件夹") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = folderDropdownExpanded) },
+                            modifier = Modifier.menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = folderDropdownExpanded,
+                            onDismissRequest = { folderDropdownExpanded = false }
+                        ) {
+                            availableFolders.forEach { folder ->
+                                DropdownMenuItem(
+                                    text = { Text(folder) },
+                                    onClick = {
+                                        selectedFolder = folder
+                                        folderDropdownExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }

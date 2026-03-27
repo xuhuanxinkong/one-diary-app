@@ -10,11 +10,10 @@
             box-sizing: border-box;
         }
         body {
-            /*padding: 10px;*/
-            background-color: #f0f8ff ; /* 浅蓝色背景 */
-            font-family: sans-serif;
+            /* 修改背景色，可自由调整 */
+            background-color: #ffffff; /* 更柔和 */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             /*overflow-x: hidden;*/
-
         }
 
         html, body {
@@ -34,17 +33,29 @@
         #content {
             width: 92%;
             height: 600px;
-            border-radius: 12px;
-            box-shadow: 15px 10px 20px rgba(0, 0, 0, 0.1);
             overflow: hidden; /* 防止内部内容溢出影响边框 */
             margin: 0 auto;
-
         }
 
-        /* 内部编辑区 */
+        /* 内部编辑区及其背景透明化 */
+        .w-e-text-container {
+            background-color: transparent !important;
+        }
         #content .w-e-text-container [contenteditable="true"] {
-            padding: 5px 10px !important;
+            /* 底部预留 120px padding，防止工具栏遮挡最后的内容 */
+            padding: 5px 10px 120px 10px !important;
             font-size: 14px;
+        }
+
+        /* 强制展示编辑区的滚动条 */
+        .w-e-text-container::-webkit-scrollbar {
+            width: 4px;
+            background-color: transparent;
+            display: block !important;
+        }
+        .w-e-text-container::-webkit-scrollbar-thumb {
+            background-color: rgba(0, 0, 0, 0.15);
+            border-radius: 4px;
         }
 
         /* 顶部工具 */
@@ -52,7 +63,7 @@
             position: sticky;
             top: 0;
             /*z-index: 2;*/
-            background-color: #f0f8ff ;
+            background-color: #ffffff ; /* 匹配新的背景 */
             display: flex;
             padding: 50px 15px 0px 0px;
             /*height: 50px;*/
@@ -60,18 +71,24 @@
         .top-btn{
             border: none;background: transparent;
             font-size: 16px;color: #333;min-width: 44px; height: 44px;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
         }
         #toast{
             position: sticky;
             justify-content: end;
             top: 0;
-            background-color: #fff;
+            /* 修复保存提示背景色，改用一个不突兀的色调或全透明 */
+            background-color: transparent; 
             display: flex;
             padding: 10px 10px;
             height: 10px;
             width: 50%;
             opacity: 0;
             transition: opacity 0.5s;
+            font-weight: bold;
+            color: #52c41a; /* 让字变绿明显一点 */
         }
 
         .bottom-format-bar {
@@ -103,11 +120,8 @@
             display: flex;
             width: 95%;
             top: 0;
-            background: #fff;
             margin: 5px auto;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 8px 10px 20px rgba(0, 0, 0, 0.1);
+            border-bottom: 1px solid #e1e4e8; /* 标题下方的分割线 */
         }
 
 
@@ -115,13 +129,108 @@
             outline: none;
             padding: 15px 10px;
             border: none;
+            background: transparent;
             font-size: 22px; font-weight: bold;width: 100%;
         }
 
 
-        /* 4. 颜色选择条 */
-        #color-bar { display: none; padding: 10px; background: #fff; border-bottom: 1px solid #eee; gap: 15px; overflow-x: auto; }
-        .dot { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #eee; flex-shrink: 0; }
+        /*悬浮工具栏取代原有的底部工具栏*/
+        .floating-toolbar-wrapper {
+            position: fixed;
+            bottom: 60px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            z-index: 100;
+            pointer-events: none; /* 让外部包裹层不阻挡点击事件 */
+        }
+
+        .tools-panel {
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+            padding: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap; /* 允许换行 */
+            max-width: 260px; /* 限制最大宽度，实现网格或自适应 */
+            justify-content: flex-start;
+            gap: 10px;
+            opacity: 0;
+            transform: scale(0.9) translateY(10px);
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transform-origin: bottom right;
+        }
+
+        .tools-panel.active {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            pointer-events: auto; /* 激活时可以点击内部工具 */
+        }
+
+        .tool-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            border: none;
+            background: none;
+            color: #333;
+            font-size: 13px; /* 减小字号 */
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            width: 48px; /* 固定宽度使网格整齐 */
+        }
+
+        .tool-icon {
+            font-size: 18px; /* 减小图标字号 */
+            font-weight: bold;
+            margin-bottom: 4px;
+            width: 36px; /* 减小图标外圈大小 */
+            height: 36px;
+            background: #f5f5f5;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .fab {
+            width: 60px;
+            height: 60px;
+            border-radius: 30px;
+            background: #333;
+            color: white;
+            border: none;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            font-size: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.3s;
+            pointer-events: auto; /* 让 FAB 可以拖拽/点击 */
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+        
+        .fab.active {
+            transform: rotate(45deg);
+            background: #ff4d4f;
+        }
+
+        .color-dot { width: 22px; height: 22px; border-radius: 50%; border: 1px solid #eee; }
+        
+        .tools-divider {
+            width: 100%;
+            height: 1px;
+            background-color: #eee;
+            margin: 4px 0;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
@@ -130,8 +239,8 @@
 <div class="top-action-bar">
     <button class="top-btn"  id="back" style="justify-content: flex-start;width: 10px;padding-left: 15px"><</button>
     <div id="toast">保存成功</div>
-    <button class="top-btn"  onclick="EditorAPI.do('undo')">↩ </button>
-    <button class="top-btn"  onclick="EditorAPI.do('redo')">↪</button>
+    <button class="top-btn"  onclick="EditorAPI.do('undo', null, event)">↩ </button>
+    <button class="top-btn"  onclick="EditorAPI.do('redo', null, event)">↪</button>
     <button class="top-btn"  id="save" onclick=""  >保存</button>
 </div>
 
@@ -140,30 +249,75 @@
 </div>
 
 
-
-
 <div id="content">
-    <div class="bottom-format-bar">
+</div>
+<!-- 显示字数 -->
+<div id="word-count" style="text-align: right; font-size: 13px; color: #999; width: 92%; margin: 10px auto 0; padding-top: 5px; border-top: 1px solid #e1e4e8;">字数: 0</div>
 
-        <div id="color-bar">
-            <div class="dot" style="background:#000"  onclick="EditorAPI.do('color','#000')"></div>
-            <div class="dot" style="background:#ff4d4f"  onclick="EditorAPI.do('color','#ff4d4f')"></div>
-            <div class="dot" style="background:#1890ff"  onclick="EditorAPI.do('color','#1890ff')"></div>
-            <div class="dot" style="background:#52c41a"  onclick="EditorAPI.do('color','#52c41a')"></div>
-        </div>
+<!-- 悬浮工具栏 -->
+<div class="floating-toolbar-wrapper">
+    <div class="tools-panel" id="toolsPanel">
+        <!-- 常用基础样式 -->
+        <button class="tool-item" onclick="EditorAPI.do('bold', null, event)">
+            <div class="tool-icon"><b>B</b></div>
+            <span>加粗</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('italic', null, event)">
+            <div class="tool-icon"><em>I</em></div>
+            <span>斜体</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('underline', null, event)">
+            <div class="tool-icon"><ins>U</ins></div>
+            <span>下划线</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('through', null, event)">
+            <div class="tool-icon"><del>S</del></div>
+            <span>删除线</span>
+        </button>
+        
+        <!-- 分割线 -->
+        <div class="tools-divider"></div>
 
-        <div id="custom-toolbar">
-            <button class="tool-btn"  onclick="EditorAPI.do('bold')"><b>B</b></button>
-            <button class="tool-btn"  onclick="EditorAPI.do('underline')"><ins>U</ins></button>
-            <button class="tool-btn"  onclick="EditorAPI.do('italic')"><em>I</em></button>
-            <button class="tool-btn"  onclick="toggleColorBar()">🎨</button>
-            <div style="width:1px; height:18px; background:#eee; margin:0 8px;"></div>
-            <button class="tool-btn"  onclick="EditorAPI.do('fontSize', '14px')">小</button>
-            <button class="tool-btn"  onclick="EditorAPI.do('fontSize', '19px')">中</button>
-            <button class="tool-btn"  onclick="EditorAPI.do('fontSize', '24px')">大</button>
-        </div>
+        <!-- 插入与字号 -->
+        <button class="tool-item" onclick="EditorAPI.do('image', null, event)">
+            <div class="tool-icon">🖼️</div>
+            <span>图片</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('fontSize', '24px', event)">
+            <div class="tool-icon">大</div>
+            <span>大字</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('fontSize', '16px', event)">
+            <div class="tool-icon">中</div>
+            <span>中字</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('fontSize', '12px', event)">
+            <div class="tool-icon">小</div>
+            <span>小字</span>
+        </button>
+        
+        <!-- 分割线 -->
+        <div class="tools-divider"></div>
 
+        <!-- 常用红蓝颜色 -->
+        <button class="tool-item" onclick="EditorAPI.do('color', '#ff4d4f', event)">
+            <div class="tool-icon"><div class="color-dot" style="background:#ff4d4f;"></div></div>
+            <span>红字</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('color', '#1890ff', event)">
+            <div class="tool-icon"><div class="color-dot" style="background:#1890ff;"></div></div>
+            <span>蓝字</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('color', '#52c41a', event)">
+            <div class="tool-icon"><div class="color-dot" style="background:#52c41a;"></div></div>
+            <span>绿字</span>
+        </button>
+        <button class="tool-item" onclick="EditorAPI.do('color', '#333333', event)">
+            <div class="tool-icon"><div class="color-dot" style="background:#333333;"></div></div>
+            <span>黑字</span>
+        </button>
     </div>
+    <button class="fab" id="fabBtn">+</button>
 </div>
 
 
@@ -175,6 +329,20 @@
 
     const { createEditor,SlateEditor} = window.wangEditor;
 
+    let currentImages = [];
+    
+    // 提取图片 src
+    function extractImages(html) {
+        // 兼容不同的 img 标签格式，提取 src
+        const imgRegex = /<img[^>]+src=["']([^"']+)["']/g;
+        let match;
+        let images = [];
+        while ((match = imgRegex.exec(html)) !== null) {
+            images.push(match[1]);
+        }
+        return images;
+    }
+
     //  初始化编辑器
     const editor = createEditor({
         selector: '#content',
@@ -183,10 +351,42 @@
                 'text': { menuKeys: [] },
                 'image': { menuKeys: [] },
                 'link': { menuKeys: [] }
+            },
+            onChange(editor) {
+                // 更新字数
+                const text = editor.getText().replace(/\n|\r/g, '').trim();
+                document.getElementById('word-count').innerText = `字数: ${text.length}`;
+
+                // 处理图片删除关联原生本地文件删除
+                const html = editor.getHtml();
+                const newImages = extractImages(html);
+                const deletedImages = currentImages.filter(src => !newImages.includes(src));
+                if (deletedImages.length > 0) {
+                    deletedImages.forEach(src => {
+                        if (window.Android && window.Android.deleteImage) {
+                            window.Android.deleteImage(src);
+                        }
+                    });
+                }
+                currentImages = newImages;
             }
         },
         mode: 'default',
     });
+
+    // 暴露给安卓的全局方法，供插入图片成功后回调
+    window.insertImage = function(url, alt = "图片") {
+        if (!editor) return;
+        // 把焦点找回来并恢复最后的状态
+        editor.restoreSelection && editor.restoreSelection();
+        editor.insertNode({
+            type: 'image',
+            src: url,
+            alt: alt,
+            href: '',
+            children: [{ text: '' }] // wangeditor 要求的 image 节点子结构
+        });
+    };
 
     // 2. 封装增强版 API 执行逻辑
     const EditorAPI = {
@@ -205,10 +405,17 @@
         },
 
         // 执行入口
-        do(type, val) {
-            if (!editor) return;
-            editor.focus();
+        do(type, val, event) {
+            // 防止点击按钮触发焦点跳转、触发系统键盘等事件
+            if (event && typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
 
+            if (!editor) return;
+
+            // 这里移除了原本直接触发 editor.focus() 的逻辑，防止默认将焦点带到编辑器，引起移动端键盘弹起。
+            // 只有当明确需要焦点（或未选中任何文字时）再考虑手动干预，但通常 wangEditor 自己能保持选区。
+            
             // 使用策略对象映射，避免长长的 if-else 链
             const actionMap = {
                 undo: () => editor.undo?.(),
@@ -216,20 +423,25 @@
                 bold: () => this.toggleMark(editor, 'bold'),
                 italic: () => this.toggleMark(editor, 'italic'),
                 underline: () => this.toggleMark(editor, 'underline'),
+                through: () => this.toggleMark(editor, 'through'),
+                image: () => {
+                    if(window.Android && window.Android.pickImage) {
+                        window.Android.pickImage();
+                    } else {
+                        console.warn("Android bridge [pickImage] not found");
+                        // 测试时可手动插入
+                        // window.insertImage('https://via.placeholder.com/150');
+                    }
+                    toggleToolbar(); // 收起菜单
+                },
                 color: () => {
                     editor.addMark('color', val);
-                    toggleColorBar();
+                    toggleToolbar(); // 选择后收起工具栏
                 },
-                fontSize: () => editor.addMark('fontSize', val),
-                // 没用的功能，列表
-                // bulletedList: () => {
-                //     // 统一命令调用方式
-                //     if (typeof editor.command === 'function') {
-                //         editor.command('bulletedList');
-                //     } else {
-                //         editor.emit?.('command', { key: 'bulletedList' });
-                //     }
-                // }
+                fontSize: () => {
+                    editor.addMark('fontSize', val);
+                    toggleToolbar(); // 选择后收起工具栏
+                },
             };
 
             // 执行对应的动作
@@ -247,15 +459,144 @@
         }
     };
 
-    function toggleColorBar() {
-        const bar = document.getElementById('color-bar');
-        bar.style.display = (bar.style.display === 'flex') ? 'none' : 'flex';
+    function toggleToolbar() {
+        const panel = document.getElementById('toolsPanel');
+        const fab = document.getElementById('fabBtn');
+        panel.classList.toggle('active');
+        fab.classList.toggle('active');
     }
+
+    // 拖动逻辑
+    (function initDrag() {
+        const fabBtn = document.getElementById('fabBtn');
+        const wrapper = document.querySelector('.floating-toolbar-wrapper');
+        let isDragging = false;
+        let hasMoved = false;
+        let startX, startY, initialLeft, initialTop;
+
+        const handleStart = (e) => {
+            isDragging = true;
+            hasMoved = false;
+            
+            // 获取初始位置
+            const rect = wrapper.getBoundingClientRect();
+            // 如果还用的是 right/bottom 定位，转为 left/top
+            if (!wrapper.style.left) {
+                wrapper.style.right = 'auto';
+                wrapper.style.bottom = 'auto';
+                wrapper.style.left = rect.left + 'px';
+                wrapper.style.top = rect.top + 'px';
+            }
+            
+            initialLeft = parseFloat(wrapper.style.left) || rect.left;
+            initialTop = parseFloat(wrapper.style.top) || rect.top;
+            
+            if (e.type === 'touchstart') {
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+            } else {
+                startX = e.clientX;
+                startY = e.clientY;
+            }
+        };
+
+        const handleMove = (e) => {
+            if (!isDragging) return;
+            
+            let currentX, currentY;
+            if (e.type === 'touchmove') {
+                currentX = e.touches[0].clientX;
+                currentY = e.touches[0].clientY;
+            } else {
+                currentX = e.clientX;
+                currentY = e.clientY;
+            }
+
+            const dx = currentX - startX;
+            const dy = currentY - startY;
+
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                hasMoved = true;
+                e.preventDefault(); // 防止页面滚动
+            }
+
+            if (hasMoved) {
+                // 限制在屏幕内拖动 (防止彻底移出屏幕)
+                const maxX = window.innerWidth - wrapper.offsetWidth;
+                const maxY = window.innerHeight - wrapper.offsetHeight;
+                
+                let newLeft = initialLeft + dx;
+                let newTop = initialTop + dy;
+                
+                newLeft = Math.max(0, Math.min(newLeft, maxX));
+                newTop = Math.max(0, Math.min(newTop, maxY));
+
+                wrapper.style.left = newLeft + 'px';
+                wrapper.style.top = newTop + 'px';
+            }
+        };
+
+        const handleEnd = (e) => {
+            if (!isDragging) return;
+            isDragging = false;
+            // 如果没有发生真正移动，触发点击交互
+            if (!hasMoved) {
+                toggleToolbar();
+                if (e.cancelable) {
+                    e.preventDefault(); // 防止触发被模拟的 click 事件，引起重复切换
+                }
+            }
+        };
+
+        fabBtn.addEventListener('touchstart', handleStart, { passive: false });
+        document.addEventListener('touchmove', handleMove, { passive: false });
+        document.addEventListener('touchend', handleEnd);
+
+        fabBtn.addEventListener('mousedown', handleStart);
+        document.addEventListener('mousemove', handleMove);
+        document.addEventListener('mouseup', handleEnd);
+    })();
+
+    // --- 核心修复：防止点击顶部工具栏和悬浮面板丢失光标和选择状态 ---
+    function makeKeepFocusZone(selector, btnSelector) {
+        const zone = document.querySelector(selector);
+        if (!zone) return;
+        let isMoved = false;
+        zone.addEventListener('touchstart', e => {
+            isMoved = false;
+            // 关键：拦截系统默认的触摸行为，这样系统就不会把焦点从编辑器剥离，
+            // 输入法软键盘不会被收起，你在富文本选中的文字（选区）也不会丢失。
+            e.preventDefault(); 
+        }, { passive: false });
+        
+        zone.addEventListener('touchmove', e => {
+            isMoved = true;
+        }, { passive: false });
+
+        zone.addEventListener('touchend', e => {
+            if (!isMoved) {
+                // 由于前面的 preventDefault 阻止了默认流，系统不会触发点击事件，这里进行代码补发
+                const btn = e.target.closest(btnSelector);
+                if (btn) {
+                    btn.click();
+                }
+            }
+        });
+
+        zone.addEventListener('mousedown', e => {
+            // PC端或外接鼠标端阻断失焦
+            e.preventDefault(); 
+        });
+    }
+
+    makeKeepFocusZone('.top-action-bar', '.top-btn');
+    makeKeepFocusZone('#toolsPanel', '.tool-item');
+
 </script>
 <script>
-    // 1. 从Android获取初始数据（注意：这些是同步调用，必须在WebView注入完成后执行）
-    const initialTitle = window.Android.getTitle();
-    const initialContent = window.Android.getContent();
+    // 1. 从Android获取初始数据（加判空，避免 bridge 未就绪时报错）
+    const initialTitle = (window.Android && window.Android.getTitle) ? window.Android.getTitle() : '';
+    const initialContent = (window.Android && window.Android.getContent) ? window.Android.getContent() : '';
 
     const titleInput = document.getElementById('title-input');
     const backButton = document.getElementById('back');
@@ -264,9 +605,29 @@
     if(initialTitle) {
         titleInput.value = initialTitle;
     }
-    if(initialContent && editor) { // 【修正】当内容存在且编辑器就绪时
-        editor.setHtml(initialContent);
+    function applyInitialContentWithRetry(content, retry = 0) {
+        if (!content) return;
+        try {
+            if (editor && typeof editor.setHtml === 'function') {
+                editor.setHtml(content);
+                // 初始化时同步一次字数
+                const text = editor.getText().replace(/\n|\r/g, '').trim();
+                document.getElementById('word-count').innerText = `字数: ${text.length}`;
+                
+                // 初始化此时的图片集合，用于后续比对删除
+                currentImages = extractImages(content);
+                return;
+            }
+        } catch (e) {
+            // 忽略本次异常，走重试
+        }
+
+        if (retry < 6) {
+            setTimeout(() => applyInitialContentWithRetry(content, retry + 1), 80);
+        }
     }
+
+    applyInitialContentWithRetry(initialContent);
 
 
 <!--    titleInput.addEventListener('input', function(event) {-->
@@ -292,6 +653,11 @@
     });
 
     saveButton.addEventListener('click',function (){
+        // 取消所有输入框和编辑器的焦点，以此触发收起软键盘
+        document.activeElement && document.activeElement.blur();
+        if (editor) { editor.blur(); }
+        if (titleInput) { titleInput.blur(); }
+
         const finalTitle = titleInput.value;
         const finalContent = editor.getHtml();
         const finalText = editor.getText();

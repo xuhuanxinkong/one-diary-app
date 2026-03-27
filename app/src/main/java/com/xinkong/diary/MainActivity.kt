@@ -70,7 +70,6 @@ fun DiaryApp() {
                         onClose = { navViewModel.navigateBack() },
                         onSave = { updated ->
                             diaryViewModel.updateDiary(updated)
-                            navViewModel.navigateBack()
                         }
                     )
                 }

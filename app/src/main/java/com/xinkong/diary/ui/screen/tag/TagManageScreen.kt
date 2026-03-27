@@ -34,12 +34,12 @@ import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 fun TagManageScreen(
     onBack: () -> Unit,
     groupedTags: Map<String, List<TagUI>>,
-    hiddenFolders: Set<String>,
+    currentFolder: String,
     onAddFolder: (String) -> Unit,
     onEditFolder: (String) -> Unit,
     onAddTag: (String) -> Unit,
     onEditTag: (TagUI) -> Unit,
-    onToggleHideFolder: (String, Boolean) -> Unit
+    onSwitchFolder: (String) -> Unit
 ) {
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var newFolderName by remember { mutableStateOf("") }
@@ -83,12 +83,12 @@ fun TagManageScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(folderName, fontSize = 18.sp, modifier = Modifier.weight(1f))
                                 
-                                val isHidden = hiddenFolders.contains(folderName)
-                                IconButton(onClick = { onToggleHideFolder(folderName, !isHidden) }) {
+                                val isCurrent = (currentFolder == folderName)
+                                IconButton(onClick = { if (!isCurrent) onSwitchFolder(folderName) }) {
                                     Icon(
-                                        imageVector = if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = if (isHidden) "已隐藏" else "已显示",
-                                        tint = if (isHidden) Color.Gray else MaterialTheme.colorScheme.primary
+                                        imageVector = if (isCurrent) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (isCurrent) "当前选中" else "切换到此文件夹",
+                                        tint = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Gray
                                     )
                                 }
                                 
@@ -191,12 +191,9 @@ fun TagManageRoute(
     val dbFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
     val diaryList by diaryViewModel.listState.collectAsStateWithLifecycle()
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
+    val currentFolder by diaryViewModel.currentFolder.collectAsStateWithLifecycle()
 
     val folderType = if (type == "diary") "Diary" else "Chat"
-    val hiddenFolders = dbFolders
-        .filter { it.type == folderType && it.isHidden }
-        .map { it.name }
-        .toSet()
 
     val groupedResult = remember(type, diaryList, chatList, diaryDbTags, chatDbTags, dbFolders) {
         if (type == "diary") {
@@ -233,7 +230,7 @@ fun TagManageRoute(
     TagManageScreen(
         onBack = onBack,
         groupedTags = groupedTags,
-        hiddenFolders = hiddenFolders,
+        currentFolder = currentFolder,
         onAddFolder = { folderName ->
             tagModel.addTagFolder(
                 TagFolder(
@@ -257,14 +254,8 @@ fun TagManageRoute(
             editingTag = tagUI
             showTagAdd = true
         },
-        onToggleHideFolder = { folderName, isHidden ->
-            tagModel.addTagFolder(
-                TagFolder(
-                    name = folderName,
-                    type = folderType,
-                    isHidden = isHidden
-                )
-            )
+        onSwitchFolder = { folderName ->
+            diaryViewModel.updateCurrentFolder(folderName)
         }
     )
 

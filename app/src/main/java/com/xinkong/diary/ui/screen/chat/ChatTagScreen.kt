@@ -38,42 +38,29 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xinkong.diary.ViewModel.TagModel
-import com.xinkong.diary.ViewModel.TagDisplayItem
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.ChatTag
+import androidx.compose.foundation.lazy.items
+import com.xinkong.diary.ui.screen.home.TagCard
 import com.xinkong.diary.ui.screen.home.TagListDisplayConfig
 import com.xinkong.diary.ui.screen.home.TagUI
-import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
 import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
-import com.xinkong.diary.ui.screen.tag.TagFolderListState
-import com.xinkong.diary.ui.screen.tag.tagFolderItems
 import com.xinkong.diary.ui.theme.currentDiaryColors
 import com.xinkong.diary.ui.theme.diaryColors
 import kotlin.collections.minus
 import kotlin.collections.plus
 
-private fun TagDisplayItem.toTagUi(): TagUI {
-    return TagUI(
-        name = name,
-        color = Color(colorInt),
-        background2 = Color(bg2Int),
-        border2 = Color(border2Int),
-        folder = folder,
-        displayName = displayName,
-        itemCount = itemCount
-    )
-}
+private const val CHAT_TAG_FOLDER = "我的笔记"
 
 
 //----------------对话分类面板（包装卡片）--------------------
 @Composable
 fun ChatTagSetting(
     chatList: List<Chat>,
-    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
-    onTagSelect: (Pair<String, String>) -> Unit = {},
-    onTagsDelete: (List<Pair<String, String>>) -> Unit = {},
-    displayConfig: TagListDisplayConfig = TagListDisplayConfig(),
-    onManageClick: () -> Unit = {}
+    selectedTag: String = UNCLASSIFIED_TAG_NAME,
+    onTagSelect: (String) -> Unit = {},
+    onTagsDelete: (List<String>) -> Unit = {},
+    displayConfig: TagListDisplayConfig = TagListDisplayConfig()
 ) {
     Card(
         modifier = Modifier
@@ -88,8 +75,7 @@ fun ChatTagSetting(
             selectedTag = selectedTag,
             onTagSelect = onTagSelect,
             onTagsDelete = onTagsDelete,
-            displayConfig = displayConfig,
-            onManageClick = onManageClick
+            displayConfig = displayConfig
         )
     }
 }
@@ -100,30 +86,41 @@ fun ChatTagSetting(
 @Composable
 fun ChatTagList(
     chatList: List<Chat>,
-    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
-    onTagSelect: (Pair<String, String>) -> Unit,
-    onTagsDelete: (List<Pair<String, String>>) -> Unit,
+    selectedTag: String = UNCLASSIFIED_TAG_NAME,
+    onTagSelect: (String) -> Unit,
+    onTagsDelete: (List<String>) -> Unit,
     displayConfig: TagListDisplayConfig = TagListDisplayConfig(),
-    tagModel: TagModel = viewModel(),
-    onManageClick: () -> Unit = {}
+    tagModel: TagModel = viewModel()
 ) {
     val context = LocalContext.current
     val dbTags by tagModel.chatTags.collectAsStateWithLifecycle()
-    val dbFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
+    val bg = MaterialTheme.diaryColors.background3
+    val color = MaterialTheme.diaryColors.primary
+    val border = MaterialTheme.diaryColors.border3
     
-    val groupedResult = remember(chatList, dbTags, dbFolders) {
-        tagModel.buildChatGroupedTags(chatList)
-    }
-
-    val groupedTags = remember(groupedResult) {
-        groupedResult.groupedTags.mapValues { (_, items) ->
-            items.map { it.toTagUi() }
-        }
+    val allTags = remember(chatList, dbTags) {
+        val usedTagNames = chatList.map { it.tag }.toSet()
+        val existingTags = dbTags.map { it.name }.toSet()
+        val allNames = usedTagNames + existingTags + UNCLASSIFIED_TAG_NAME
+        
+        allNames.map { tagName ->
+            val dbTag = dbTags.find { it.name == tagName }
+            val count = chatList.count { it.tag == tagName }
+            TagUI(
+                name = tagName,
+                color = dbTag?.colorInt?.let { Color(it) } ?: color,
+                background2 = dbTag?.bg2Int?.let { Color(it) } ?: bg,
+                border2 = dbTag?.border2Int?.let { Color(it) } ?: border,
+                folder = CHAT_TAG_FOLDER,
+                displayName = tagName,
+                itemCount = count
+            )
+        }.sortedByDescending { it.itemCount }
     }
 
     var isTagAdd by remember { mutableStateOf(false) }
     var isSelectionMode by remember { mutableStateOf(false) }
-    var selectedTags by remember { mutableStateOf(setOf<Pair<String, String>>()) }
+    var selectedTags by remember { mutableStateOf(setOf<String>()) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         LazyColumn(
@@ -141,17 +138,6 @@ fun ChatTagList(
                 ) {
                     Text("分类：", fontSize = 24.sp)
                     Spacer(modifier = Modifier.weight(1f))
-                    if (displayConfig.showManageAction) {
-                        Text(
-                            text = "管理",
-                            color = MaterialTheme.diaryColors.primary,
-                            modifier = Modifier
-                                .clickable {
-                                    onManageClick()
-                                }
-                                .padding(end = 16.dp)
-                        )
-                    }
                     if (displayConfig.enableSelection && isSelectionMode) {
                         IconButton(onClick = {
                             android.widget.Toast.makeText(context, "对话导出功能待实现", android.widget.Toast.LENGTH_SHORT).show()
@@ -159,11 +145,11 @@ fun ChatTagList(
                             Icon(Icons.Default.Upload, contentDescription = "Export")
                         }
                         IconButton(onClick = {
-                            val tagsToRemove = dbTags.filter { (it.folder to it.name) in selectedTags }
+                            val tagsToRemove = dbTags.filter { it.name in selectedTags }
                             tagsToRemove.forEach {
                                 tagModel.deleteChatTag(it)
                             }
-                            onTagsDelete(tagsToRemove.map { it.folder to it.name })
+                            onTagsDelete(tagsToRemove.map { it.name })
                             isSelectionMode = false
                             selectedTags = emptySet()
                         }) {
@@ -172,48 +158,31 @@ fun ChatTagList(
                     }
                 }
             }
-            tagFolderItems(
-                groupedTags = groupedTags,
-                listState = TagFolderListState(
-                    selectedTag = selectedTag,
-                    isSelectionMode = displayConfig.enableSelection && isSelectionMode,
-                    selectedTags = selectedTags
-                ),
-                onTagClick = { tag ->
-                    if (displayConfig.enableSelection && isSelectionMode) {
-                        val key = tag.folder to tag.name
-                        selectedTags = if (selectedTags.contains(key)) selectedTags - key else selectedTags + key
-                    } else {
-                        onTagSelect(tag.folder to tag.name)
-                        currentDiaryColors.value = currentDiaryColors.value.copy(
-                            background3 = tag.background2,
-                            border3 = tag.border2
-                        )
+            items(allTags) { tag ->
+                val isUnclassified = tag.displayName == "未分类"
+                TagCard(
+                    tag = tag,
+                    isSelectionMode = displayConfig.enableSelection && isSelectionMode && !isUnclassified,
+                    isSelected = selectedTags.contains(tag.name),
+                    onLongClick = {
+                        if (displayConfig.enableSelection && !isUnclassified) {
+                            isSelectionMode = true
+                            selectedTags = selectedTags + tag.name
+                        }
+                    },
+                    onClick = {
+                        if (displayConfig.enableSelection && isSelectionMode && !isUnclassified) {
+                            val key = tag.name
+                            selectedTags = if (selectedTags.contains(key)) selectedTags - key else selectedTags + key
+                        } else if (!isSelectionMode || !isUnclassified) {
+                            onTagSelect(tag.name)
+                            currentDiaryColors.value = currentDiaryColors.value.copy(
+                                background3 = tag.background2,
+                                border3 = tag.border2
+                            )
+                        }
                     }
-                },
-                onTagLongClick = { tag ->
-                    if (displayConfig.enableSelection) {
-                        isSelectionMode = true
-                        selectedTags = selectedTags + (tag.folder to tag.name)
-                    }
-                }
-            )
-
-            if (groupedResult.hiddenItemCount > 0) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "有 ${groupedResult.hiddenItemCount} 个文件已隐藏",
-                            fontSize = 12.sp,
-                            color = Color.Gray
-                        )
-                    }
-                }
+                )
             }
         }
 
@@ -235,21 +204,22 @@ fun ChatTagList(
 
     // 复用 TagScreen 的 TagAdd 对话框
     if (displayConfig.showAddAction && isTagAdd) {
-        val uniqueFolders = groupedResult.availableFolders
         com.xinkong.diary.ui.screen.home.TagAdd(
             onDismiss = { isTagAdd = false },
-            availableFolders = uniqueFolders,
+            availableFolders = listOf(CHAT_TAG_FOLDER),
+            showFolderSelection = false,
+            initialFolder = CHAT_TAG_FOLDER,
             onConfirm = { name, color, background2, border2, folder ->
-                val exists = dbTags.any { it.folder == folder && it.name == name }
+                val exists = dbTags.any { it.name == name }
                 if (exists) {
-                    android.widget.Toast.makeText(context, "该文件夹下已存在同名分类", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(context, "已存在同名分类", android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     tagModel.addChatTag(ChatTag(
                         name = name,
                         colorInt = color.toArgb(),
                         bg2Int = background2.toArgb(),
                         border2Int = border2.toArgb(),
-                        folder = folder
+                        folder = CHAT_TAG_FOLDER
                     ))
                 }
                 isTagAdd = false

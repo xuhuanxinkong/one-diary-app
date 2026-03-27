@@ -69,21 +69,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
 import com.xinkong.diary.ui.screen.home.SearchBarItem
-import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
 import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
 //----------------对话页面总入口--------------------
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
-    selectedTag: Pair<String, String> = DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME,
-    onSelectedTagChange: (Pair<String, String>) -> Unit = {},
+    selectedTag: String = UNCLASSIFIED_TAG_NAME,
+    onSelectedTagChange: (String) -> Unit = {},
     isSelectionMode: Boolean = false,
     selectedIds: Set<Long> = emptySet(),
     onEnterSelection: (Long) -> Unit = {},
     onToggleSelection: (Long) -> Unit = {},
     onExitSelection: () -> Unit = {},
-    onManageTags: () -> Unit = {},
     onClick: (Chat) -> Unit
 ) {
     val viewModel: ChatViewModel = viewModel()
@@ -103,7 +101,7 @@ fun ChatScreen(
         if (isSearchMode && searchQuery.isNotBlank()) {
             searchResults
         } else {
-            chatList.filter { it.tag == selectedTag.second && it.tagFolder == selectedTag.first }
+            chatList.filter { it.tag == selectedTag }
         }
     }
     // --------------------------------
@@ -157,16 +155,14 @@ fun ChatScreen(
                         isSearchMode = false
                         searchQuery = ""
                     },
-                    onManageTags = onManageTags,
                     onTagsDelete = { deletedTags ->
-                        deletedTags.forEach { (folder, tagName) ->
+                        deletedTags.forEach { tagName ->
                             chatList
-                                .filter { it.tag == tagName && it.tagFolder == folder }
+                                .filter { it.tag == tagName }
                                 .forEach { chat ->
                                     viewModel.updateChat(
                                         chat.copy(
-                                            tag = UNCLASSIFIED_TAG_NAME,
-                                            tagFolder = folder
+                                            tag = UNCLASSIFIED_TAG_NAME
                                         )
                                     )
                                 }
@@ -239,11 +235,10 @@ fun ChatScreen(
 //----------------对话页头部--------------------
 @Composable
 fun ChatHeaderColumn(
-    selectedTag: Pair<String, String>,
+    selectedTag: String,
     chatList: List<Chat>,
-    onTagSelect: (Pair<String, String>) -> Unit,
-    onTagsDelete: (List<Pair<String, String>>) -> Unit,
-    onManageTags: () -> Unit = {},
+    onTagSelect: (String) -> Unit,
+    onTagsDelete: (List<String>) -> Unit,
     isCollapsed: Boolean = false
 ) {
     var isRolled by remember { mutableStateOf(false) }
@@ -262,7 +257,7 @@ fun ChatHeaderColumn(
                 .padding(20.dp, topPadding, 20.dp, 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val displayTitle = selectedTag.second
+            val displayTitle = selectedTag
             Text(displayTitle, fontSize = titleFontSize.sp, modifier = Modifier.clickable { isRolled = !isRolled })
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
@@ -278,19 +273,6 @@ fun ChatHeaderColumn(
             )
         }
         
-        androidx.compose.foundation.layout.Box(modifier = Modifier
-            .fillMaxWidth()
-            .height(subtitleHeight)
-            .graphicsLayer { alpha = subtitleAlpha }
-            .padding(start = 20.dp)
-        ) {
-            Text(
-                "当前文件夹：${selectedTag.first}",
-                fontSize = 15.sp,
-                color = Color.Gray,
-                modifier = Modifier.align(Alignment.BottomStart)
-            )
-        }
         Spacer(modifier = Modifier.height(if(isCollapsed) 10.dp else 20.dp))
 
         AnimatedVisibility(
@@ -304,10 +286,6 @@ fun ChatHeaderColumn(
                 onTagSelect = { tag ->
                     onTagSelect(tag)
                     isRolled = false
-                },
-                onManageClick = {
-                    isRolled = false
-                    onManageTags()
                 },
                 onTagsDelete = onTagsDelete
             )
@@ -402,7 +380,7 @@ fun ChatCard(chat: Chat, modifier: Modifier) {
 
 //----------------添加Chat按钮--------------------
 @Composable
-fun AddChatButton(tag: Pair<String, String>) {
+fun AddChatButton(tag: String) {
     val viewModel: ChatViewModel = viewModel()
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -410,7 +388,7 @@ fun AddChatButton(tag: Pair<String, String>) {
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(MaterialTheme.diaryColors.primary),
         contentPadding = PaddingValues(0.dp),
-        onClick = { viewModel.addChat("新对话", tag.second, tag.first) },
+        onClick = { viewModel.addChat("新对话", tag) },
         interactionSource = interactionSource,
         modifier = Modifier
             .padding(bottom = 20.dp, end = 12.dp)

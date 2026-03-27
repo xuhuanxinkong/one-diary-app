@@ -32,6 +32,13 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
     private val _listState = MutableStateFlow(listOf<Diary>())
     val listState: StateFlow<List<Diary>> = _listState.asStateFlow()
 
+    private val _currentFolder = MutableStateFlow("我的笔记")
+    val currentFolder: StateFlow<String> = _currentFolder.asStateFlow()
+
+    fun updateCurrentFolder(folderName: String) {
+        _currentFolder.value = folderName
+    }
+
     init {
         viewModelScope.launch {
             diaryDao.getAll().collect { diaries ->

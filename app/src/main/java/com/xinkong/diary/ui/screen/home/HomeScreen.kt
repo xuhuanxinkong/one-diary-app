@@ -127,7 +127,7 @@ fun HomeScreen(){
     val tagFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
 
     var homeSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
-    var chatSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
+    var chatSelectedTag by rememberSaveable { mutableStateOf(UNCLASSIFIED_TAG_NAME) }
 
     val homeTagDisplayMap = remember(contentList, diaryTags, tagFolders) {
         tagModel.buildDiaryGroupedTags(contentList)
@@ -136,12 +136,12 @@ fun HomeScreen(){
             .flatten()
             .associateBy { it.folder to it.name }
     }
-    val chatTagDisplayMap = remember(chatList, chatTags, tagFolders) {
+    val chatTagDisplayMap = remember(chatList, chatTags) {
         tagModel.buildChatGroupedTags(chatList)
             .groupedTags
             .values
             .flatten()
-            .associateBy { it.folder to it.name }
+            .associateBy { it.name }
     }
 
     LaunchedEffect(homeSelectedTag, chatSelectedTag, homeTagDisplayMap, chatTagDisplayMap) {
@@ -173,25 +173,26 @@ fun HomeScreen(){
                             isDiary = selectedTab == Tab.HOME,
                             diaryList = contentList,
                             chatList = chatList,
-                            onTagSelected = { tag ->
-                                if (selectedTab == Tab.HOME) {
-                                    contentList.filter { it.id in selectedIds }.forEach {
-                                        diaryViewModel.updateDiary(
-                                            it.copy(
-                                                tag = tag.second,
-                                                tagFolder = tag.first
-                                            )
+                            onDiaryTagSelected = { tag: Pair<String, String> ->
+                                contentList.filter { it.id in selectedIds }.forEach {
+                                    diaryViewModel.updateDiary(
+                                        it.copy(
+                                            tag = tag.second,
+                                            tagFolder = tag.first
                                         )
-                                    }
-                                } else {
-                                    chatList.filter { it.id in selectedIds }.forEach {
-                                        chatViewModel.updateChat(
-                                            it.copy(
-                                                tag = tag.second,
-                                                tagFolder = tag.first
-                                            )
+                                    )
+                                }
+                                showMoveBar = false
+                                isSelectionMode = false
+                                selectedIds = emptySet()
+                            },
+                            onChatTagSelected = { tag: String ->
+                                chatList.filter { it.id in selectedIds }.forEach {
+                                    chatViewModel.updateChat(
+                                        it.copy(
+                                            tag = tag
                                         )
-                                    }
+                                    )
                                 }
                                 showMoveBar = false
                                 isSelectionMode = false
@@ -278,9 +279,6 @@ fun HomeScreen(){
                         isSelectionMode = false
                         selectedIds = emptySet()
                         showMoveBar = false
-                    },
-                    onManageTags = {
-                        navViewModel.navigateTo(Route.TagManage("chat"))
                     },
                     onClick = { chat ->
                         navViewModel.navigateTo(Route.ChatDetail(chat.id))

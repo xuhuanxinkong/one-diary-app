@@ -29,7 +29,10 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -37,7 +40,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,8 +85,9 @@ fun SettingScreen(
         uri?.toString()?.let(onBackgroundChange)
     }
 
-
-
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences("api_keys", android.content.Context.MODE_PRIVATE)
+    var baiduApiKey by remember { mutableStateOf(prefs.getString("baidu_api_key", "") ?: "") }
 
     Scaffold(
         topBar = { SettingTopBar(onBack = onBack) }
@@ -123,6 +129,151 @@ fun SettingScreen(
                     hasBackground = chat.backgroundUri.isNotEmpty(),
                     onClick = { backgroundPicker.launch("image/*") }
                 )
+
+                // 工具设置
+                var toolsExpanded by remember { mutableStateOf(true) }
+                SettingSectionHeader(
+                    title = "工具设置",
+                    isExpanded = toolsExpanded,
+                    onClick = { toolsExpanded = !toolsExpanded }
+                )
+                if (toolsExpanded) {
+                    if (aiConfigs.isNotEmpty()) {
+                        val config = aiConfigs.first()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "开启图片识别",
+                                fontSize = 14.sp,
+                                color = Color.DarkGray,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = config.enableImageSupport,
+                                onCheckedChange = { checked ->
+                                    chatViewModel.updateAiConfig(
+                                        config.copy(enableImageSupport = checked)
+                                    )
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaterialTheme.diaryColors.primary
+                                )
+                            )
+                        }
+                    } else {
+                        Text(
+                            "请先添加AI后再设置工具开关。",
+                            color = Color.Gray,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                }
+
+                // 百度搜索设置
+                var searchExpanded by remember { mutableStateOf(true) }
+                SettingSectionHeader(
+                    title = "百度搜索设置",
+                    isExpanded = searchExpanded,
+                    onClick = { searchExpanded = !searchExpanded }
+                )
+                if (searchExpanded) {
+                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                        OutlinedTextField(
+                            value = baiduApiKey,
+                            onValueChange = {
+                                baiduApiKey = it
+                                prefs.edit().putString("baidu_api_key", it).apply()
+                            },
+                            label = { Text("千帆大模型 API Key") },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            singleLine = true
+                        )
+                    }
+                }
+
+                // 图片识别测试
+                var imageTestExpanded by remember { mutableStateOf(true) }
+                SettingSectionHeader(
+                    title = "图片识别测试",
+                    isExpanded = imageTestExpanded,
+                    onClick = { imageTestExpanded = !imageTestExpanded }
+                )
+                if (imageTestExpanded) {
+                    var testStatus by remember { mutableStateOf("") }
+                    val scope = rememberCoroutineScope()
+                    
+                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    testStatus = "测试中..."
+                                    try {
+                                        val drawable = androidx.core.content.ContextCompat.getDrawable(context, com.xinkong.diary.R.mipmap.ic_launcher)
+                                        val bitmap = if (drawable is android.graphics.drawable.BitmapDrawable) {
+                                            drawable.bitmap
+                                        } else {
+                                            val w = drawable?.intrinsicWidth?.coerceAtLeast(1) ?: 100
+                                            val h = drawable?.intrinsicHeight?.coerceAtLeast(1) ?: 100
+                                            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                                            val canvas = android.graphics.Canvas(bmp)
+                                            drawable?.setBounds(0, 0, canvas.width, canvas.height)
+                                            drawable?.draw(canvas)
+                                            bmp
+                                        }
+                                        
+                                        val outputStream = java.io.ByteArrayOutputStream()
+                                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+                                        val base64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
+                                        
+                                        val config = aiConfigs.firstOrNull()
+                                        if (config != null) {
+                                            val messages = listOf(
+                                                mapOf(
+                                                    "role" to "user",
+                                                    "content" to listOf(
+                                                        mapOf("type" to "text", "text" to "What is this?"),
+                                                        mapOf("type" to "image_url", "image_url" to mapOf("url" to "data:image/jpeg;base64,$base64"))
+                                                    )
+                                                )
+                                            )
+                                            val result = com.xinkong.diary.Http.AiHttp().chatWithAi(config, messages)
+                                            result.fold(
+                                                onSuccess = { response ->
+                                                    val reply = (response as? com.xinkong.diary.Data.AiResponse.Message)?.content ?: ""
+                                                    if (reply.contains("笔记") || reply.contains("日记")) {
+                                                        testStatus = "成功！AI识别为笔记/日记"
+                                                    } else {
+                                                        testStatus = "失败：AI回答为 $reply"
+                                                    }
+                                                },
+                                                onFailure = { e ->
+                                                    testStatus = "请求失败：${e.message}"
+                                                }
+                                            )
+                                        } else {
+                                            testStatus = "请先添加AI"
+                                        }
+                                    } catch (e: Exception) {
+                                        testStatus = "错误：${e.message}"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("测试图片识别")
+                        }
+                        if (testStatus.isNotEmpty()) {
+                            Text(testStatus, color = Color.Gray, fontSize = 14.sp)
+                        }
+                    }
+                }
             }
         }
     }
