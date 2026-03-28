@@ -65,6 +65,7 @@ import java.util.Locale
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Checkbox
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
@@ -109,7 +110,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var isCollapsed by remember { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(listState) {
+    LaunchedEffect(listState) {
         androidx.compose.runtime.snapshotFlow {
             listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
         }.collect { (index, offset) ->

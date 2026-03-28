@@ -4,11 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xinkong.diary.Http.AiHttp
-import kotlinx.coroutines.flow.collect
-import com.xinkong.diary.Data.AiResponse
-import com.xinkong.diary.Data.AiState
-import com.xinkong.diary.Data.AiToolCall
-import com.xinkong.diary.Data.ToolTask
+import com.xinkong.diary.data.AiResponse
+import com.xinkong.diary.data.AiState
+import com.xinkong.diary.data.AiToolCall
+import com.xinkong.diary.data.ToolTask
 import com.xinkong.diary.repository.AppDatabase
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.AiChatConfig

@@ -33,7 +33,7 @@ class NavigationViewModel : ViewModel() {
     }
 }
 
-enum class Tab { HOME, AI }
+enum class Tab { HOME, AI, ALARM }
 
 @Serializable
 sealed class Route {
@@ -60,6 +60,9 @@ sealed class Route {
     // 标签管理页 (type: "diary" 或 "chat")
     @Serializable
     data class TagManage(val type: String) : Route()
+
+    @Serializable
+    data class AlarmEdit(val id: Int) : Route()
 
     // 其他页面
 }

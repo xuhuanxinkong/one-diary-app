@@ -1,4 +1,4 @@
-package com.xinkong.diary.Data
+package com.xinkong.diary.data
 
 
 sealed class AiState{

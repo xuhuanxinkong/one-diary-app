@@ -1,8 +1,8 @@
 package com.xinkong.diary.Http
 
 
-import com.xinkong.diary.Data.AiResponse
-import com.xinkong.diary.Data.AiToolCall
+import com.xinkong.diary.data.AiResponse
+import com.xinkong.diary.data.AiToolCall
 import com.xinkong.diary.repository.AiChatConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow

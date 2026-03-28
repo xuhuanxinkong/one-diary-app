@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
+import com.xinkong.diary.ViewModel.AlarmViewModel
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.ViewModel.DiaryViewModel
 import com.xinkong.diary.ViewModel.NavigationViewModel
@@ -25,8 +26,10 @@ import com.xinkong.diary.ui.screen.chat.DetailScreen
 import com.xinkong.diary.ui.screen.chat.SettingScreen
 import com.xinkong.diary.ui.screen.chat.TalkScreen
 import com.xinkong.diary.repository.AiChatConfig
+import com.xinkong.diary.ui.screen.alarm.AlarmEditScreen
 import com.xinkong.diary.ui.screen.home.DiaryDetail
 import com.xinkong.diary.ui.screen.home.HomeScreen
+import com.xinkong.diary.ui.screen.tag.TagManageRoute
 import com.xinkong.diary.ui.theme.DiarydTheme
 
 class MainActivity : ComponentActivity() {
@@ -46,6 +49,7 @@ fun DiaryApp() {
     val navViewModel: NavigationViewModel = viewModel()
     val diaryViewModel: DiaryViewModel = viewModel()
     val chatViewModel: ChatViewModel = viewModel()
+    val alarmViewModel: AlarmViewModel = viewModel()
     val backStack = navViewModel.backStack
 
 
@@ -123,8 +127,15 @@ fun DiaryApp() {
             }
             entry<Route.TagManage> { route ->
                 val type = route.type
-                com.xinkong.diary.ui.screen.tag.TagManageRoute(
+                TagManageRoute(
                     type = type,
+                    onBack = { navViewModel.navigateBack() }
+                )
+            }
+            entry<Route.AlarmEdit> { route ->
+                AlarmEditScreen(
+                    id = route.id,
+                    alarmViewModel = alarmViewModel,
                     onBack = { navViewModel.navigateBack() }
                 )
             }

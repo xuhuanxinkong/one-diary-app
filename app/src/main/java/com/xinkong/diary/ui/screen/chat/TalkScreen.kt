@@ -73,7 +73,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.DisposableEffect
@@ -82,7 +81,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.xinkong.diary.Data.AiState
+import com.xinkong.diary.data.AiState
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
@@ -96,7 +95,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
 import java.io.ByteArrayOutputStream
-import java.io.InputStream
 import java.io.File
 import java.io.FileOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult

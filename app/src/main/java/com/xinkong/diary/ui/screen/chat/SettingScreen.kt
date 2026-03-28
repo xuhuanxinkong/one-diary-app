@@ -56,11 +56,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.xinkong.diary.data.AiResponse
+
+import com.xinkong.diary.Http.AiHttp
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.UserChatConfig
-import com.xinkong.diary.ui.screen.home.AiSection
 import com.xinkong.diary.ui.screen.home.SettingSectionHeader
 import com.xinkong.diary.ui.theme.diaryColors
 
@@ -243,10 +245,10 @@ fun SettingScreen(
                                                     )
                                                 )
                                             )
-                                            val result = com.xinkong.diary.Http.AiHttp().chatWithAi(config, messages)
+                                            val result = AiHttp().chatWithAi(config, messages)
                                             result.fold(
                                                 onSuccess = { response ->
-                                                    val reply = (response as? com.xinkong.diary.Data.AiResponse.Message)?.content ?: ""
+                                                    val reply = (response as? AiResponse.Message)?.content ?: ""
                                                     if (reply.contains("笔记") || reply.contains("日记")) {
                                                         testStatus = "成功！AI识别为笔记/日记"
                                                     } else {

@@ -96,12 +96,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.MarkUnreadChatAlt
 import androidx.compose.material.icons.filled.NoteAlt
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
+import com.xinkong.diary.ui.screen.alarm.AlarmScreen
 import com.xinkong.diary.ui.screen.tag.DEFAULT_TAG_FOLDER
 import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
@@ -283,6 +285,10 @@ fun HomeScreen(){
                     onClick = { chat ->
                         navViewModel.navigateTo(Route.ChatDetail(chat.id))
                     }
+                )
+                Tab.ALARM -> AlarmScreen(
+                    onAddAlarm = { navViewModel.navigateTo(Route.AlarmEdit(0)) },
+                    onEditAlarm = { id -> navViewModel.navigateTo(Route.AlarmEdit(id)) }
                 )
             }
         }
@@ -714,9 +720,13 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                if (selectedTab == Tab.HOME) MaterialTheme.diaryColors.background2
-                else MaterialTheme.diaryColors.background3
-            ),
+                when (selectedTab) {
+                    Tab.HOME -> MaterialTheme.diaryColors.background2
+                    Tab.AI -> MaterialTheme.diaryColors.background3
+                    Tab.ALARM -> MaterialTheme.diaryColors.background1
+                }
+            )
+            .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly // 均匀分布
     ) {
@@ -724,7 +734,7 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .padding(end = 30.dp, top = 6.dp, bottom = 4.dp)
+                .padding(top = 6.dp, bottom = 4.dp)
                 .clickable(
                     interactionSource = homeInteractionSource,
                     indication = null
@@ -746,7 +756,7 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .padding(start = 30.dp, top = 6.dp, bottom = 4.dp)
+                .padding(top = 6.dp, bottom = 4.dp)
                 .clickable(
                     interactionSource = funInteractionSource,
                     indication = null
@@ -762,6 +772,28 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text("对话", fontSize = 10.sp)
+        }
+
+        val alarmInteractionSource = remember { MutableInteractionSource() }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .padding(top = 6.dp, bottom = 4.dp)
+                .clickable(
+                    interactionSource = alarmInteractionSource,
+                    indication = null
+                ) {
+                    onTabSelected(Tab.ALARM)
+                }
+                .pressScaleEffect(alarmInteractionSource, 0.75f)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Notifications,
+                contentDescription = "闹钟",
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text("闹钟", fontSize = 10.sp)
         }
     }
 }
