@@ -9,10 +9,12 @@ import com.xinkong.diary.data.AiResponse
 import com.xinkong.diary.data.AlarmEntity
 import com.xinkong.diary.receiver.ChainAlarmHelper
 import com.xinkong.diary.repository.AppDatabase
+import com.xinkong.diary.repository.DiaryDao
 import com.xinkong.diary.repository.ChatMessage
 import com.xinkong.diary.utils.NotificationHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,6 +37,7 @@ class AiTaskWorker(
         val db = AppDatabase.getDatabase(context)
         val alarmDao = db.alarmDao()
         val chatDao = db.chatDao()
+        val diaryDao = db.diaryDao()
 
         var currentAlarm = alarmDao.getAlarmByIdSync(alarmId) ?: return Result.failure()
 
@@ -61,7 +64,7 @@ class AiTaskWorker(
         return try {
             val success = withTimeoutOrNull(5 * 60 * 1000L) {
                 when (actionType) {
-                    "PROCESS_NOTE" -> executeAiReminder(chatDao, currentAlarm)
+                    "PROCESS_NOTE" -> executeAiReminder(chatDao, diaryDao, currentAlarm)
                     else -> {
                         delay(50)
                         true
@@ -96,16 +99,28 @@ class AiTaskWorker(
 
     private suspend fun executeAiReminder(
         chatDao: com.xinkong.diary.repository.ChatDao,
+        diaryDao: DiaryDao,
         alarm: AlarmEntity
     ): Boolean {
         val aiId = parseAiId(alarm.taskPayload) ?: return false
         val aiConfig = chatDao.getAiConfigById(aiId) ?: return false
         val chat = chatDao.getChatByIdSuspend(aiConfig.chatId) ?: return false
-
-        val prompt = alarm.remark.ifBlank {
-            "请以${aiConfig.name}的身份，结合当前时间，给我一条简洁提醒：${alarm.name}"
+        val contextText = buildAiContextText(aiConfig.referencedDiaryId, diaryDao)
+        val taskPrompt = alarm.remark.ifBlank { "请总结今天新增或最近更新的笔记，并给出3条行动建议。" }
+        val systemInstruction = buildString {
+            append("你正在执行一个由闹钟触发的定时AI任务。")
+            append("任务名称：${alarm.name}。")
+            append("当前时间：${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}。")
+            append("必须优先完成“任务指令”，再参考上下文输出结果。")
+            append("输出要求：先给结论，再给关键要点，语言简洁。")
+            if (contextText.isNotBlank()) {
+                append("\n【可用上下文】\n$contextText")
+            }
         }
-        val messages = listOf(mapOf("role" to "user", "content" to prompt))
+        val messages = listOf(
+            mapOf("role" to "system", "content" to systemInstruction),
+            mapOf("role" to "user", "content" to "任务指令（最高优先级）：$taskPrompt")
+        )
         val result = AiHttp().chatWithAi(aiConfig, messages)
         if (result.isFailure) {
             Log.e(TAG, "AI request failed: ${result.exceptionOrNull()?.message}")
@@ -144,6 +159,21 @@ class AiTaskWorker(
             id.takeIf { it > 0 }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private suspend fun buildAiContextText(referencedDiaryId: String, diaryDao: DiaryDao): String {
+        if (referencedDiaryId.isBlank()) return ""
+        val ids = try {
+            Json.decodeFromString<List<Long>>(referencedDiaryId)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (ids.isEmpty()) return ""
+        val diaries = diaryDao.getDiariesByIds(ids)
+        if (diaries.isEmpty()) return ""
+        return diaries.joinToString("\n\n") {
+            "标题：${it.title}\n时间：${it.date}\n内容：${it.text.ifEmpty { it.content }}"
         }
     }
 }
