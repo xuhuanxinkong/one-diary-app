@@ -46,6 +46,7 @@ class AiTaskWorker(
         if (actionType == "PROCESS_NOTE" && triggerTime > 0 && now - triggerTime > 60 * 60 * 1000L) {
             currentAlarm = currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = now)
             alarmDao.updateAlarm(currentAlarm)
+            NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：任务超时未执行", true)
             return Result.failure()
         }
 
@@ -85,6 +86,7 @@ class AiTaskWorker(
             } else {
                 if (runAttemptCount > 3) {
                     alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED"))
+                    NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：AI任务执行失败", true)
                     Result.failure()
                 } else {
                     Result.retry()
@@ -93,6 +95,7 @@ class AiTaskWorker(
         } catch (e: Exception) {
             Log.e(TAG, "Error executing task", e)
             alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = System.currentTimeMillis()))
+            NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：AI任务异常", true)
             Result.failure()
         }
     }
@@ -102,8 +105,11 @@ class AiTaskWorker(
         diaryDao: DiaryDao,
         alarm: AlarmEntity
     ): Boolean {
-        val aiId = parseAiId(alarm.taskPayload) ?: return false
-        val aiConfig = chatDao.getAiConfigById(aiId) ?: return false
+        val aiId = parseAiId(alarm.taskPayload)
+        val aiConfig = when {
+            aiId != null -> chatDao.getAiConfigById(aiId)
+            else -> null
+        } ?: chatDao.getFirstAiConfig() ?: return false
         val chat = chatDao.getChatByIdSuspend(aiConfig.chatId) ?: return false
         val contextText = buildAiContextText(aiConfig.referencedDiaryId, diaryDao)
         val taskPrompt = alarm.remark.ifBlank { "请总结今天新增或最近更新的笔记，并给出3条行动建议。" }
@@ -149,6 +155,7 @@ class AiTaskWorker(
             messageText = content,
             isHighPriority = true
         )
+        NotificationHelper.sendAlarmNotification(context, alarm.id, "${alarm.name}：AI任务已完成", true)
         return true
     }
 

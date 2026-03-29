@@ -82,6 +82,9 @@ interface ChatDao {
     @Query("SELECT * FROM ai_chat_configs WHERE id = :aiId LIMIT 1")
     suspend fun getAiConfigById(aiId: Long): AiChatConfig?
 
+    @Query("SELECT * FROM ai_chat_configs ORDER BY id ASC LIMIT 1")
+    suspend fun getFirstAiConfig(): AiChatConfig?
+
     //配置相关 UserChatConfig
     @Insert
     suspend fun insertUserConfig(config: UserChatConfig)

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -25,6 +26,7 @@ import androidx.compose.foundation.border
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.verticalScroll
 import com.xinkong.diary.ViewModel.AlarmViewModel
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.data.AlarmEntity
@@ -281,6 +283,8 @@ fun AlarmEditScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                                 .border(1.dp, Color.LightGray.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .heightIn(max = 220.dp)
+                                .verticalScroll(rememberScrollState())
                                 .padding(12.dp)
                         ) {
                             Column {
