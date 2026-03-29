@@ -61,6 +61,9 @@ class AiTaskWorker(
             retryCount = currentAlarm.retryCount + 1
         )
         alarmDao.updateAlarm(currentAlarm)
+        if (actionType == "PROCESS_NOTE") {
+            NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：AI任务开始执行", true)
+        }
 
         return try {
             val success = withTimeoutOrNull(5 * 60 * 1000L) {
