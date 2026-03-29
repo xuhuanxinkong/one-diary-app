@@ -115,6 +115,10 @@ fun TalkScreen(
     LaunchedEffect(currentFolder) {
         viewModel.aiCurrentFolder = currentFolder
     }
+    // 进入聊天时清空未读数
+    LaunchedEffect(chat.id) {
+        viewModel.clearUnreadCount(chat.id)
+    }
     
     val aiState by viewModel.aiState.collectAsStateWithLifecycle()
     val pendingToolUI by viewModel.pendingToolUI.collectAsStateWithLifecycle()

@@ -23,10 +23,27 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import org.json.JSONObject
 import android.util.Log
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.forEach
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import java.text.SimpleDateFormat
 import java.util.Date
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    fun clearUnreadCount(chatId: Long) {
+        viewModelScope.launch {
+            // 1. 直接通过非 Flow 的同步方法获取当前对象（或者在 Dao 里写一个 suspend 函数）
+            val chat = chatDao.getChatByIdSuspend(chatId)
+
+            // 2. 判断并更新
+            if (chat != null && chat.unreadCount != 0) {
+                chatDao.updateChat(chat.copy(unreadCount = 0))
+            }
+        }
+    }
     companion object {
         private const val TAG = "ChatViewModel"
     }
@@ -39,6 +56,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ---- 对话列表状态 ----
     private val _chatListState = MutableStateFlow(listOf<Chat>())
     val chatListState: StateFlow<List<Chat>> = _chatListState.asStateFlow()
+
+
+
+    // 2. 派生 AI 列表：当对话列表变化时，触发异步查询 获取第一个Ai
+    val AiListState: StateFlow<List<AiChatConfig>> = chatListState
+        .flatMapLatest { chats ->
+            flow {
+                val firstAiList = chats.mapNotNull { chat ->
+                    // 调用你已有的 DAO 方法：获取该 chatId 下的所有配置，并取第一个
+                    val configs = chatDao.getAiConfigOnce(chat.id)
+                    configs.firstOrNull()
+                }.distinctBy { it.id } // 按照 AI ID 去重
+
+                emit(firstAiList)
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     // ---- AI 状态 ----
     private val _aiState = MutableStateFlow<AiState>(AiState.Idle)
@@ -78,6 +116,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private var currentBatch: ToolBatchContext? = null
 
+
+    //========== 初始化 ==========
     init {
         viewModelScope.launch {
             chatDao.getAllChat().collect { chats ->

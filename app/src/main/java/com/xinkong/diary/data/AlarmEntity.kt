@@ -12,16 +12,28 @@ data class AlarmEntity(
     val isActive: Boolean = true,
     // Days of the week (1=Mon, 7=Sun). Empty means runs only once or chained from a specific date.
     val repeatDays: List<Int> = emptyList(),
-    // Duration to ring in minutes
+    // 持续时间
     val ringDuration: Int = 5,
-    // Interval before ringing again in minutes
+    // 间隔
     val snoozeInterval: Int = 10,
-    // Number of times it can snooze
+    // 重响次数
     val snoozeCount: Int = 3,
-    // Any remark from user or AI
+    // 备注
     val remark: String = "",
-    // When 12-hour format is required in memory, though we save time as 24-hr format.
+    // 12/24时制
     val isAm: Boolean = hour < 12,
-    // Custom ringtone URI if set, empty if default
-    val ringtoneUri: String = ""
+    // 铃声
+    val ringtoneUri: String = "",
+    
+    // ======== AI后台任务与提醒扩展 ========
+    // 动作类型: "REMIND"(纯提醒/闹钟), "PROCESS_NOTE"(后台AI处理笔记), 等
+    val actionType: String = "REMIND",
+    // 任务状态: "PENDING", "RUNNING", "COMPLETED", "FAILED"
+    val taskStatus: String = "PENDING",
+    // 任务执行所需的上下文 (JSON 等格式)
+    val taskPayload: String? = null,
+    // 最后活跃时间，用于检测“僵尸任务”
+    val lastHeartbeat: Long = 0L,
+    // 重试次数
+    val retryCount: Int = 0
 )
