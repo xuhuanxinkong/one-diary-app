@@ -136,6 +136,7 @@ fun DiaryApp() {
                 AlarmEditScreen(
                     id = route.id,
                     alarmViewModel = alarmViewModel,
+                    chatViewModel = chatViewModel,
                     onBack = { navViewModel.navigateBack() }
                 )
             }

@@ -14,7 +14,8 @@ data class Chat(
     val date: String = "",
     val tag:String = "未分类",
     val tagFolder: String = "我的笔记",
-    val backgroundUri: String = ""
+    val backgroundUri: String = "",
+    val unreadCount: Int = 0 // 新增未读消息计数
 )
 
 @Entity(

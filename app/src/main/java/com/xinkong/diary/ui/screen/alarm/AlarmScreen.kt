@@ -345,17 +345,15 @@ fun AlarmCard(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 4. 重复也写到卡片上
-                val daysMap = listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
-                val repeatStr = if (alarm.repeatDays.isEmpty()) "" else {
-                    if (alarm.repeatDays.size == 7) " | 每天"
-                    else " | " + alarm.repeatDays.sorted().joinToString("，") { daysMap[it - 1] } + "重复"
-                }
+                // 改为显示备注，文本过长截断
+                val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
 
-                Text(
-                    text = alarm.name + repeatStr,
+                androidx.compose.material3.Text(
+                    text = alarm.name + remarkStr,
                     fontSize = 14.sp,
-                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha=0.7f) else Color.Gray
+                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha=0.7f) else Color.Gray,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
             Switch(

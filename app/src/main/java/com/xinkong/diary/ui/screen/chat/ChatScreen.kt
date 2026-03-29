@@ -356,16 +356,26 @@ fun ChatCard(chat: Chat, modifier: Modifier) {
         modifier = modifier
     ) {
         Column(verticalArrangement = Arrangement.Center) {
-            Text(
-                "对话:${chat.title}",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(15.dp,16.dp,0.dp, 0.dp)
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "对话:${chat.title}",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(15.dp,16.dp,0.dp, 0.dp)
+                )
+                if (chat.unreadCount > 0) {
+                    // 红色未读圆点
+                    androidx.compose.foundation.Canvas(modifier = Modifier
+                        .padding(end = 16.dp)
+                        .size(12.dp), onDraw = {
+                        drawCircle(Color.Red)
+                    })
+                }
+            }
             Text(
                 formattedDate+" | ",
                 maxLines = 1,

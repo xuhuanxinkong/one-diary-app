@@ -14,19 +14,33 @@ import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.UserChatConfig
 import com.xinkong.diary.repository.ChatMessage
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import org.json.JSONObject
 import android.util.Log
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import java.text.SimpleDateFormat
 import java.util.Date
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    fun clearUnreadCount(chatId: Long) {
+        viewModelScope.launch {
+            // 1. 直接通过非 Flow 的同步方法获取当前对象（或者在 Dao 里写一个 suspend 函数）
+            val chat = chatDao.getChatByIdSuspend(chatId)
+
+            // 2. 判断并更新
+            if (chat != null && chat.unreadCount != 0) {
+                chatDao.updateChat(chat.copy(unreadCount = 0))
+            }
+        }
+    }
     companion object {
         private const val TAG = "ChatViewModel"
     }
@@ -37,8 +51,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val aiHttp = AiHttp()
 
     // ---- 对话列表状态 ----
-    private val _chatListState = MutableStateFlow(listOf<Chat>())
-    val chatListState: StateFlow<List<Chat>> = _chatListState.asStateFlow()
+    val chatListState: StateFlow<List<Chat>> = chatDao.getAllChat()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    // 派生 AI 列表：避免按会话逐个查询，直接基于全量配置和会话列表映射
+    val allAiConfigsState: StateFlow<List<AiChatConfig>> = chatDao.getAllAiConfigs()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    // 派生每个对话的首个 AI（供首页等轻量场景使用）
+    val AiListState: StateFlow<List<AiChatConfig>> = combine(
+        chatListState,
+        allAiConfigsState
+    ) { chats, allConfigs ->
+        val chatIds = chats.map { it.id }.toSet()
+        allConfigs
+            .asSequence()
+            .filter { it.chatId in chatIds }
+            .groupBy { it.chatId }
+            .mapNotNull { (_, configs) -> configs.firstOrNull() }
+            .distinctBy { it.id }
+            .toList()
+    }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     // ---- AI 状态 ----
     private val _aiState = MutableStateFlow<AiState>(AiState.Idle)
@@ -78,13 +124,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private var currentBatch: ToolBatchContext? = null
 
-    init {
-        viewModelScope.launch {
-            chatDao.getAllChat().collect { chats ->
-                _chatListState.update { chats }
-            }
-        }
-    }
 
     // ========== 对话 CRUD ==========
 

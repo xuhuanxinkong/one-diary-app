@@ -27,6 +27,10 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE id = :chatId")
     fun findChatById(chatId: Long): Flow<Chat>
 
+    // 在 ChatDao 中增加一个 suspend 方法，专门用于这种一次性的逻辑操作
+    @Query("SELECT * FROM chats WHERE id = :chatId LIMIT 1")
+    suspend fun getChatByIdSuspend(chatId: Long): Chat?
+
     @Query("SELECT * FROM chats WHERE tag =:tag")
     fun getChatByTag(tag: String): Flow<List<Chat>>
 
@@ -71,6 +75,12 @@ interface ChatDao {
 
     @Query("SELECT * FROM ai_chat_configs WHERE chatId = :chatId")
     suspend fun getAiConfigOnce(chatId: Long): List<AiChatConfig>
+
+    @Query("SELECT * FROM ai_chat_configs")
+    fun getAllAiConfigs(): Flow<List<AiChatConfig>>
+
+    @Query("SELECT * FROM ai_chat_configs WHERE id = :aiId LIMIT 1")
+    suspend fun getAiConfigById(aiId: Long): AiChatConfig?
 
     //配置相关 UserChatConfig
     @Insert
