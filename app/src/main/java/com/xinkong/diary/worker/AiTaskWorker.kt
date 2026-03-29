@@ -39,18 +39,19 @@ class AiTaskWorker(
         val chatViewModel = ChatViewModel(context.applicationContext as Application)
 
         var currentAlarm = alarmDao.getAlarmByIdSync(alarmId) ?: return Result.failure()
+        val alarmAvatarUri = parseAvatarUri(currentAlarm.taskPayload)
 
         val triggerTime = inputData.getLong("TRIGGER_TIME", -1L)
         val now = System.currentTimeMillis()
         if (actionType == "PROCESS_NOTE" && triggerTime > 0 && now - triggerTime > 60 * 60 * 1000L) {
             currentAlarm = currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = now)
             alarmDao.updateAlarm(currentAlarm)
-            notifyAiTaskStatus(currentAlarm.id, NOTIFY_TIMEOUT_OFFSET, "${currentAlarm.name}：任务超时未执行")
+            notifyAiTaskStatus(currentAlarm.id, NOTIFY_TIMEOUT_OFFSET, "${currentAlarm.name}：任务超时未执行", alarmAvatarUri)
             return Result.failure()
         }
 
         val currentTime = System.currentTimeMillis()
-        if (currentAlarm.taskStatus == "RUNNING" && currentTime - currentAlarm.lastHeartbeat < 3600000) {
+        if (currentAlarm.taskStatus == "RUNNING" && runAttemptCount == 0 && currentTime - currentAlarm.lastHeartbeat < 3600000) {
             return Result.retry()
         }
 
@@ -61,7 +62,7 @@ class AiTaskWorker(
         )
         alarmDao.updateAlarm(currentAlarm)
         if (actionType == "PROCESS_NOTE") {
-            notifyAiTaskStatus(currentAlarm.id, NOTIFY_START_OFFSET, "${currentAlarm.name}：AI任务开始执行")
+            notifyAiTaskStatus(currentAlarm.id, NOTIFY_START_OFFSET, "${currentAlarm.name}：AI任务开始执行", alarmAvatarUri)
         }
 
         return try {
@@ -88,7 +89,7 @@ class AiTaskWorker(
             } else {
                 if (runAttemptCount > 3) {
                     alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED"))
-                    notifyAiTaskStatus(currentAlarm.id, NOTIFY_FAIL_OFFSET, "${currentAlarm.name}：AI任务执行失败")
+                    notifyAiTaskStatus(currentAlarm.id, NOTIFY_FAIL_OFFSET, "${currentAlarm.name}：AI任务执行失败", alarmAvatarUri)
                     Result.failure()
                 } else {
                     Result.retry()
@@ -97,7 +98,7 @@ class AiTaskWorker(
         } catch (e: Exception) {
             Log.e(TAG, "Error executing task", e)
             alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = System.currentTimeMillis()))
-            notifyAiTaskStatus(currentAlarm.id, NOTIFY_EXCEPTION_OFFSET, "${currentAlarm.name}：AI任务异常")
+            notifyAiTaskStatus(currentAlarm.id, NOTIFY_EXCEPTION_OFFSET, "${currentAlarm.name}：AI任务异常", alarmAvatarUri)
             Result.failure()
         }
     }
@@ -115,6 +116,7 @@ class AiTaskWorker(
         val chat = chatDao.getChatByIdSuspend(aiConfig.chatId) ?: return false
         val payloadReferencedDiaryId = parseReferencedDiaryId(alarm.taskPayload)
         val payloadAvatarUri = parseAvatarUri(alarm.taskPayload)
+        val resolvedAvatarUri = payloadAvatarUri ?: aiConfig.avatarUri
         val taskPrompt = alarm.remark.ifBlank { "请总结今天新增或最近更新的笔记，并给出3条行动建议。" }
         val result = chatViewModel.sendAlarmTaskMessage(
             chatId = chat.id,
@@ -124,6 +126,14 @@ class AiTaskWorker(
         )
         if (result.isFailure) {
             Log.e(TAG, "AI request failed: ${result.exceptionOrNull()?.message}")
+            NotificationHelper.sendAiMessageNotification(
+                context = context,
+                notificationId = alarm.id * 100 + NOTIFY_FAIL_OFFSET,
+                senderName = aiConfig.name,
+                messageText = "${alarm.name}：${result.exceptionOrNull()?.message ?: "执行失败"}",
+                isHighPriority = false,
+                avatarUri = resolvedAvatarUri
+            )
             return false
         }
         val content = result.getOrDefault("提醒：${alarm.name}")
@@ -134,9 +144,9 @@ class AiTaskWorker(
             senderName = aiConfig.name,
             messageText = content,
             isHighPriority = false,
-            avatarUri = payloadAvatarUri ?: aiConfig.avatarUri
+            avatarUri = resolvedAvatarUri
         )
-        notifyAiTaskStatus(alarm.id, NOTIFY_DONE_OFFSET, "${alarm.name}：AI任务已完成")
+        notifyAiTaskStatus(alarm.id, NOTIFY_DONE_OFFSET, "${alarm.name}：AI任务已完成", resolvedAvatarUri)
         return true
     }
 
@@ -168,13 +178,14 @@ class AiTaskWorker(
         }
     }
 
-    private fun notifyAiTaskStatus(alarmId: Int, offset: Int, text: String) {
+    private fun notifyAiTaskStatus(alarmId: Int, offset: Int, text: String, avatarUri: String? = null) {
         NotificationHelper.sendAiMessageNotification(
             context = context,
             notificationId = alarmId * 100 + offset,
             senderName = "AI提醒",
             messageText = text,
-            isHighPriority = false
+            isHighPriority = false,
+            avatarUri = avatarUri
         )
     }
 }

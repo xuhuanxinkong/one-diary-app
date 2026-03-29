@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import java.io.File
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
@@ -115,11 +116,16 @@ object NotificationHelper {
     private fun loadAvatarBitmap(context: Context, avatarUri: String?): android.graphics.Bitmap? {
         if (avatarUri.isNullOrBlank()) return null
         return try {
-            context.contentResolver.openInputStream(Uri.parse(avatarUri))?.use {
-                BitmapFactory.decodeStream(it)
+            val uri = Uri.parse(avatarUri)
+            if (uri.scheme.isNullOrBlank()) {
+                BitmapFactory.decodeFile(avatarUri)
+            } else {
+                context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it)
+                }
             }
         } catch (_: Exception) {
-            null
+            if (File(avatarUri).exists()) BitmapFactory.decodeFile(avatarUri) else null
         }
     }
 
