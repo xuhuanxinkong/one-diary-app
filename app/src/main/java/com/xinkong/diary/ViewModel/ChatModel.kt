@@ -231,6 +231,74 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * 后台定时任务版发送：单 AI、无图片、保留工具调用能力
+     */
+    suspend fun sendAlarmTaskMessage(
+        chatId: Long,
+        aiConfig: AiChatConfig,
+        taskPrompt: String,
+        referencedDiaryIdOverride: String? = null
+    ): Result<String> {
+        val firstAiId = chatDao.getAiConfigOnce(chatId).firstOrNull()?.id
+        val enabledTools = mutableSetOf<String>().apply {
+            if (!aiConfig.enableStream) {
+                add("query_chat_history")
+                if (aiConfig.enableWebSearch) add("web_search_baidu")
+                if (aiConfig.id == firstAiId) {
+                    if (aiConfig.enableReadNotes) add("read_notes")
+                    if (aiConfig.enableWriteNote) add("write_note")
+                    if (aiConfig.enableEditNote) add("edit_note")
+                }
+            }
+        }
+
+        val chat = chatDao.getChatByIdSuspend(chatId) ?: return Result.failure(Exception("会话不存在"))
+        val messages = buildAlarmContextMessages(
+            chatId = chatId,
+            currentAiConfig = aiConfig,
+            enabledTools = enabledTools,
+            taskPrompt = taskPrompt,
+            referencedDiaryIdOverride = referencedDiaryIdOverride
+        ).toMutableList()
+        val executedTools = mutableListOf<String>()
+
+        repeat(4) {
+            val result = requestAiResponse(aiConfig, messages, enabledTools)
+            if (result.isFailure) return Result.failure(result.exceptionOrNull() ?: Exception("AI回复失败"))
+            val response = result.getOrNull() as? AiResponse.Message ?: return Result.failure(Exception("AI回复格式异常"))
+
+            val tasks = parseToolTasks(response.toolCalls, enabledTools)
+            if (tasks.isEmpty()) {
+                var displayContent = response.content.ifBlank { "(空回复)" }
+                val aiNameTemp = aiConfig.name
+                val prefixRegex = Regex("^(?:(?:(?i)${Regex.escape(aiNameTemp)})|(?i)ai)[:：]\\s*")
+                while (prefixRegex.containsMatchIn(displayContent)) {
+                    displayContent = displayContent.replaceFirst(prefixRegex, "").trimStart()
+                }
+                val aiMsg = ChatMessage(
+                    chatId = chatId,
+                    role = "assistant",
+                    content = displayContent,
+                    date = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(Date()),
+                    toolExecutions = Json.encodeToString(executedTools),
+                    aiId = aiConfig.id
+                )
+                chatDao.insertMessage(aiMsg)
+                return Result.success(displayContent)
+            }
+
+            messages.add(buildAssistantToolCallMessage(response.content, tasks.map { it.toolCall }))
+            for (task in tasks) {
+                val toolResult = executeBackgroundToolTask(task, chatId, chat.tagFolder)
+                executedTools.add(task.title)
+                messages.add(toolResult)
+            }
+        }
+
+        return Result.failure(Exception("工具调用轮次过多，已中止"))
+    }
+
     // ========== 配置 ==========
 
     fun findAiConfig(chatId: Long): Flow<List<AiChatConfig>> = chatDao.findAiConfig(chatId)
@@ -835,6 +903,186 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "name" to toolName,
             "content" to displayStr
         )
+    }
+
+    private suspend fun executeBackgroundToolTask(task: ToolTask, chatId: Long, defaultFolder: String): Map<String, Any> {
+        return when (task) {
+            is ToolTask.ReadNotes -> {
+                val diaries = diaryDao.searchByKeyword(task.keyword, task.limit)
+                    .filter { it.tagFolder == defaultFolder }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = task.keyword,
+                    toolResult = formatDiaryToolResult(diaries)
+                )
+            }
+            is ToolTask.WriteNote -> {
+                val newDiary = com.xinkong.diary.repository.Diary(
+                    title = task.noteTitle,
+                    text = "",
+                    content = task.content,
+                    date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
+                    tag = task.tag,
+                    tagFolder = defaultFolder
+                )
+                diaryDao.insert(newDiary)
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = "",
+                    toolResult = "笔记新增成功: ${task.noteTitle}"
+                )
+            }
+            is ToolTask.EditNote -> {
+                val existing = diaryDao.getDiaryById(task.id)
+                val resultText = if (existing != null) {
+                    val updated = existing.copy(
+                        title = task.noteTitle ?: existing.title,
+                        content = task.content ?: existing.content,
+                        tag = task.tag ?: existing.tag
+                    )
+                    diaryDao.update(updated)
+                    "笔记修改成功: ID=${task.id}"
+                } else {
+                    "修改失败：找不到 ID=${task.id} 的笔记"
+                }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = "",
+                    toolResult = resultText
+                )
+            }
+            is ToolTask.GetTagsAndFolders -> {
+                val foldersAndTags = diaryDao.getAllTagsAndFolders()
+                val grouped = foldersAndTags.groupBy({ it.tagFolder }, { it.tag })
+                val formatted = "当前所有的分类结构：\n" + grouped.entries.joinToString("\n") { (folder, tags) ->
+                    "- 文件夹：[$folder]，包含标签：${tags.joinToString(", ")}"
+                }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = "",
+                    toolResult = formatted
+                )
+            }
+            is ToolTask.QueryChatHistory -> {
+                val messages = chatDao.getMessagesOnce(chatId)
+                val format = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                val startTimeDate = task.startDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
+                val endTimeDate = task.endDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
+                val timeFiltered = messages.filter { msg ->
+                    try {
+                        val msgDate = format.parse(msg.date)
+                        val passStart = startTimeDate == null || msgDate == null || !msgDate.before(startTimeDate)
+                        val passEnd = endTimeDate == null || msgDate == null || !msgDate.after(endTimeDate)
+                        passStart && passEnd
+                    } catch (e: Exception) {
+                        true
+                    }
+                }
+                val matched = if (task.keyword.isNotEmpty()) {
+                    timeFiltered.filter { it.content.contains(task.keyword, ignoreCase = true) }
+                } else timeFiltered
+                val results = matched.takeLast(task.limit)
+                val resultText = if (results.isEmpty()) {
+                    val k = task.keyword.ifEmpty { "任意" }
+                    "未找到符合条件(时间和关键词 '${k}') 的历史对话记录。"
+                } else {
+                    results.joinToString("\n\n") { "(${it.date}) ${it.role}: ${it.content}" }
+                }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = task.keyword,
+                    toolResult = resultText
+                )
+            }
+            is ToolTask.WebSearchBaidu -> {
+                val prefs = getApplication<Application>().getSharedPreferences("api_keys", android.content.Context.MODE_PRIVATE)
+                val apiKey = prefs.getString("baidu_api_key", "") ?: ""
+                val res = if (apiKey.isEmpty()) {
+                    Result.success("说明：由于用户未配置百度千帆大模型API Key，联网搜索请求失败。")
+                } else {
+                    aiHttp.performBaiduWebSearch(task.keyword, apiKey)
+                }
+                val resultStr = res.getOrElse { "搜索出错: ${it.message}" }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = task.keyword,
+                    toolResult = "网络搜索结果：\n$resultStr"
+                )
+            }
+        }
+    }
+
+    private suspend fun buildAlarmContextMessages(
+        chatId: Long,
+        currentAiConfig: AiChatConfig,
+        enabledTools: Set<String>,
+        taskPrompt: String,
+        referencedDiaryIdOverride: String?
+    ): List<Map<String, Any>> {
+        val messages = mutableListOf<Map<String, Any>>()
+        val systemContent = buildAlarmSystemMessage(chatId, currentAiConfig, enabledTools, referencedDiaryIdOverride)
+        if (systemContent.isNotEmpty()) {
+            messages.add(mapOf("role" to "system", "content" to systemContent))
+        }
+
+        val userConfig = chatDao.getUserConfigOnce(chatId)
+        val aiConfigs = chatDao.getAiConfigOnce(chatId)
+        val history = chatDao.getMessagesOnce(chatId).takeLast(13)
+        history.forEach { msg ->
+            val isUserMessage = msg.role == userRole
+            val isCurrentAiMessage = msg.role == assistantRole && msg.aiId == currentAiConfig.id
+            val senderName = if (isUserMessage) userConfig?.name ?: "我" else aiConfigs.find { it.id == msg.aiId }?.name ?: "AI"
+            val actualRole = if (isCurrentAiMessage) assistantRole else userRole
+            val formattedContent = "[时间: ${msg.date}] ${senderName}: ${msg.content}"
+            messages.add(mapOf("role" to actualRole, "content" to formattedContent))
+        }
+
+        val nowText = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())
+        messages.add(
+            mapOf(
+                "role" to userRole,
+                "content" to "[时间: $nowText] 定时任务指令（最高优先级）: $taskPrompt"
+            )
+        )
+        val toolInstruction = buildToolInstruction(enabledTools)
+        if (toolInstruction.isNotEmpty()) {
+            messages.add(mapOf("role" to "system", "content" to "【系统提醒】\n$toolInstruction"))
+        }
+        return messages
+    }
+
+    private suspend fun buildAlarmSystemMessage(
+        chatId: Long,
+        currentAiConfig: AiChatConfig,
+        enabledTools: Set<String>,
+        referencedDiaryIdOverride: String?
+    ): String {
+        val userContext = buildContextFromConfig(chatDao.getUserConfigOnce(chatId)?.referencedDiaryId)
+        val aiContext = buildContextFromConfig(referencedDiaryIdOverride ?: currentAiConfig.referencedDiaryId)
+        val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())
+        return buildString {
+            append("当前系统时间：$currentTime\n")
+            append("你现在的身份是：${currentAiConfig.name}。你正在执行一个闹钟触发的定时任务，请严格按任务指令完成，不要偏离目标。\n\n")
+            if (userContext.isNotEmpty()) append("【用户资料】\n$userContext\n\n")
+            if (aiContext.isNotEmpty()) append("【你的背景资料】\n$aiContext\n\n")
+            if ("read_notes" in enabledTools) {
+                append(
+                    """
+    【工具协议】
+    你可使用函数工具（例如 read_notes）。如果你觉得需要使用工具，必须通过标准的 tool_calls 格式结构返回，不要在对话中用文本或者 markdown 告诉用户你在使用工具。
+    参数格式：
+    - keyword: string（中英文关键词，不含标点）
+    - limit: integer（1 到 5）
+    """.trimIndent()
+                )
+            }
+        }.trim()
     }
 
     // 保存多 AI 回复的模式与启用顺序

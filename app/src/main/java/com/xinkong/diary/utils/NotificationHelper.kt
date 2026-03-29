@@ -45,6 +45,14 @@ object NotificationHelper {
             // 2. 普通消息渠道
             val msgChannel = NotificationChannel(MESSAGE_CHANNEL_ID, MESSAGE_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT).apply {
                 lockscreenVisibility = androidx.core.app.NotificationCompat.VISIBILITY_PRIVATE
+                val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                setSound(
+                    notificationUri,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
             }
 
             notificationManager.createNotificationChannel(alarmChannel)
