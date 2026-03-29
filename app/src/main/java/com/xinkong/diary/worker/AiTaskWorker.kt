@@ -114,6 +114,7 @@ class AiTaskWorker(
         } ?: chatDao.getFirstAiConfig() ?: return false
         val chat = chatDao.getChatByIdSuspend(aiConfig.chatId) ?: return false
         val payloadReferencedDiaryId = parseReferencedDiaryId(alarm.taskPayload)
+        val payloadAvatarUri = parseAvatarUri(alarm.taskPayload)
         val taskPrompt = alarm.remark.ifBlank { "请总结今天新增或最近更新的笔记，并给出3条行动建议。" }
         val result = chatViewModel.sendAlarmTaskMessage(
             chatId = chat.id,
@@ -133,7 +134,7 @@ class AiTaskWorker(
             senderName = aiConfig.name,
             messageText = content,
             isHighPriority = false,
-            avatarUri = aiConfig.avatarUri
+            avatarUri = payloadAvatarUri ?: aiConfig.avatarUri
         )
         notifyAiTaskStatus(alarm.id, NOTIFY_DONE_OFFSET, "${alarm.name}：AI任务已完成")
         return true
@@ -153,6 +154,15 @@ class AiTaskWorker(
         if (taskPayload.isNullOrBlank()) return null
         return try {
             JSONObject(taskPayload).optString("referencedDiaryId").takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseAvatarUri(taskPayload: String?): String? {
+        if (taskPayload.isNullOrBlank()) return null
+        return try {
+            JSONObject(taskPayload).optString("avatarUri").takeIf { it.isNotBlank() }
         } catch (_: Exception) {
             null
         }

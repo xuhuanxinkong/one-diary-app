@@ -27,6 +27,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
+import coil.compose.AsyncImage
 import com.xinkong.diary.ViewModel.AlarmViewModel
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.data.AlarmEntity
@@ -249,12 +250,12 @@ fun AlarmEditScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (selectedAi != null) {
-                                Box(
-                                    modifier = Modifier.size(56.dp).background(Color(0xFF5B9BD5), CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(selectedAi.name.take(2), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                }
+                                AiAvatar(
+                                    avatarUri = selectedAi.avatarUri,
+                                    name = selectedAi.name,
+                                    size = 56.dp,
+                                    fontSize = 18.sp
+                                )
                             } else {
                                 Box(
                                     modifier = Modifier.size(56.dp).background(Color(0xFF5B9BD5), CircleShape),
@@ -299,12 +300,11 @@ fun AlarmEditScreen(
                                             .padding(vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Box(
-                                            modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF5B9BD5)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(config.name.take(2), color = Color.White)
-                                        }
+                                        AiAvatar(
+                                            avatarUri = config.avatarUri,
+                                            name = config.name,
+                                            size = 40.dp
+                                        )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(text = config.name)
@@ -555,8 +555,37 @@ private fun buildAiTaskPayload(aiConfig: AiChatConfig?): String? {
         .put("aiId", aiConfig.id)
         .put("chatId", aiConfig.chatId)
         .put("aiName", aiConfig.name)
+        .put("avatarUri", aiConfig.avatarUri)
         .put("referencedDiaryId", aiConfig.referencedDiaryId)
         .toString()
+}
+
+@Composable
+private fun AiAvatar(
+    avatarUri: String,
+    name: String,
+    size: androidx.compose.ui.unit.Dp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 14.sp
+) {
+    if (avatarUri.isNotBlank()) {
+        AsyncImage(
+            model = avatarUri,
+            contentDescription = "AI头像",
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(Color(0xFF5B9BD5))
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .background(Color(0xFF5B9BD5), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(name.take(2), color = Color.White, fontSize = fontSize, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 
 @Composable
