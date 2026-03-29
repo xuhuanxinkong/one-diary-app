@@ -19,7 +19,7 @@ object NotificationHelper {
 
     private const val ALARM_CHANNEL_ID = "ALARM_CHANNEL_V2"
     private const val ALARM_CHANNEL_NAME = "重要提醒(闹钟与AI消息)"
-    private const val MESSAGE_CHANNEL_ID = "MESSAGE_CHANNEL"
+    private const val MESSAGE_CHANNEL_ID = "MESSAGE_CHANNEL_V2"
     private const val MESSAGE_CHANNEL_NAME = "普通消息"
 
     fun createChannels(context: Context) {

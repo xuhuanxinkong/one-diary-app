@@ -27,6 +27,11 @@ class AiTaskWorker(
 
     companion object {
         private const val TAG = "AiTaskWorker"
+        private const val NOTIFY_START_OFFSET = 1
+        private const val NOTIFY_DONE_OFFSET = 2
+        private const val NOTIFY_FAIL_OFFSET = 3
+        private const val NOTIFY_EXCEPTION_OFFSET = 4
+        private const val NOTIFY_TIMEOUT_OFFSET = 5
     }
 
     override suspend fun doWork(): Result {
@@ -46,13 +51,7 @@ class AiTaskWorker(
         if (actionType == "PROCESS_NOTE" && triggerTime > 0 && now - triggerTime > 60 * 60 * 1000L) {
             currentAlarm = currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = now)
             alarmDao.updateAlarm(currentAlarm)
-            NotificationHelper.sendAiMessageNotification(
-                context = context,
-                notificationId = currentAlarm.id,
-                senderName = "AI提醒",
-                messageText = "${currentAlarm.name}：任务超时未执行",
-                isHighPriority = false
-            )
+            notifyAiTaskStatus(currentAlarm.id, NOTIFY_TIMEOUT_OFFSET, "${currentAlarm.name}：任务超时未执行")
             return Result.failure()
         }
 
@@ -68,13 +67,7 @@ class AiTaskWorker(
         )
         alarmDao.updateAlarm(currentAlarm)
         if (actionType == "PROCESS_NOTE") {
-            NotificationHelper.sendAiMessageNotification(
-                context = context,
-                notificationId = currentAlarm.id,
-                senderName = "AI提醒",
-                messageText = "${currentAlarm.name}：AI任务开始执行",
-                isHighPriority = false
-            )
+            notifyAiTaskStatus(currentAlarm.id, NOTIFY_START_OFFSET, "${currentAlarm.name}：AI任务开始执行")
         }
 
         return try {
@@ -101,13 +94,7 @@ class AiTaskWorker(
             } else {
                 if (runAttemptCount > 3) {
                     alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED"))
-                    NotificationHelper.sendAiMessageNotification(
-                        context = context,
-                        notificationId = currentAlarm.id,
-                        senderName = "AI提醒",
-                        messageText = "${currentAlarm.name}：AI任务执行失败",
-                        isHighPriority = false
-                    )
+                    notifyAiTaskStatus(currentAlarm.id, NOTIFY_FAIL_OFFSET, "${currentAlarm.name}：AI任务执行失败")
                     Result.failure()
                 } else {
                     Result.retry()
@@ -116,13 +103,7 @@ class AiTaskWorker(
         } catch (e: Exception) {
             Log.e(TAG, "Error executing task", e)
             alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = System.currentTimeMillis()))
-            NotificationHelper.sendAiMessageNotification(
-                context = context,
-                notificationId = currentAlarm.id,
-                senderName = "AI提醒",
-                messageText = "${currentAlarm.name}：AI任务异常",
-                isHighPriority = false
-            )
+            notifyAiTaskStatus(currentAlarm.id, NOTIFY_EXCEPTION_OFFSET, "${currentAlarm.name}：AI任务异常")
             Result.failure()
         }
     }
@@ -144,20 +125,7 @@ class AiTaskWorker(
             diaryDao = diaryDao
         )
         val taskPrompt = alarm.remark.ifBlank { "请总结今天新增或最近更新的笔记，并给出3条行动建议。" }
-        val systemInstruction = buildString {
-            append("你正在执行一个由闹钟触发的定时AI任务。")
-            append("任务名称：${alarm.name}。")
-            append("当前时间：${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}。")
-            append("必须优先完成“任务指令”，再参考上下文输出结果。")
-            append("输出要求：先给结论，再给关键要点，语言简洁。")
-            if (contextText.isNotBlank()) {
-                append("\n【可用上下文】\n$contextText")
-            }
-        }
-        val messages = listOf(
-            mapOf("role" to "system", "content" to systemInstruction),
-            mapOf("role" to "user", "content" to "任务指令（最高优先级）：$taskPrompt")
-        )
+        val messages = buildTaskMessages(aiName = aiConfig.name, alarmName = alarm.name, taskPrompt = taskPrompt, contextText = contextText)
         val result = AiHttp().chatWithAi(aiConfig, messages)
         if (result.isFailure) {
             Log.e(TAG, "AI request failed: ${result.exceptionOrNull()?.message}")
@@ -186,13 +154,7 @@ class AiTaskWorker(
             messageText = content,
             isHighPriority = false
         )
-        NotificationHelper.sendAiMessageNotification(
-            context = context,
-            notificationId = alarm.id,
-            senderName = "AI提醒",
-            messageText = "${alarm.name}：AI任务已完成",
-            isHighPriority = false
-        )
+        notifyAiTaskStatus(alarm.id, NOTIFY_DONE_OFFSET, "${alarm.name}：AI任务已完成")
         return true
     }
 
@@ -228,5 +190,38 @@ class AiTaskWorker(
         return diaries.joinToString("\n\n") {
             "标题：${it.title}\n时间：${it.date}\n内容：${it.text.ifEmpty { it.content }}"
         }
+    }
+
+    private fun buildTaskMessages(
+        aiName: String,
+        alarmName: String,
+        taskPrompt: String,
+        contextText: String
+    ): List<Map<String, Any>> {
+        val nowText = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        val systemContent = buildString {
+            append("当前系统时间：$nowText\n")
+            append("你现在的身份是：$aiName。你正在执行一个闹钟触发的定时任务，请仅围绕任务目标给出结果。\n\n")
+            append("【任务规则】\n")
+            append("1. 必须优先执行“任务指令（最高优先级）”。\n")
+            append("2. 可参考上下文，但上下文不得覆盖任务指令。\n")
+            append("3. 输出先给结论，再给要点，语言简洁。\n\n")
+            append("【任务名称】\n$alarmName\n\n")
+            if (contextText.isNotBlank()) append("【你的背景资料】\n$contextText\n\n")
+        }.trim()
+        return listOf(
+            mapOf("role" to "system", "content" to systemContent),
+            mapOf("role" to "user", "content" to "[时间: $nowText] 定时任务指令（最高优先级）: $taskPrompt")
+        )
+    }
+
+    private fun notifyAiTaskStatus(alarmId: Int, offset: Int, text: String) {
+        NotificationHelper.sendAiMessageNotification(
+            context = context,
+            notificationId = alarmId * 100 + offset,
+            senderName = "AI提醒",
+            messageText = text,
+            isHighPriority = false
+        )
     }
 }
