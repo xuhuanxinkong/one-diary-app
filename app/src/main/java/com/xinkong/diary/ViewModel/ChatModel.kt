@@ -276,6 +276,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 while (prefixRegex.containsMatchIn(displayContent)) {
                     displayContent = displayContent.replaceFirst(prefixRegex, "").trimStart()
                 }
+                // 移除时间前缀 [时间: yyyy-MM-dd HH:mm]
+                val timePrefixRegex = Regex("^\\[时间:\\s*\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}\\]\\s*")
+                while (timePrefixRegex.containsMatchIn(displayContent)) {
+                    displayContent = displayContent.replaceFirst(timePrefixRegex, "").trimStart()
+                }
                 val aiMsg = ChatMessage(
                     chatId = chatId,
                     role = "assistant",
@@ -343,6 +348,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         var displayContent = fullContent
         while (prefixRegex.containsMatchIn(displayContent)) {
             displayContent = displayContent.replaceFirst(prefixRegex, "")
+        }
+        // 移除时间前缀 [时间: yyyy-MM-dd HH:mm]
+        val timePrefixRegex = Regex("^\\[时间:\\s*\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}\\]\\s*")
+        while (timePrefixRegex.containsMatchIn(displayContent)) {
+            displayContent = displayContent.replaceFirst(timePrefixRegex, "").trimStart()
         }
         return displayContent
     }
@@ -740,6 +750,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 while (prefixRegex.containsMatchIn(tempContent)) {
                                     tempContent = tempContent.replaceFirst(prefixRegex, "").trimStart()
                                 }
+                                // 移除时间前缀 [时间: yyyy-MM-dd HH:mm]
+                                val timePrefixRegex = Regex("^\\[时间:\\s*\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}\\]\\s*")
+                                while (timePrefixRegex.containsMatchIn(tempContent)) {
+                                    tempContent = tempContent.replaceFirst(timePrefixRegex, "").trimStart()
+                                }
                                 
                                 val aiMsg = ChatMessage(
                                     chatId = chatId,
@@ -772,6 +787,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val prefixRegex = Regex("^(?:(?:(?i)${Regex.escape(aiNameTemp)})|(?i)ai)[:：]\\s*")
                         while (prefixRegex.containsMatchIn(displayContent)) {
                             displayContent = displayContent.replaceFirst(prefixRegex, "").trimStart()
+                        }
+                        // 移除时间前缀 [时间: yyyy-MM-dd HH:mm]
+                        val timePrefixRegex = Regex("^\\[时间:\\s*\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}\\]\\s*")
+                        while (timePrefixRegex.containsMatchIn(displayContent)) {
+                            displayContent = displayContent.replaceFirst(timePrefixRegex, "").trimStart()
                         }
                         
                         val toolExecutionsStr = Json.encodeToString(executedTools)

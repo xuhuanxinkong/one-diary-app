@@ -320,11 +320,13 @@ fun AlarmCard(
     onCheckedChange: (Boolean) -> Unit,
     onClick: () -> Unit
 ) {
+    val isAiReminder = alarm.actionType == "PROCESS_NOTE"
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp)
             .clickable { onClick() },
-        shape = RoundedCornerShape(20.dp), // 使用 20.dp 以贴合苹果风格现代大圆角卡片
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
@@ -336,19 +338,35 @@ fun AlarmCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(
-                    text = String.format("%02d:%02d", alarm.hour, alarm.minute),
-                    fontSize = 42.sp, // 加大时间主体字号，增加视觉冲击力
-                    fontWeight = FontWeight.W600,
-                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface else Color.Gray
-                )
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = String.format("%02d:%02d", alarm.hour, alarm.minute),
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.W600,
+                        color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface else Color.Gray
+                    )
+                    if (isAiReminder) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0xFF5B9BD5).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                "AI",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF5B9BD5)
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // 改为显示备注，文本过长截断
                 val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
 
-                androidx.compose.material3.Text(
+                Text(
                     text = alarm.name + remarkStr,
                     fontSize = 14.sp,
                     color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha=0.7f) else Color.Gray,
@@ -359,7 +377,7 @@ fun AlarmCard(
             Switch(
                 checked = alarm.isActive,
                 onCheckedChange = onCheckedChange,
-                modifier = Modifier.scale(1.1f) // 微调开关组件大小
+                modifier = Modifier.scale(1.1f)
             )
         }
     }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -55,7 +56,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.repository.Chat
+import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.ui.animation.pressScaleEffect
+import coil.compose.AsyncImage
+import androidx.compose.ui.draw.clip
 import com.xinkong.diary.ui.animation.toggleRotateEffect
 import com.xinkong.diary.ui.screen.chat.ChatTagSetting
 import com.xinkong.diary.ui.screen.home.SwipeBackground
@@ -64,6 +68,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -87,6 +92,7 @@ fun ChatScreen(
 ) {
     val viewModel: ChatViewModel = viewModel()
     val chatList by viewModel.chatListState.collectAsStateWithLifecycle()
+    val aiList by viewModel.AiListState.collectAsStateWithLifecycle()
     
     // ----------- 搜索状态 -------------
     var searchQuery by remember { mutableStateOf("") }
@@ -197,6 +203,7 @@ fun ChatScreen(
                 }
                 
                 items(filteredList, key = { it.id }) { chat ->
+                    val aiConfig = aiList.firstOrNull { it.chatId == chat.id }
                     if (isSelectionMode) {
                         Row(
                             modifier = Modifier
@@ -206,7 +213,7 @@ fun ChatScreen(
                                 .clickable { onToggleSelection(chat.id) },
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            ChatCard(chat = chat, modifier = Modifier.weight(1f))
+                            ChatCard(chat = chat, aiConfig = aiConfig, modifier = Modifier.weight(1f))
                             Checkbox(
                                 checked = chat.id in selectedIds,
                                 onCheckedChange = { onToggleSelection(chat.id) }
@@ -215,6 +222,7 @@ fun ChatScreen(
                     } else {
                         SwipeableChatCard(
                             chat = chat,
+                            aiConfig = aiConfig,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(5.dp)
@@ -306,6 +314,7 @@ fun ChatHeaderColumn(
 @Composable
 fun SwipeableChatCard(
     chat: Chat,
+    aiConfig: AiChatConfig?,
     modifier: Modifier,
     onDelete: () -> Unit
 ) {
@@ -324,7 +333,7 @@ fun SwipeableChatCard(
         enableDismissFromEndToStart = true,
         enableDismissFromStartToEnd = false,
         backgroundContent = { SwipeBackground(dismissState = dismissState) },
-        content = { ChatCard(chat = chat, modifier = modifier) }
+        content = { ChatCard(chat = chat, aiConfig = aiConfig, modifier = modifier) }
     )
 
     if (showDialog) {
@@ -339,7 +348,7 @@ fun SwipeableChatCard(
 
 //----------------Chat卡片--------------------
 @Composable
-fun ChatCard(chat: Chat, modifier: Modifier) {
+fun ChatCard(chat: Chat, aiConfig: AiChatConfig?, modifier: Modifier) {
     val formattedDate = remember(chat.date) {
         try {
             val dateTime = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).parse(chat.date)
@@ -350,39 +359,65 @@ fun ChatCard(chat: Chat, modifier: Modifier) {
     }
     Card(
         elevation = CardDefaults.cardElevation(4.dp),
-        shape = RoundedCornerShape(25.dp),
+        shape = RoundedCornerShape(20.dp),
         border = BorderStroke(1.dp, MaterialTheme.diaryColors.border3),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFEFEFE)),
         modifier = modifier
     ) {
-        Column(verticalArrangement = Arrangement.Center) {
+        Column(
+            modifier = Modifier.padding(15.dp, 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // 第一行：AI头像 + AI名称 + 未读红点
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // AI头像
+                if (aiConfig != null && aiConfig.avatarUri.isNotBlank()) {
+                    AsyncImage(
+                        model = aiConfig.avatarUri,
+                        contentDescription = "AI头像",
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(Color(0xFF5B9BD5), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            (aiConfig?.name ?: "AI").take(2),
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    "对话:${chat.title}",
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    aiConfig?.name ?: "Ai助手",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(15.dp,16.dp,0.dp, 0.dp)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
                 if (chat.unreadCount > 0) {
                     // 红色未读圆点
-                    androidx.compose.foundation.Canvas(modifier = Modifier
-                        .padding(end = 16.dp)
-                        .size(12.dp), onDraw = {
-                        drawCircle(Color.Red)
-                    })
+                    androidx.compose.foundation.Canvas(
+                        modifier = Modifier.size(12.dp),
+                        onDraw = { drawCircle(Color.Red) }
+                    )
                 }
             }
+            // 第二行：日期 | 对话名称
             Text(
-                formattedDate+" | ",
+                "$formattedDate | ${chat.title}",
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 fontSize = 12.sp,
-                color = Color.Gray,
-                modifier = Modifier.padding(15.dp,0.dp,0.dp, 8.dp)
+                color = Color.Gray
             )
         }
     }
