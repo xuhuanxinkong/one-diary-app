@@ -46,7 +46,13 @@ class AiTaskWorker(
         if (actionType == "PROCESS_NOTE" && triggerTime > 0 && now - triggerTime > 60 * 60 * 1000L) {
             currentAlarm = currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = now)
             alarmDao.updateAlarm(currentAlarm)
-            NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：任务超时未执行", true)
+            NotificationHelper.sendAiMessageNotification(
+                context = context,
+                notificationId = currentAlarm.id,
+                senderName = "AI提醒",
+                messageText = "${currentAlarm.name}：任务超时未执行",
+                isHighPriority = false
+            )
             return Result.failure()
         }
 
@@ -62,7 +68,13 @@ class AiTaskWorker(
         )
         alarmDao.updateAlarm(currentAlarm)
         if (actionType == "PROCESS_NOTE") {
-            NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：AI任务开始执行", true)
+            NotificationHelper.sendAiMessageNotification(
+                context = context,
+                notificationId = currentAlarm.id,
+                senderName = "AI提醒",
+                messageText = "${currentAlarm.name}：AI任务开始执行",
+                isHighPriority = false
+            )
         }
 
         return try {
@@ -89,7 +101,13 @@ class AiTaskWorker(
             } else {
                 if (runAttemptCount > 3) {
                     alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED"))
-                    NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：AI任务执行失败", true)
+                    NotificationHelper.sendAiMessageNotification(
+                        context = context,
+                        notificationId = currentAlarm.id,
+                        senderName = "AI提醒",
+                        messageText = "${currentAlarm.name}：AI任务执行失败",
+                        isHighPriority = false
+                    )
                     Result.failure()
                 } else {
                     Result.retry()
@@ -98,7 +116,13 @@ class AiTaskWorker(
         } catch (e: Exception) {
             Log.e(TAG, "Error executing task", e)
             alarmDao.updateAlarm(currentAlarm.copy(taskStatus = "FAILED", lastHeartbeat = System.currentTimeMillis()))
-            NotificationHelper.sendAlarmNotification(context, currentAlarm.id, "${currentAlarm.name}：AI任务异常", true)
+            NotificationHelper.sendAiMessageNotification(
+                context = context,
+                notificationId = currentAlarm.id,
+                senderName = "AI提醒",
+                messageText = "${currentAlarm.name}：AI任务异常",
+                isHighPriority = false
+            )
             Result.failure()
         }
     }
@@ -114,7 +138,11 @@ class AiTaskWorker(
             else -> null
         } ?: chatDao.getFirstAiConfig() ?: return false
         val chat = chatDao.getChatByIdSuspend(aiConfig.chatId) ?: return false
-        val contextText = buildAiContextText(aiConfig.referencedDiaryId, diaryDao)
+        val payloadReferencedDiaryId = parseReferencedDiaryId(alarm.taskPayload)
+        val contextText = buildAiContextText(
+            referencedDiaryId = payloadReferencedDiaryId ?: aiConfig.referencedDiaryId,
+            diaryDao = diaryDao
+        )
         val taskPrompt = alarm.remark.ifBlank { "请总结今天新增或最近更新的笔记，并给出3条行动建议。" }
         val systemInstruction = buildString {
             append("你正在执行一个由闹钟触发的定时AI任务。")
@@ -156,9 +184,15 @@ class AiTaskWorker(
             notificationId = chat.id.toInt(),
             senderName = aiConfig.name,
             messageText = content,
-            isHighPriority = true
+            isHighPriority = false
         )
-        NotificationHelper.sendAlarmNotification(context, alarm.id, "${alarm.name}：AI任务已完成", true)
+        NotificationHelper.sendAiMessageNotification(
+            context = context,
+            notificationId = alarm.id,
+            senderName = "AI提醒",
+            messageText = "${alarm.name}：AI任务已完成",
+            isHighPriority = false
+        )
         return true
     }
 
@@ -167,6 +201,15 @@ class AiTaskWorker(
         return try {
             val id = JSONObject(taskPayload).optLong("aiId", -1L)
             id.takeIf { it > 0 }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseReferencedDiaryId(taskPayload: String?): String? {
+        if (taskPayload.isNullOrBlank()) return null
+        return try {
+            JSONObject(taskPayload).optString("referencedDiaryId").takeIf { it.isNotBlank() }
         } catch (_: Exception) {
             null
         }

@@ -555,6 +555,7 @@ private fun buildAiTaskPayload(aiConfig: AiChatConfig?): String? {
         .put("aiId", aiConfig.id)
         .put("chatId", aiConfig.chatId)
         .put("aiName", aiConfig.name)
+        .put("referencedDiaryId", aiConfig.referencedDiaryId)
         .toString()
 }
 
