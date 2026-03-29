@@ -132,7 +132,8 @@ class AiTaskWorker(
             notificationId = chat.id.toInt(),
             senderName = aiConfig.name,
             messageText = content,
-            isHighPriority = false
+            isHighPriority = false,
+            avatarUri = aiConfig.avatarUri
         )
         notifyAiTaskStatus(alarm.id, NOTIFY_DONE_OFFSET, "${alarm.name}：AI任务已完成")
         return true

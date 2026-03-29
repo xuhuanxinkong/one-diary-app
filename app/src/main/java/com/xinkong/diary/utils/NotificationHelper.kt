@@ -6,11 +6,13 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
+import androidx.core.graphics.drawable.IconCompat
 import com.xinkong.diary.MainActivity
 import com.xinkong.diary.R
 import com.xinkong.diary.receiver.AlarmRingActivity
@@ -63,7 +65,14 @@ object NotificationHelper {
     /**
      * 发送类似微信的AI消息通知（基于 MessagingStyle）
      */
-    fun sendAiMessageNotification(context: Context, notificationId: Int, senderName: String, messageText: String, isHighPriority: Boolean = false) {
+    fun sendAiMessageNotification(
+        context: Context,
+        notificationId: Int,
+        senderName: String,
+        messageText: String,
+        isHighPriority: Boolean = false,
+        avatarUri: String? = null
+    ) {
         createChannels(context)
 
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -76,10 +85,12 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // 构造用户或AI的头像 (示例用系统图标兜底，可换成AI特有头像)
-        val aiPerson = Person.Builder()
-            .setName(senderName)
-            .build()
+        val avatarBitmap = loadAvatarBitmap(context, avatarUri)
+        val aiPersonBuilder = Person.Builder().setName(senderName)
+        if (avatarBitmap != null) {
+            aiPersonBuilder.setIcon(IconCompat.createWithBitmap(avatarBitmap))
+        }
+        val aiPerson = aiPersonBuilder.build()
             
         val messagingStyle = NotificationCompat.MessagingStyle(aiPerson)
             .addMessage(messageText, System.currentTimeMillis(), aiPerson)
@@ -93,9 +104,23 @@ object NotificationHelper {
             .setAutoCancel(true)
             .setPriority(if (isHighPriority) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        if (avatarBitmap != null) {
+            builder.setLargeIcon(avatarBitmap)
+        }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(notificationId, builder.build())
+    }
+
+    private fun loadAvatarBitmap(context: Context, avatarUri: String?): android.graphics.Bitmap? {
+        if (avatarUri.isNullOrBlank()) return null
+        return try {
+            context.contentResolver.openInputStream(Uri.parse(avatarUri))?.use {
+                BitmapFactory.decodeStream(it)
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
