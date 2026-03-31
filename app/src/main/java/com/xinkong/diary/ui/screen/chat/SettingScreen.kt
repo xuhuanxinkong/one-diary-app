@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,11 +35,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -73,23 +77,36 @@ fun SettingScreen(
     onBack: () -> Unit,
     onTitleChange: (String) -> Unit,
     onBackgroundChange: (String) -> Unit,
-    onAvatarClick: (String, Long?) -> Unit = {_, _ ->}
+    onGroupAvatarChange: (String) -> Unit = {},
+    onHistoryRoundsChange: (Int) -> Unit = {},
+    onAvatarClick: (String, Long?) -> Unit = {_, _ ->},
+    isGroupChat: Boolean = false  // 是否为群聊，群聊才显示添加AI按钮
 ) {
     val chatViewModel: ChatViewModel = viewModel()
     val aiConfigs by chatViewModel.findAiConfig(chat.id)
         .collectAsStateWithLifecycle(emptyList())
     val userConfig by chatViewModel.findUserConfig(chat.id)
         .collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
+    
+    // 获取所有可用的AI（从AI列表，即非群聊的Chat）
+    val allChats by chatViewModel.chatListState.collectAsStateWithLifecycle(emptyList())
+    val availableAis = remember(allChats) {
+        allChats.filter { !it.isGroupChat }
+    }
+    
+    var showAddAiDialog by remember { mutableStateOf(false) }
 
     val backgroundPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.toString()?.let(onBackgroundChange)
     }
-
-    val context = LocalContext.current
-    val prefs = context.getSharedPreferences("api_keys", android.content.Context.MODE_PRIVATE)
-    var baiduApiKey by remember { mutableStateOf(prefs.getString("baidu_api_key", "") ?: "") }
+    
+    val groupAvatarPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.toString()?.let(onGroupAvatarChange)
+    }
 
     Scaffold(
         topBar = { SettingTopBar(onBack = onBack) }
@@ -98,17 +115,18 @@ fun SettingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
                 .background(Color(0xFFF5F5F5)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(24.dp))
 
-            // AI 头像 + 添加按钮
+            // AI 头像（群聊时显示添加按钮，点击弹出选择对话框）
             AvatarRow(
                 aiConfigs = aiConfigs,
                 userConfig = userConfig,
                 onAvatarClick = onAvatarClick,
-                onAddAiClick = { chatViewModel.addAiConfig(chat.id) }
+                onAddAiClick = if (isGroupChat) {{ showAddAiDialog = true }} else null
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -131,154 +149,215 @@ fun SettingScreen(
                     hasBackground = chat.backgroundUri.isNotEmpty(),
                     onClick = { backgroundPicker.launch("image/*") }
                 )
+                
+                // 群聊头像设置（仅群聊显示）
+                if (isGroupChat) {
+                    Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { groupAvatarPicker.launch("image/*") }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "群聊头像",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray
+                        )
+                        Text(
+                            if (chat.groupAvatarUri.isNotEmpty()) "已设置" else "未设置",
+                            fontSize = 14.sp,
+                            color = if (chat.groupAvatarUri.isNotEmpty()) MaterialTheme.diaryColors.primary else Color.Gray
+                        )
+                    }
+                }
 
-                // 工具设置
-                var toolsExpanded by remember { mutableStateOf(true) }
+                // 记忆对话轮数设置
+                Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                var historyExpanded by remember { mutableStateOf(true) }
                 SettingSectionHeader(
-                    title = "工具设置",
-                    isExpanded = toolsExpanded,
-                    onClick = { toolsExpanded = !toolsExpanded }
+                    title = "记忆设置",
+                    isExpanded = historyExpanded,
+                    onClick = { historyExpanded = !historyExpanded }
                 )
-                if (toolsExpanded) {
-                    if (aiConfigs.isNotEmpty()) {
-                        val config = aiConfigs.first()
+                if (historyExpanded) {
+                    var historyRounds by remember { mutableIntStateOf(chat.historyRounds) }
+                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                "开启图片识别",
+                                "历史对话轮数",
                                 fontSize = 14.sp,
-                                color = Color.DarkGray,
-                                modifier = Modifier.weight(1f)
+                                color = Color.DarkGray
                             )
-                            Switch(
-                                checked = config.enableImageSupport,
-                                onCheckedChange = { checked ->
-                                    chatViewModel.updateAiConfig(
-                                        config.copy(enableImageSupport = checked)
-                                    )
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = MaterialTheme.diaryColors.primary
-                                )
+                            Text(
+                                "${historyRounds}轮",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.diaryColors.primary,
+                                fontWeight = FontWeight.Medium
                             )
                         }
-                    } else {
-                        Text(
-                            "请先添加AI后再设置工具开关。",
-                            color = Color.Gray,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-                }
-
-                // 百度搜索设置
-                var searchExpanded by remember { mutableStateOf(true) }
-                SettingSectionHeader(
-                    title = "百度搜索设置",
-                    isExpanded = searchExpanded,
-                    onClick = { searchExpanded = !searchExpanded }
-                )
-                if (searchExpanded) {
-                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                        OutlinedTextField(
-                            value = baiduApiKey,
-                            onValueChange = {
-                                baiduApiKey = it
-                                prefs.edit().putString("baidu_api_key", it).apply()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Slider(
+                            value = historyRounds.toFloat(),
+                            onValueChange = { 
+                                historyRounds = it.toInt()
                             },
-                            label = { Text("千帆大模型 API Key") },
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            singleLine = true
-                        )
-                    }
-                }
-
-                // 图片识别测试
-                var imageTestExpanded by remember { mutableStateOf(true) }
-                SettingSectionHeader(
-                    title = "图片识别测试",
-                    isExpanded = imageTestExpanded,
-                    onClick = { imageTestExpanded = !imageTestExpanded }
-                )
-                if (imageTestExpanded) {
-                    var testStatus by remember { mutableStateOf("") }
-                    val scope = rememberCoroutineScope()
-                    
-                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    testStatus = "测试中..."
-                                    try {
-                                        val drawable = androidx.core.content.ContextCompat.getDrawable(context, com.xinkong.diary.R.mipmap.ic_launcher)
-                                        val bitmap = if (drawable is android.graphics.drawable.BitmapDrawable) {
-                                            drawable.bitmap
-                                        } else {
-                                            val w = drawable?.intrinsicWidth?.coerceAtLeast(1) ?: 100
-                                            val h = drawable?.intrinsicHeight?.coerceAtLeast(1) ?: 100
-                                            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-                                            val canvas = android.graphics.Canvas(bmp)
-                                            drawable?.setBounds(0, 0, canvas.width, canvas.height)
-                                            drawable?.draw(canvas)
-                                            bmp
-                                        }
-                                        
-                                        val outputStream = java.io.ByteArrayOutputStream()
-                                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
-                                        val base64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
-                                        
-                                        val config = aiConfigs.firstOrNull()
-                                        if (config != null) {
-                                            val messages = listOf(
-                                                mapOf(
-                                                    "role" to "user",
-                                                    "content" to listOf(
-                                                        mapOf("type" to "text", "text" to "What is this?"),
-                                                        mapOf("type" to "image_url", "image_url" to mapOf("url" to "data:image/jpeg;base64,$base64"))
-                                                    )
-                                                )
-                                            )
-                                            val result = AiHttp().chatWithAi(config, messages)
-                                            result.fold(
-                                                onSuccess = { response ->
-                                                    val reply = (response as? AiResponse.Message)?.content ?: ""
-                                                    if (reply.contains("笔记") || reply.contains("日记")) {
-                                                        testStatus = "成功！AI识别为笔记/日记"
-                                                    } else {
-                                                        testStatus = "失败：AI回答为 $reply"
-                                                    }
-                                                },
-                                                onFailure = { e ->
-                                                    testStatus = "请求失败：${e.message}"
-                                                }
-                                            )
-                                        } else {
-                                            testStatus = "请先添加AI"
-                                        }
-                                    } catch (e: Exception) {
-                                        testStatus = "错误：${e.message}"
-                                    }
-                                }
+                            onValueChangeFinished = {
+                                onHistoryRoundsChange(historyRounds)
                             },
+                            valueRange = 1f..30f,
+                            steps = 28,
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("测试图片识别")
-                        }
-                        if (testStatus.isNotEmpty()) {
-                            Text(testStatus, color = Color.Gray, fontSize = 14.sp)
-                        }
+                        )
+                        Text(
+                            "AI将记忆最近${historyRounds}轮对话内容（建议6-15轮）",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
                     }
                 }
             }
         }
     }
+    
+    // 添加AI选择对话框（群聊专用）
+    if (showAddAiDialog) {
+        AddAiToGroupDialog(
+            availableChats = availableAis,
+            existingAiConfigs = aiConfigs,
+            chatViewModel = chatViewModel,
+            groupChatId = chat.id,
+            onDismiss = { showAddAiDialog = false }
+        )
+    }
+}
+
+/**
+ * 添加AI到群聊的对话框
+ */
+@Composable
+fun AddAiToGroupDialog(
+    availableChats: List<Chat>,
+    existingAiConfigs: List<AiChatConfig>,
+    chatViewModel: ChatViewModel,
+    groupChatId: Long,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    // 获取每个单聊的AI配置
+    var aiList by remember { mutableStateOf<List<AiChatConfig>>(emptyList()) }
+    
+    androidx.compose.runtime.LaunchedEffect(availableChats) {
+        val ais = mutableListOf<AiChatConfig>()
+        for (chat in availableChats) {
+            val configs = chatViewModel.findAiConfigOnce(chat.id)
+            configs.firstOrNull()?.let { ais.add(it) }
+        }
+        aiList = ais
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加AI到群聊") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+            ) {
+                if (aiList.isEmpty()) {
+                    Text("暂无可添加的AI", color = Color.Gray)
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn {
+                        items(aiList) { aiConfig ->
+                            // 检查是否已在群聊中
+                            val isAlreadyAdded = existingAiConfigs.any { it.name == aiConfig.name }
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !isAlreadyAdded) {
+                                        chatViewModel.addAiToGroupChat(groupChatId, aiConfig)
+                                        onDismiss()
+                                    }
+                                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // AI头像
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFE8F5E9)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (aiConfig.avatarUri.isNotEmpty()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(aiConfig.avatarUri)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = "AI头像",
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Text(
+                                            aiConfig.name.take(1),
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.diaryColors.primary
+                                        )
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.width(12.dp))
+                                
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        aiConfig.name,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isAlreadyAdded) Color.Gray else Color.Black
+                                    )
+                                    if (aiConfig.model.isNotEmpty()) {
+                                        Text(
+                                            aiConfig.model,
+                                            fontSize = 12.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+                                
+                                if (isAlreadyAdded) {
+                                    Text(
+                                        "已添加",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+                            Divider(color = Color(0xFFF0F0F0))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 
@@ -315,7 +394,7 @@ fun AvatarRow(
     aiConfigs: List<AiChatConfig>,
     userConfig: UserChatConfig,
     onAvatarClick: (String, Long?) -> Unit = {_, _ ->},
-    onAddAiClick: () -> Unit = {}
+    onAddAiClick: (() -> Unit)? = null  // null表示不显示添加按钮
 ) {
     val context = LocalContext.current
     LazyRow(
@@ -379,23 +458,25 @@ fun AvatarRow(
             Spacer(modifier = Modifier.width(16.dp))
         }
 
-        item {
-            // 添加按钮
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFE0E0E0))
-                        .clickable { onAddAiClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = "添加",
-                        tint = Color.Gray,
-                        modifier = Modifier.size(28.dp)
-                    )
+        // 添加按钮（仅在群聊设置时显示）
+        if (onAddAiClick != null) {
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE0E0E0))
+                            .clickable { onAddAiClick() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "添加",
+                            tint = Color.Gray,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
             }
         }

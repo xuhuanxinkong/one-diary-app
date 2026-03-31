@@ -48,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +73,7 @@ import com.xinkong.diary.repository.Diary
 import com.xinkong.diary.ui.screen.home.AiSection
 import com.xinkong.diary.ui.screen.home.SettingSectionHeader
 import com.xinkong.diary.ui.theme.diaryColors
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import java.io.File
@@ -84,30 +86,35 @@ fun DetailScreen(
     chat: Chat,
     role: String,
     aiId: Long? = null,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    isGroupChat: Boolean = false
 ) {
     if (role == "user") {
         UserConfig(chat = chat, onBack = onBack)
     } else {
-        AiConfig(chat = chat, aiId = aiId, onBack = onBack)
+        AiConfig(chat = chat, aiId = aiId, onBack = onBack, isGroupChat = isGroupChat)
     }
 }
 
 
 
 @Composable
-fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
+fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Boolean = false){
 
     val chatViewModel: ChatViewModel = viewModel()
     val configs by chatViewModel.findAiConfig(chat.id)
         .collectAsStateWithLifecycle(emptyList())
     val config = configs.find { it.id == aiId } ?: configs.firstOrNull() ?: AiChatConfig(chatId = chat.id)
     val isFirstAi = configs.firstOrNull()?.id == config.id
+    // 群聊中可以删除任何AI（移除）；单聊中首个AI不能删除
+    val canDelete = if (isGroupChat) true else !isFirstAi
 
     var enableReadNotes by remember(config.enableReadNotes) { mutableStateOf(config.enableReadNotes) }
     var enableWriteNote by remember(config.enableWriteNote) { mutableStateOf(config.enableWriteNote) }
     var enableEditNote by remember(config.enableEditNote) { mutableStateOf(config.enableEditNote) }
-    var enableStream by remember(config.enableStream) { mutableStateOf(config.enableStream) } // 流式开关
+    var enableStream by remember(config.enableStream) { mutableStateOf(config.enableStream) }
+    var enableImageSupport by remember(config.enableImageSupport) { mutableStateOf(config.enableImageSupport) }
+    var enableWebSearch by remember(config.enableWebSearch) { mutableStateOf(config.enableWebSearch) }
     var isEditingName by remember { mutableStateOf(false) }
     var tempName by remember(config.name) { mutableStateOf(config.name) }
 
@@ -115,7 +122,11 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
     var configExpanded by remember { mutableStateOf(true) }
     var contextExpanded by remember { mutableStateOf(true) }
     var functionExpanded by remember { mutableStateOf(true) }
-
+    var toolsExpanded by remember { mutableStateOf(true) }
+    
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences("api_keys", android.content.Context.MODE_PRIVATE)
+    var baiduApiKey by remember { mutableStateOf(prefs.getString("baidu_api_key", "") ?: "") }
 
 
     Scaffold(
@@ -123,9 +134,15 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
             DetailTopBar(
                 title ="AI 信息",
                 onBack = onBack,
-                showDelete = !isFirstAi,
+                showDelete = canDelete,
                 onDelete = {
-                    chatViewModel.deleteAiConfig(config)
+                    if (isGroupChat) {
+                        // 群聊中只是从聊天移除，不删除AI本身
+                        chatViewModel.removeAiFromChat(config)
+                    } else {
+                        // 单聊中删除AI并删除绑定文件夹
+                        chatViewModel.deleteAiConfigWithFolder(config)
+                    }
                     onBack()
                 }
             )
@@ -290,8 +307,11 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
                                     color = Color.DarkGray,
                                     modifier = Modifier.weight(1f))
                                 Switch(
-                                    checked = config.enableWebSearch,
-                                    onCheckedChange = { chatViewModel.updateAiConfig(config.copy(enableWebSearch = it)) },
+                                    checked = enableWebSearch,
+                                    onCheckedChange = { checked ->
+                                        enableWebSearch = checked
+                                        chatViewModel.updateAiConfig(config.copy(enableWebSearch = checked))
+                                    },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = Color.White,
                                         checkedTrackColor = MaterialTheme.diaryColors.primary
@@ -357,6 +377,137 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit){
                                 )
                             )
                         }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = Color.LightGray.copy(alpha = 0.5f))
+                
+                // ========== 工具设置（图片识别、百度搜索）==========
+                SettingSectionHeader(
+                    title = "工具设置",
+                    isExpanded = toolsExpanded,
+                    onClick = { toolsExpanded = !toolsExpanded }
+                )
+                if (toolsExpanded) {
+                    // 图片识别开关
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "开启图片识别",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = enableImageSupport,
+                            onCheckedChange = { checked ->
+                                enableImageSupport = checked
+                                chatViewModel.updateAiConfig(config.copy(enableImageSupport = checked))
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+                    
+                    // 百度搜索API Key设置
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "百度搜索设置",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    OutlinedTextField(
+                        value = baiduApiKey,
+                        onValueChange = {
+                            baiduApiKey = it
+                            prefs.edit().putString("baidu_api_key", it).apply()
+                        },
+                        label = { Text("千帆大模型 API Key") },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        singleLine = true
+                    )
+                    
+                    // 图片识别测试
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "图片识别测试",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    var testStatus by remember { mutableStateOf("") }
+                    val scope = rememberCoroutineScope()
+                    
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                testStatus = "测试中..."
+                                try {
+                                    val drawable = androidx.core.content.ContextCompat.getDrawable(context, com.xinkong.diary.R.mipmap.ic_launcher)
+                                    val bitmap = if (drawable is android.graphics.drawable.BitmapDrawable) {
+                                        drawable.bitmap
+                                    } else {
+                                        val w = drawable?.intrinsicWidth?.coerceAtLeast(1) ?: 100
+                                        val h = drawable?.intrinsicHeight?.coerceAtLeast(1) ?: 100
+                                        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                                        val canvas = android.graphics.Canvas(bmp)
+                                        drawable?.setBounds(0, 0, canvas.width, canvas.height)
+                                        drawable?.draw(canvas)
+                                        bmp
+                                    }
+                                    
+                                    val outputStream = java.io.ByteArrayOutputStream()
+                                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+                                    val base64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
+                                    
+                                    val messages = listOf(
+                                        mapOf(
+                                            "role" to "user",
+                                            "content" to listOf(
+                                                mapOf("type" to "text", "text" to "What is this?"),
+                                                mapOf("type" to "image_url", "image_url" to mapOf("url" to "data:image/jpeg;base64,$base64"))
+                                            )
+                                        )
+                                    )
+                                    val result = com.xinkong.diary.Http.AiHttp().chatWithAi(config, messages)
+                                    result.fold(
+                                        onSuccess = { response ->
+                                            val reply = (response as? com.xinkong.diary.data.AiResponse.Message)?.content ?: ""
+                                            if (reply.contains("笔记") || reply.contains("日记")) {
+                                                testStatus = "成功！AI识别为笔记/日记"
+                                            } else {
+                                                testStatus = "失败：AI回答为 $reply"
+                                            }
+                                        },
+                                        onFailure = { e ->
+                                            testStatus = "请求失败：${e.message}"
+                                        }
+                                    )
+                                } catch (e: Exception) {
+                                    testStatus = "错误：${e.message}"
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.diaryColors.primary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("测试图片识别")
+                    }
+                    if (testStatus.isNotEmpty()) {
+                        Text(testStatus, color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
 

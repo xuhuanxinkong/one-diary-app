@@ -86,11 +86,29 @@ fun DiaryApp() {
                         chat = it,
                         onBack = { navViewModel.navigateBack() },
                         onAvatarClick = { role, aiId ->
-                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId))
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId, isGroupChat = false))
                         },
                         onSetting = {
                             navViewModel.navigateTo(Route.ChatSetting(it.id))
-                        }
+                        },
+                        isGroupChat = false
+                    )
+                }
+            }
+            entry<Route.GroupChatDetail> { route ->
+                val chat by chatViewModel.findChat(route.sessionId)
+                    .collectAsStateWithLifecycle(initialValue = null)
+                chat?.let {
+                    TalkScreen(
+                        chat = it,
+                        onBack = { navViewModel.navigateBack() },
+                        onAvatarClick = { role, aiId ->
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId, isGroupChat = true))
+                        },
+                        onSetting = {
+                            navViewModel.navigateTo(Route.GroupChatSetting(it.id))
+                        },
+                        isGroupChat = true
                     )
                 }
             }
@@ -102,7 +120,8 @@ fun DiaryApp() {
                         chat = it,
                         role = route.role,
                         aiId = route.aiId,
-                        onBack = { navViewModel.navigateBack() }
+                        onBack = { navViewModel.navigateBack() },
+                        isGroupChat = route.isGroupChat
                     )
                 }
             }
@@ -119,9 +138,42 @@ fun DiaryApp() {
                         onBackgroundChange = { backgroundUri ->
                             chatViewModel.updateChat(it.copy(backgroundUri = backgroundUri))
                         },
-                        onAvatarClick = { role, aiId ->
-                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId))
+                        onGroupAvatarChange = { avatarUri ->
+                            chatViewModel.updateChat(it.copy(groupAvatarUri = avatarUri))
                         },
+                        onHistoryRoundsChange = { rounds ->
+                            chatViewModel.updateChat(it.copy(historyRounds = rounds))
+                        },
+                        onAvatarClick = { role, aiId ->
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId, isGroupChat = false))
+                        },
+                        isGroupChat = false
+                    )
+                }
+            }
+            entry<Route.GroupChatSetting> { route ->
+                val chat by chatViewModel.findChat(route.chatId)
+                    .collectAsStateWithLifecycle(initialValue = null)
+                chat?.let {
+                    SettingScreen(
+                        chat = it,
+                        onBack = { navViewModel.navigateBack() },
+                        onTitleChange = { newTitle ->
+                            chatViewModel.updateChat(it.copy(title = newTitle))
+                        },
+                        onBackgroundChange = { backgroundUri ->
+                            chatViewModel.updateChat(it.copy(backgroundUri = backgroundUri))
+                        },
+                        onGroupAvatarChange = { avatarUri ->
+                            chatViewModel.updateChat(it.copy(groupAvatarUri = avatarUri))
+                        },
+                        onHistoryRoundsChange = { rounds ->
+                            chatViewModel.updateChat(it.copy(historyRounds = rounds))
+                        },
+                        onAvatarClick = { role, aiId ->
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId, isGroupChat = true))
+                        },
+                        isGroupChat = true
                     )
                 }
             }

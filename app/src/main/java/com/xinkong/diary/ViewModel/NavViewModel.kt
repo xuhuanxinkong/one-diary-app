@@ -45,17 +45,25 @@ sealed class Route {
     @Serializable
     data class DiaryDetail(val id: Long) : Route()
 
-    // 从 AI 页面打开的对话详情
+    // 从 AI 页面打开的单聊对话详情
     @Serializable
     data class ChatDetail(val sessionId: Long) : Route()
 
+    // 从 AI 页面打开的群聊对话详情
+    @Serializable
+    data class GroupChatDetail(val sessionId: Long) : Route()
+
     // 角色详情页（从对话中点击头像进入）
     @Serializable
-    data class RoleDetail(val chatId: Long, val role: String, val aiId: Long? = null) : Route()
+    data class RoleDetail(val chatId: Long, val role: String, val aiId: Long? = null, val isGroupChat: Boolean = false) : Route()
 
-    // 对话设置页
+    // 对话设置页（单聊）
     @Serializable
     data class ChatSetting(val chatId: Long) : Route()
+
+    // 对话设置页（群聊，可添加AI）
+    @Serializable
+    data class GroupChatSetting(val chatId: Long) : Route()
 
     // 标签管理页 (type: "diary" 或 "chat")
     @Serializable

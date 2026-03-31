@@ -13,10 +13,13 @@ import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.UserChatConfig
 import com.xinkong.diary.repository.ChatMessage
+import com.xinkong.diary.repository.GroupChatMember
+import com.xinkong.diary.repository.TagFolder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -43,12 +46,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
     companion object {
         private const val TAG = "ChatViewModel"
+        private const val PREFS_NAME = "chat_settings"
+        private const val KEY_HISTORY_ROUNDS = "history_rounds"
+        private const val DEFAULT_HISTORY_ROUNDS = 12
     }
 
     private val db = AppDatabase.getDatabase(application)
     private val chatDao = db.chatDao()
     private val diaryDao = db.diaryDao()
+
+    private val tagDao = db.tagDao()
+    
     private val aiHttp = AiHttp()
+    private val prefs = application.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+    
+    // 获取历史消息轮数设置
+    fun getHistoryRounds(): Int = prefs.getInt(KEY_HISTORY_ROUNDS, DEFAULT_HISTORY_ROUNDS)
+    
+    fun setHistoryRounds(rounds: Int) {
+        prefs.edit().putInt(KEY_HISTORY_ROUNDS, rounds.coerceIn(1, 50)).apply()
+    }
 
     // ---- 对话列表状态 ----
     val chatListState: StateFlow<List<Chat>> = chatDao.getAllChat()
@@ -143,7 +160,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteChat(chat: Chat) {
-        viewModelScope.launch { chatDao.deleteChat(chat) }
+        viewModelScope.launch {
+            // 获取该Chat下所有AI配置，删除它们绑定的文件夹
+            val aiConfigs = chatDao.getAiConfigOnce(chat.id)
+            for (config in aiConfigs) {
+                if (config.boundFolder.isNotBlank()) {
+                    // 查找并删除AI绑定的文件夹
+                    val folders = tagDao.getAllTagFolders().first()
+                    val folderToDelete = folders.find { 
+                        it.name == config.boundFolder && it.isAiBound 
+                    }
+                    if (folderToDelete != null) {
+                        tagDao.deleteTagFolder(folderToDelete)
+                    }
+                }
+            }
+            // 删除Chat（级联删除会自动删除关联的AI配置和消息）
+            chatDao.deleteChat(chat)
+        }
     }
 
     fun updateChat(chat: Chat) {
@@ -307,6 +341,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ========== 配置 ==========
 
     fun findAiConfig(chatId: Long): Flow<List<AiChatConfig>> = chatDao.findAiConfig(chatId)
+    
+    suspend fun findAiConfigOnce(chatId: Long): List<AiChatConfig> = chatDao.getAiConfigOnce(chatId)
 
     fun addAiConfig(chatId: Long) {
         viewModelScope.launch { chatDao.insertAiConfig(AiChatConfig(chatId = chatId)) }
@@ -319,6 +355,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteAiConfig(config: AiChatConfig) {
         viewModelScope.launch { chatDao.deleteAiConfig(config) }
     }
+    
+    /**
+     * 从群聊中移除AI（不删除AI本身，只从当前聊天移除）
+     */
+    fun removeAiFromChat(config: AiChatConfig) {
+        viewModelScope.launch { chatDao.deleteAiConfig(config) }
+    }
+    
+    /**
+     * 删除AI并自动删除绑定的文件夹
+     */
+    fun deleteAiConfigWithFolder(config: AiChatConfig) {
+        viewModelScope.launch {
+            // 如果有绑定文件夹，删除该文件夹
+            if (config.boundFolder.isNotBlank()) {
+                val tagDao = AppDatabase.getDatabase(getApplication()).tagDao()
+                // 查找并删除绑定的文件夹
+                val folders = tagDao.getAllTagFolders().first()
+                val folderToDelete = folders.find { it.name == config.boundFolder }
+                if (folderToDelete != null) {
+                    tagDao.deleteTagFolder(folderToDelete)
+                }
+            }
+            // 删除AI配置
+            chatDao.deleteAiConfig(config)
+        }
+    }
 
     fun findUserConfig(chatId: Long): Flow<UserChatConfig> = chatDao.findUserConfig(chatId)
 
@@ -327,6 +390,140 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun searchChat(keyword: String): Flow<List<Chat>> = chatDao.searchAllByKeyword(keyword)
+
+    // ========== 创建AI对话 ==========
+
+    /**
+     * 创建新的AI对话（单聊）：直接创建一个新Chat并关联一个新的AI，同时创建绑定的文件夹
+     */
+    fun createAiChatWithNewAi(aiName: String = "AI助手", folderName: String) {
+        viewModelScope.launch {
+            // 1. 先创建AI绑定的文件夹（type为"Diary"，用于日记笔记）
+            val folder = TagFolder(
+                name = folderName,
+                type = "Diary",
+                isHidden = false,
+                isAiBound = true
+            )
+            tagDao.insertTagFolder(folder)
+            
+            // 2. 创建Chat
+            val chat = Chat(
+                title = aiName,
+                date = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(Date()),
+                tag = "未分类",
+                tagFolder = aiCurrentFolder
+            )
+            val chatId = chatDao.insertChat(chat)
+            
+            // 3. 创建AI配置，绑定文件夹
+            chatDao.insertAiConfig(AiChatConfig(
+                chatId = chatId, 
+                name = aiName,
+                boundFolder = folderName
+            ))
+            chatDao.insertUserConfig(UserChatConfig(chatId = chatId))
+        }
+    }
+
+    /**
+     * 创建群聊：选择多个已有的AI配置，复制到新的群聊对话中
+     */
+    fun createGroupChat(selectedAis: List<AiChatConfig>) {
+        if (selectedAis.size < 2) return
+        viewModelScope.launch {
+            val groupName = selectedAis.take(3).joinToString("、") { it.name }
+            val chat = Chat(
+                title = "$groupName 群聊",
+                date = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(Date()),
+                tag = "未分类",
+                tagFolder = aiCurrentFolder,
+                isGroupChat = true  // 标记为群聊
+            )
+            val chatId = chatDao.insertChat(chat)
+            
+            // 复制选中的AI配置到新群聊，并记录成员关系
+            selectedAis.forEachIndexed { index, aiConfig ->
+                chatDao.insertAiConfig(
+                    AiChatConfig(
+                        chatId = chatId,
+                        name = aiConfig.name,
+                        avatarUri = aiConfig.avatarUri,
+                        baseUrl = aiConfig.baseUrl,
+                        apiKey = aiConfig.apiKey,
+                        model = aiConfig.model,
+                        enableStream = aiConfig.enableStream,
+                        enableWebSearch = aiConfig.enableWebSearch,
+                        enableImageSupport = aiConfig.enableImageSupport,
+                        enableReadNotes = aiConfig.enableReadNotes,
+                        enableWriteNote = aiConfig.enableWriteNote,
+                        enableEditNote = aiConfig.enableEditNote,
+                        boundFolder = aiConfig.boundFolder,
+                        promptRole = aiConfig.promptRole,
+                        promptDomain = aiConfig.promptDomain,
+                        promptRules = aiConfig.promptRules,
+                        promptStyle = aiConfig.promptStyle,
+                        promptExtra = aiConfig.promptExtra,
+                        replyOrder = index,
+                        isEnabled = true
+                    )
+                )
+                // 记录群聊成员关系
+                chatDao.insertGroupChatMember(GroupChatMember(groupChatId = chatId, sourceAiId = aiConfig.id))
+            }
+            chatDao.insertUserConfig(UserChatConfig(chatId = chatId))
+        }
+    }
+    
+    /**
+     * 从AI列表中添加AI到群聊
+     */
+    fun addAiToGroupChat(groupChatId: Long, sourceAiConfig: AiChatConfig) {
+        viewModelScope.launch {
+            // 获取当前群聊中AI数量作为replyOrder
+            val existingConfigs = chatDao.getAiConfigOnce(groupChatId)
+            val newOrder = existingConfigs.size
+            
+            // 复制AI配置到群聊
+            chatDao.insertAiConfig(
+                AiChatConfig(
+                    chatId = groupChatId,
+                    name = sourceAiConfig.name,
+                    avatarUri = sourceAiConfig.avatarUri,
+                    baseUrl = sourceAiConfig.baseUrl,
+                    apiKey = sourceAiConfig.apiKey,
+                    model = sourceAiConfig.model,
+                    enableStream = sourceAiConfig.enableStream,
+                    enableWebSearch = sourceAiConfig.enableWebSearch,
+                    enableImageSupport = sourceAiConfig.enableImageSupport,
+                    enableReadNotes = sourceAiConfig.enableReadNotes,
+                    enableWriteNote = sourceAiConfig.enableWriteNote,
+                    enableEditNote = sourceAiConfig.enableEditNote,
+                    boundFolder = sourceAiConfig.boundFolder,
+                    promptRole = sourceAiConfig.promptRole,
+                    promptDomain = sourceAiConfig.promptDomain,
+                    promptRules = sourceAiConfig.promptRules,
+                    promptStyle = sourceAiConfig.promptStyle,
+                    promptExtra = sourceAiConfig.promptExtra,
+                    replyOrder = newOrder,
+                    isEnabled = true
+                )
+            )
+            // 记录群聊成员关系
+            chatDao.insertGroupChatMember(GroupChatMember(groupChatId = groupChatId, sourceAiId = sourceAiConfig.id))
+        }
+    }
+    
+    /**
+     * 获取所有可用的AI配置（来自AI列表，即单聊的第一个AI）
+     */
+    fun getAllAvailableAis(): Flow<List<AiChatConfig>> {
+        return chatDao.getAllChat().map { chats ->
+            chats.filter { !it.isGroupChat }.mapNotNull { chat ->
+                chatDao.getAiConfigOnce(chat.id).firstOrNull()
+            }
+        }
+    }
 
     // ========== AI 工具方法 ==========
 
@@ -624,9 +821,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 获取全部配置用于映射名字
         val userConfig = chatDao.getUserConfigOnce(chatId)
         val aiConfigs = chatDao.getAiConfigOnce(chatId)
+        
+        // 获取当前对话的历史轮数设置
+        val chat = chatDao.getChatByIdSuspend(chatId)
+        val historyRounds = chat?.historyRounds ?: DEFAULT_HISTORY_ROUNDS
 
         // 历史消息（此时已经包含了最新的用户消息或者其他 AI 的回复）
-        val history = chatDao.getMessagesOnce(chatId).takeLast(13)
+        // 使用用户设置的轮数，每轮包含一来一回，所以乘2再加1确保最新消息
+        val history = chatDao.getMessagesOnce(chatId).takeLast(historyRounds * 2 + 1)
         history.forEach { msg ->
             val isUserMessage = msg.role == userRole
             val isCurrentAiMessage =
@@ -646,8 +848,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 userRole
             }
             
-            // 将每条消息格式化为 [时间] $name: message 的形式
-            val formattedContent = "[时间: ${msg.date}] ${senderName}: ${msg.content}"
+            // 格式：不要使用 AI 容易学习并复制的格式
+            // 使用 <> 标签式格式，AI 不会在回复中使用这种格式
+            val formattedContent = "<msg time=\"${msg.date}\" from=\"${senderName}\">${msg.content}</msg>"
             messages.add(mapOf("role" to actualRole, "content" to formattedContent))
         }
 
@@ -687,21 +890,66 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val aiContext = buildContextFromConfig(currentAiConfig.referencedDiaryId)
         val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())
         
+        // 解析结构化规则
+        val rules = try {
+            Json.decodeFromString<List<String>>(currentAiConfig.promptRules)
+        } catch (e: Exception) {
+            emptyList()
+        }
+        
+        // 检查是否存在结构化提示词字段
+        val hasStructuredPrompt = currentAiConfig.promptRole.isNotBlank() || 
+                                  currentAiConfig.promptDomain.isNotBlank() || 
+                                  rules.isNotEmpty() || 
+                                  currentAiConfig.promptStyle.isNotBlank()
+        
         return buildString {
-            append("当前系统时间：$currentTime\n")
-            append("你现在的身份是：${currentAiConfig.name}。在接下来的对话记录中，所有发送的消息会以“发送者名称: 消息内容”的格式提供，如果消息带有[时间:xxx]标识，代表该消息发送的时间。请根据此多角色群聊记录进行回复。请严格用你的身份做出对应的反应，不要扮演其他角色。\n\n")
+            append("当前系统时间：$currentTime\n\n")
+            // 结构化身份设定
+            if (hasStructuredPrompt) {
+                append("【身份设定】\n")
+                append("{\n")
+                append("  \"name\": \"${currentAiConfig.name}\"")
+                if (currentAiConfig.promptRole.isNotBlank()) {
+                    append(",\n  \"role\": \"${currentAiConfig.promptRole}\"")
+                }
+                if (currentAiConfig.promptDomain.isNotBlank()) {
+                    append(",\n  \"domain\": \"${currentAiConfig.promptDomain}\"")
+                }
+                if (rules.isNotEmpty()) {
+                    append(",\n  \"rules\": ${Json.encodeToString(rules)}")
+                }
+                if (currentAiConfig.promptStyle.isNotBlank()) {
+                    append(",\n  \"style\": \"${currentAiConfig.promptStyle}\"")
+                }
+                append("\n}\n\n")
+            }
+            
+            // 额外提示词
+            if (currentAiConfig.promptExtra.isNotBlank()) {
+                append("【额外指令】\n${currentAiConfig.promptExtra}\n\n")
+            }
+            
+            
+            append("你现在的身份是：${currentAiConfig.name}。在接下来的对话记录中，消息使用“发送者名称: 消息内容”的格式提供，包含时间和发送者信息。请根据此多角色群聊记录进行回复。请严格用你的身份做出对应的反应，不要扮演其他角色。\n")
+            append("【重要】回复时直接输出内容，绝对不要在开头添加你的名字、时间标识或任何前缀（如\"${currentAiConfig.name}：\"或\"[时间:...]\"）。\n\n")
             if (userContext.isNotEmpty()) append("【用户资料】\n$userContext\n\n")
             if (aiContext.isNotEmpty()) append("【你的背景资料】\n$aiContext\n\n")
-            if ("read_notes" in enabledTools) {
-                append(
-                    """
-    【工具协议】
-    你可使用函数工具（例如 read_notes）。如果你觉得需要使用工具，必须通过标准的 tool_calls 格式结构返回，不要在对话中用文本或者 markdown 告诉用户你在使用工具。
-    参数格式：
-    - keyword: string（中英文关键词，不含标点）
-    - limit: integer（1 到 5）
-    """.trimIndent()
-                )
+            if ("read_notes" in enabledTools || "write_note" in enabledTools || "edit_note" in enabledTools) {
+                append("【工具协议】\n")
+                append("你可使用函数工具（例如 read_notes、write_note、edit_note）。如果你觉得需要使用工具，必须通过标准的 tool_calls 格式结构返回，不要在对话中用文本或者 markdown 告诉用户你在使用工具。\n")
+                
+                // 文件夹限制
+                if (currentAiConfig.boundFolder.isNotBlank()) {
+                    append("【重要】你对笔记的所有操作（读取、写入、编辑）都必须限定在文件夹「${currentAiConfig.boundFolder}」内。不要访问或修改其他文件夹的内容。\n")
+                }
+                
+                append("参数格式：\n")
+                append("- keyword: string（中英文关键词，不含标点）\n")
+                append("- limit: integer（1 到 5）\n")
+                if (currentAiConfig.boundFolder.isNotBlank()) {
+                    append("- folder: 固定为「${currentAiConfig.boundFolder}」\n")
+                }
             }
         }.trim()
     }
@@ -716,6 +964,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (ids.isEmpty()) return ""
         val diaries = diaryDao.getDiariesByIds(ids)
         return diaries.joinToString("\n") { "${it.title}: ${it.text}" }
+    }
+
+    /**
+     * 清理AI回复中的名字和时间前缀
+     */
+    private fun cleanAiResponsePrefix(content: String, aiName: String?): String {
+        var result = content
+        val nameToCheck = aiName ?: "AI"
+        
+        // 移除名字前缀的各种变体：AI助手：、Ai助手:、AI：等
+        // 使用循环处理重复前缀，如：AI助手：AI助手：
+        val namePrefixes = listOf(
+            Regex("^(?i)${Regex.escape(nameToCheck)}[:：]\\s*"),
+            Regex("^(?i)ai助手[:：]\\s*"),
+            Regex("^(?i)ai[:：]\\s*"),
+            Regex("^${Regex.escape(nameToCheck)}[:：]\\s*")
+        )
+        
+        var changed = true
+        while (changed) {
+            changed = false
+            for (regex in namePrefixes) {
+                if (regex.containsMatchIn(result)) {
+                    result = result.replaceFirst(regex, "").trimStart()
+                    changed = true
+                }
+            }
+        }
+        
+        // 移除时间前缀 [时间: yyyy-MM-dd HH:mm] 或 [时间:yyyy-MM-dd HH:mm]
+        val timePrefixRegex = Regex("^\\[时间[:：]\\s*\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}\\]\\s*")
+        while (timePrefixRegex.containsMatchIn(result)) {
+            result = result.replaceFirst(timePrefixRegex, "").trimStart()
+        }
+        
+        return result
     }
 
     // ========== 私有：响应处理 ==========
@@ -745,16 +1029,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     
                             if (response.content.isNotBlank()) {
                                 var tempContent = response.content
-                                val aiNameTemp = config?.name ?: "AI"
-                                val prefixRegex = Regex("^(?:(?:(?i)${Regex.escape(aiNameTemp)})|(?i)ai)[:：]\\s*")
-                                while (prefixRegex.containsMatchIn(tempContent)) {
-                                    tempContent = tempContent.replaceFirst(prefixRegex, "").trimStart()
-                                }
-                                // 移除时间前缀 [时间: yyyy-MM-dd HH:mm]
-                                val timePrefixRegex = Regex("^\\[时间:\\s*\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}\\]\\s*")
-                                while (timePrefixRegex.containsMatchIn(tempContent)) {
-                                    tempContent = tempContent.replaceFirst(timePrefixRegex, "").trimStart()
-                                }
+                                tempContent = cleanAiResponsePrefix(tempContent, config?.name)
                                 
                                 val aiMsg = ChatMessage(
                                     chatId = chatId,
@@ -783,16 +1058,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
 
                         var displayContent = response.content.ifBlank { "(空回复)" }
-                        val aiNameTemp = config?.name ?: "AI"
-                        val prefixRegex = Regex("^(?:(?:(?i)${Regex.escape(aiNameTemp)})|(?i)ai)[:：]\\s*")
-                        while (prefixRegex.containsMatchIn(displayContent)) {
-                            displayContent = displayContent.replaceFirst(prefixRegex, "").trimStart()
-                        }
-                        // 移除时间前缀 [时间: yyyy-MM-dd HH:mm]
-                        val timePrefixRegex = Regex("^\\[时间:\\s*\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}\\]\\s*")
-                        while (timePrefixRegex.containsMatchIn(displayContent)) {
-                            displayContent = displayContent.replaceFirst(timePrefixRegex, "").trimStart()
-                        }
+                        displayContent = cleanAiResponsePrefix(displayContent, config?.name)
                         
                         val toolExecutionsStr = Json.encodeToString(executedTools)
                         val aiMsg = ChatMessage(
@@ -1053,13 +1319,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         val userConfig = chatDao.getUserConfigOnce(chatId)
         val aiConfigs = chatDao.getAiConfigOnce(chatId)
-        val history = chatDao.getMessagesOnce(chatId).takeLast(13)
+        
+        // 获取当前对话的历史轮数设置
+        val chat = chatDao.getChatByIdSuspend(chatId)
+        val historyRounds = chat?.historyRounds ?: DEFAULT_HISTORY_ROUNDS
+        val history = chatDao.getMessagesOnce(chatId).takeLast(historyRounds * 2 + 1)
         history.forEach { msg ->
             val isUserMessage = msg.role == userRole
             val isCurrentAiMessage = msg.role == assistantRole && msg.aiId == currentAiConfig.id
             val senderName = if (isUserMessage) userConfig?.name ?: "我" else aiConfigs.find { it.id == msg.aiId }?.name ?: "AI"
             val actualRole = if (isCurrentAiMessage) assistantRole else userRole
-            val formattedContent = "[时间: ${msg.date}] ${senderName}: ${msg.content}"
+            val formattedContent = "<msg time=\"${msg.date}\" from=\"${senderName}\">${msg.content}</msg>"
             messages.add(mapOf("role" to actualRole, "content" to formattedContent))
         }
 
@@ -1067,7 +1337,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         messages.add(
             mapOf(
                 "role" to userRole,
-                "content" to "[时间: $nowText] 定时任务指令（最高优先级）: $taskPrompt"
+                "content" to "<task time=\"$nowText\" priority=\"high\">$taskPrompt</task>"
             )
         )
         val toolInstruction = buildToolInstruction(enabledTools)

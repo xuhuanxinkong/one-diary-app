@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -32,7 +33,6 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -44,9 +44,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,6 +96,10 @@ import java.io.File
 import java.io.FileOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,7 +107,8 @@ fun TalkScreen(
     chat: Chat,
     onBack: () -> Unit,
     onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
-    onSetting: () -> Unit = {}
+    onSetting: () -> Unit = {},
+    isGroupChat: Boolean = false  // 群聊显示AI回复顺序按钮
 ) {
     val viewModel: ChatViewModel = viewModel()
     val diaryModel: com.xinkong.diary.ViewModel.DiaryViewModel = viewModel()
@@ -289,14 +291,16 @@ fun TalkScreen(
                     },
                     onAddClick = { showExpandPanel = !showExpandPanel },
                     showExpandPanel = showExpandPanel,
-                    onShowAiReply = { showAiReplySheet = true },
                     onPickImage = {
                         imagePickerLauncher.launch("image/*")
                         showExpandPanel = false
-                    }
+                    },
+                    showAiReplyButton = isGroupChat,
+                    onShowAiReply = { showAiReplySheet = true }
                 )
 
-                if (showAiReplySheet) {
+                // 群聊时显示AI回复顺序选择
+                if (showAiReplySheet && isGroupChat) {
                     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
                     ModalBottomSheet(
                         onDismissRequest = { showAiReplySheet = false },
@@ -897,34 +901,36 @@ fun ChatBubble(
                             modifier = Modifier.padding(bottom = 2.dp, end = 4.dp)
                         )
                     }
-                    Box {
-                        Box(
-                            modifier = Modifier
-                                .widthIn(max = 260.dp)
-                                .combinedClickable(
-                                    enabled = !isMultiSelectMode,
-                                    onLongClick = { showMenu = true },
-                                    onClick = { }
-                                )
-                                .background(Color(0xFF95EC69), shape = RoundedCornerShape(8.dp))
-                                .padding(12.dp)
-                        ) {
-                            Column {
-                                if (photoUris.isNotEmpty()) {
-                                    photoUris.forEach { uri ->
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
-                                            contentDescription = "用户图片",
-                                            modifier = Modifier
-                                                .padding(bottom = 8.dp)
-                                                .widthIn(max = 140.dp)
-                                                .height(140.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { expandedImageUri = uri },
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
-                                }
+                    // 图片单独显示在气泡外
+                    if (photoUris.isNotEmpty()) {
+                        photoUris.forEach { uri ->
+                            AsyncImage(
+                                model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
+                                contentDescription = "用户图片",
+                                modifier = Modifier
+                                    .padding(bottom = 6.dp)
+                                    .widthIn(max = 200.dp)
+                                    .heightIn(max = 200.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { expandedImageUri = uri },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                    // 文字气泡（如果有文字内容）
+                    if (content.isNotBlank()) {
+                        Box {
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 260.dp)
+                                    .combinedClickable(
+                                        enabled = !isMultiSelectMode,
+                                        onLongClick = { showMenu = true },
+                                        onClick = { }
+                                    )
+                                    .background(Color(0xFF95EC69), shape = RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                            ) {
                                 ExpandableMessageContent(
                                     content = content,
                                     textColor = Color.Black,
@@ -932,15 +938,15 @@ fun ChatBubble(
                                     isSelectable = allowSelection
                                 )
                             }
+                            ChatMessageMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                onDelete = onDelete,
+                                onQuote = onQuote,
+                                onCopy = { clipboardManager.setText(AnnotatedString(content)) },
+                                onMultiSelect = onMultiSelect
+                            )
                         }
-                        ChatMessageMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                            onDelete = onDelete,
-                            onQuote = onQuote,
-                            onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                            onMultiSelect = onMultiSelect
-                        )
                     }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
@@ -999,34 +1005,36 @@ fun ChatBubble(
                             modifier = Modifier.padding(bottom = 2.dp, start = 4.dp)
                         )
                     }
-                    Box {
-                        Box(
-                            modifier = Modifier
-                                .widthIn(max = 260.dp)
-                                .combinedClickable(
-                                    enabled = !isMultiSelectMode,
-                                    onLongClick = { showMenu = true },
-                                    onClick = { }
-                                )
-                                .background(Color.White, shape = RoundedCornerShape(8.dp))
-                                .padding(12.dp)
-                        ) {
-                            Column {
-                                if (photoUris.isNotEmpty()) {
-                                    photoUris.forEach { uri ->
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
-                                            contentDescription = "AI图片",
-                                            modifier = Modifier
-                                                .padding(bottom = 8.dp)
-                                                .widthIn(max = 140.dp)
-                                                .height(140.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { expandedImageUri = uri },
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
-                                }
+                    // 图片单独显示在气泡外
+                    if (photoUris.isNotEmpty()) {
+                        photoUris.forEach { uri ->
+                            AsyncImage(
+                                model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
+                                contentDescription = "AI图片",
+                                modifier = Modifier
+                                    .padding(bottom = 6.dp)
+                                    .widthIn(max = 200.dp)
+                                    .heightIn(max = 200.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { expandedImageUri = uri },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                    // 文字气泡（如果有文字内容）
+                    if (content.isNotBlank()) {
+                        Box {
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 260.dp)
+                                    .combinedClickable(
+                                        enabled = !isMultiSelectMode,
+                                        onLongClick = { showMenu = true },
+                                        onClick = { }
+                                    )
+                                    .background(Color.White, shape = RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                            ) {
                                 ExpandableMessageContent(
                                     content = content,
                                     textColor = Color.Black,
@@ -1035,15 +1043,15 @@ fun ChatBubble(
                                     onAnimationEnd = onAnimationEnd
                                 )
                             }
+                            ChatMessageMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                onDelete = onDelete,
+                                onQuote = onQuote,
+                                onCopy = { clipboardManager.setText(AnnotatedString(content)) },
+                                onMultiSelect = onMultiSelect
+                            )
                         }
-                        ChatMessageMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                            onDelete = onDelete,
-                            onQuote = onQuote,
-                            onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                            onMultiSelect = onMultiSelect
-                        )
                     }
 
                     if (toolExecutions.isNotEmpty()) {
@@ -1093,8 +1101,9 @@ fun TalkBottomBar(
     onSend: () -> Unit,
     onAddClick: () -> Unit,
     showExpandPanel: Boolean,
-    onShowAiReply: () -> Unit,
-    onPickImage: () -> Unit = {}
+    onPickImage: () -> Unit = {},
+    showAiReplyButton: Boolean = false,
+    onShowAiReply: () -> Unit = {}
 ) {
     Column {
         Divider(color = Color.LightGray, thickness = 0.5.dp)
@@ -1127,6 +1136,7 @@ fun TalkBottomBar(
             onInputChange = onInputChange,
             onSend = onSend,
             onAddClick = onAddClick,
+            showAiReplyButton = showAiReplyButton,
             onShowAiReply = onShowAiReply
         )
         if (showExpandPanel) {
@@ -1141,7 +1151,8 @@ fun TalkInputRow(
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     onAddClick: () -> Unit,
-    onShowAiReply: () -> Unit
+    showAiReplyButton: Boolean = false,
+    onShowAiReply: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -1168,15 +1179,18 @@ fun TalkInputRow(
             }
         )
         Spacer(modifier = Modifier.width(4.dp))
-        IconButton(onClick = onShowAiReply, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = Icons.Default.StarBorder,
-                contentDescription = "AI",
-                tint = Color.DarkGray,
-                modifier = Modifier.size(24.dp)
-            )
+        // 群聊时显示AI回复顺序按钮
+        if (showAiReplyButton) {
+            IconButton(onClick = onShowAiReply, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    imageVector = Icons.Default.StarBorder,
+                    contentDescription = "AI回复顺序",
+                    tint = Color.DarkGray,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
         }
-        Spacer(modifier = Modifier.width(4.dp))
         IconButton(onClick = onAddClick, modifier = Modifier.size(40.dp)) {
             Icon(
                 imageVector = Icons.Default.Add,

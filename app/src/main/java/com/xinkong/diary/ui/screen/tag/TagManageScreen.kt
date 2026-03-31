@@ -480,45 +480,61 @@ fun TagManageRoute(
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    val folderToDelete = editingFolder ?: return@TextButton
-                    // Delete folder
-                    if (type == "diary") {
-                        tagModel.diaryTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
-                            diaryViewModel.listState.value
-                                .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
-                                .forEach { diary ->
-                                    diaryViewModel.updateDiary(
-                                        diary.copy(
-                                            tag = UNCLASSIFIED_TAG_NAME,
-                                            tagFolder = DEFAULT_TAG_FOLDER
+                // 检查是否是AI绑定的文件夹
+                val folderEntity = tagModel.tagFolders.value.firstOrNull {
+                    it.name == editingFolder && it.type == folderType
+                }
+                val isAiBoundFolder = folderEntity?.isAiBound == true
+                
+                if (!isAiBoundFolder) {
+                    TextButton(onClick = {
+                        val folderToDelete = editingFolder ?: return@TextButton
+                        // Delete folder
+                        if (type == "diary") {
+                            tagModel.diaryTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
+                                diaryViewModel.listState.value
+                                    .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
+                                    .forEach { diary ->
+                                        diaryViewModel.updateDiary(
+                                            diary.copy(
+                                                tag = UNCLASSIFIED_TAG_NAME,
+                                                tagFolder = DEFAULT_TAG_FOLDER
+                                            )
                                         )
-                                    )
-                                }
-                            tagModel.deleteDiaryTag(dbTag)
-                        }
-                    } else {
-                        tagModel.chatTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
-                            chatViewModel.chatListState.value
-                                .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
-                                .forEach { chat ->
-                                    chatViewModel.updateChat(
-                                        chat.copy(
-                                            tag = UNCLASSIFIED_TAG_NAME,
-                                            tagFolder = DEFAULT_TAG_FOLDER
+                                    }
+                                tagModel.deleteDiaryTag(dbTag)
+                            }
+                        } else {
+                            tagModel.chatTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
+                                chatViewModel.chatListState.value
+                                    .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
+                                    .forEach { chat ->
+                                        chatViewModel.updateChat(
+                                            chat.copy(
+                                                tag = UNCLASSIFIED_TAG_NAME,
+                                                tagFolder = DEFAULT_TAG_FOLDER
+                                            )
                                         )
-                                    )
-                                }
-                            tagModel.deleteChatTag(dbTag)
+                                    }
+                                tagModel.deleteChatTag(dbTag)
+                            }
                         }
+                        val folder = tagModel.tagFolders.value.firstOrNull {
+                            it.name == folderToDelete && it.type == folderType
+                        } ?: TagFolder(name = folderToDelete, type = folderType, isHidden = false)
+                        tagModel.deleteTagFolder(folder)
+                        editingFolder = null
+                    }) {
+                        Text("删除", color = Color.Red)
                     }
-                    val folderEntity = tagModel.tagFolders.value.firstOrNull {
-                        it.name == folderToDelete && it.type == folderType
-                    } ?: TagFolder(name = folderToDelete, type = folderType, isHidden = false)
-                    tagModel.deleteTagFolder(folderEntity)
-                    editingFolder = null
-                }) {
-                    Text("删除", color = Color.Red)
+                } else {
+                    // AI绑定的文件夹显示提示
+                    Text(
+                        "AI绑定文件夹",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
                 }
             }
         )

@@ -10,9 +10,9 @@ import com.xinkong.diary.data.AlarmEntity
 
 @Database(
     entities = [Diary::class, Chat::class,
-        ChatMessage::class, AiChatConfig::class, UserChatConfig::class,
+        ChatMessage::class, AiChatConfig::class, UserChatConfig::class, GroupChatMember::class,
         DiaryTag::class, ChatTag::class, TagFolder::class, AlarmEntity::class],
-    version = 30,
+    version = 32,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

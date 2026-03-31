@@ -79,6 +79,7 @@ import com.xinkong.diary.repository.Diary
 import com.xinkong.diary.repository.DiarySaver
 import com.xinkong.diary.ui.animation.pressScaleEffect
 import com.xinkong.diary.ui.animation.toggleRotateEffect
+import com.xinkong.diary.ui.screen.chat.AiListScreen
 import com.xinkong.diary.ui.screen.chat.ChatScreen
 import com.xinkong.diary.ui.screen.chat.TalkScreen
 import com.xinkong.diary.ui.theme.DiarydTheme
@@ -129,7 +130,6 @@ fun HomeScreen(){
     val tagFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
 
     var homeSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
-    var chatSelectedTag by rememberSaveable { mutableStateOf(UNCLASSIFIED_TAG_NAME) }
 
     val homeTagDisplayMap = remember(contentList, diaryTags, tagFolders) {
         tagModel.buildDiaryGroupedTags(contentList)
@@ -138,22 +138,15 @@ fun HomeScreen(){
             .flatten()
             .associateBy { it.folder to it.name }
     }
-    val chatTagDisplayMap = remember(chatList, chatTags) {
-        tagModel.buildChatGroupedTags(chatList)
-            .groupedTags
-            .values
-            .flatten()
-            .associateBy { it.name }
-    }
 
-    LaunchedEffect(homeSelectedTag, chatSelectedTag, homeTagDisplayMap, chatTagDisplayMap) {
+    LaunchedEffect(homeSelectedTag, homeTagDisplayMap) {
         val homeMatched = homeTagDisplayMap[homeSelectedTag]
         val homeBg = homeMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background2
         val homeBorder = homeMatched?.let { Color(it.border2Int) } ?: ThemeDefault.border2
 
-        val chatMatched = chatTagDisplayMap[chatSelectedTag]
-        val chatBg = chatMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background0
-        val chatBorder = chatMatched?.let { Color(it.border2Int) } ?: ThemeDefault.sweetBorder
+        // 使用默认背景色
+        val chatBg = ThemeDefault.background0
+        val chatBorder = ThemeDefault.sweetBorder
 
         currentDiaryColors.value = currentDiaryColors.value.copy(
             background2 = homeBg,
@@ -263,27 +256,12 @@ fun HomeScreen(){
                         navViewModel.navigateTo(Route.DiaryDetail(diary.id))
                     }
                 )
-                Tab.AI -> ChatScreen(
-                    selectedTag = chatSelectedTag,
-                    onSelectedTagChange = { chatSelectedTag = it },
-                    isSelectionMode = isSelectionMode,
-                    selectedIds = selectedIds,
-                    onEnterSelection = { id ->
-                        isSelectionMode = true
-                        selectedIds = setOf(id)
-                        showMoveBar = false
-                    },
-                    onToggleSelection = { id ->
-                        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
-                        if (selectedIds.isEmpty()) isSelectionMode = false
-                    },
-                    onExitSelection = {
-                        isSelectionMode = false
-                        selectedIds = emptySet()
-                        showMoveBar = false
-                    },
-                    onClick = { chat ->
+                Tab.AI -> AiListScreen(
+                    onAiChatClick = { chat ->
                         navViewModel.navigateTo(Route.ChatDetail(chat.id))
+                    },
+                    onGroupChatClick = { chat ->
+                        navViewModel.navigateTo(Route.GroupChatDetail(chat.id))
                     }
                 )
                 Tab.ALARM -> AlarmScreen(

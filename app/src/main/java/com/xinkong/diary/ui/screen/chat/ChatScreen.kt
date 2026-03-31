@@ -1,11 +1,5 @@
 package com.xinkong.diary.ui.screen.chat
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -19,21 +13,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
@@ -42,52 +35,38 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.xinkong.diary.ViewModel.ChatViewModel
-import com.xinkong.diary.repository.Chat
-import com.xinkong.diary.repository.AiChatConfig
-import com.xinkong.diary.ui.animation.pressScaleEffect
 import coil.compose.AsyncImage
-import androidx.compose.ui.draw.clip
-import com.xinkong.diary.ui.animation.toggleRotateEffect
-import com.xinkong.diary.ui.screen.chat.ChatTagSetting
+import com.xinkong.diary.ViewModel.ChatViewModel
+import com.xinkong.diary.repository.AiChatConfig
+import com.xinkong.diary.repository.Chat
+import com.xinkong.diary.ui.animation.pressScaleEffect
+import com.xinkong.diary.ui.screen.home.SearchBarItem
+import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
 import com.xinkong.diary.ui.screen.home.SwipeBackground
+import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 import com.xinkong.diary.ui.theme.diaryColors
 import java.text.SimpleDateFormat
 import java.util.Locale
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Checkbox
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.style.TextOverflow
-import com.xinkong.diary.ui.screen.home.SelectionModeTopBar
-import com.xinkong.diary.ui.screen.home.SearchBarItem
-import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
 
 //----------------对话页面总入口--------------------
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
-    selectedTag: String = UNCLASSIFIED_TAG_NAME,
-    onSelectedTagChange: (String) -> Unit = {},
-    isSelectionMode: Boolean = false,
-    selectedIds: Set<Long> = emptySet(),
-    onEnterSelection: (Long) -> Unit = {},
-    onToggleSelection: (Long) -> Unit = {},
-    onExitSelection: () -> Unit = {},
     onClick: (Chat) -> Unit
 ) {
     val viewModel: ChatViewModel = viewModel()
@@ -104,11 +83,11 @@ fun ChatScreen(
     }
     val searchResults by searchFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    val filteredList = remember(chatList, selectedTag, isSearchMode, searchResults) {
+    val filteredList = remember(chatList, isSearchMode, searchResults) {
         if (isSearchMode && searchQuery.isNotBlank()) {
             searchResults
         } else {
-            chatList.filter { it.tag == selectedTag }
+            chatList
         }
     }
     // --------------------------------
@@ -129,7 +108,7 @@ fun ChatScreen(
     }
 
     Scaffold(
-        floatingActionButton = { if (!isSelectionMode && !isSearchMode) AddChatButton(selectedTag) }
+        floatingActionButton = { if (!isSearchMode) AddChatButton() }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -137,13 +116,7 @@ fun ChatScreen(
                 .background(MaterialTheme.diaryColors.background3)
                 .padding(innerPadding)
         ) {
-            if (isSelectionMode) {
-                SelectionModeTopBar(
-                    isDiary = false,
-                    selectedCount = selectedIds.size,
-                    onClose = onExitSelection
-                )
-            } else if (isSearchMode) {
+            if (isSearchMode) {
                 SelectionModeTopBar(
                     isDiary = false,
                     selectedCount = filteredList.size,
@@ -154,29 +127,7 @@ fun ChatScreen(
                     title = "搜索结果: ${filteredList.size} 项"
                 )
             } else {
-                ChatHeaderColumn(
-                    selectedTag = selectedTag,
-                    chatList = chatList,
-                    onTagSelect = { tag -> 
-                        onSelectedTagChange(tag)
-                        isSearchMode = false
-                        searchQuery = ""
-                    },
-                    onTagsDelete = { deletedTags ->
-                        deletedTags.forEach { tagName ->
-                            chatList
-                                .filter { it.tag == tagName }
-                                .forEach { chat ->
-                                    viewModel.updateChat(
-                                        chat.copy(
-                                            tag = UNCLASSIFIED_TAG_NAME
-                                        )
-                                    )
-                                }
-                            }
-                    },
-                    isCollapsed = isCollapsed
-                )
+                ChatHeaderColumn(isCollapsed = isCollapsed)
             }
 
             LazyColumn(
@@ -186,54 +137,32 @@ fun ChatScreen(
                 state = listState
             ) {
                 item {
-                    if (!isSelectionMode) {
-                        SearchBarItem(
-                            searchQuery = searchQuery,
-                            onSearchQueryChange = { 
-                                searchQuery = it 
-                                isSearchMode = true
-                            },
-                            onSearchExecute = { isSearchMode = true },
-                            onClear = { 
-                                searchQuery = ""
-                            },
-                            isDiary = false
-                        )
-                    }
+                    SearchBarItem(
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { 
+                            searchQuery = it 
+                            isSearchMode = true
+                        },
+                        onSearchExecute = { isSearchMode = true },
+                        onClear = { 
+                            searchQuery = ""
+                        },
+                        isDiary = false
+                    )
                 }
                 
                 items(filteredList, key = { it.id }) { chat ->
                     val aiConfig = aiList.firstOrNull { it.chatId == chat.id }
-                    if (isSelectionMode) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(5.dp)
-                                .animateItem()
-                                .clickable { onToggleSelection(chat.id) },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            ChatCard(chat = chat, aiConfig = aiConfig, modifier = Modifier.weight(1f))
-                            Checkbox(
-                                checked = chat.id in selectedIds,
-                                onCheckedChange = { onToggleSelection(chat.id) }
-                            )
-                        }
-                    } else {
-                        SwipeableChatCard(
-                            chat = chat,
-                            aiConfig = aiConfig,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(5.dp)
-                                .animateItem()
-                                .combinedClickable(
-                                    onClick = { onClick(chat) },
-                                    onLongClick = { onEnterSelection(chat.id) }
-                                ),
-                            onDelete = { viewModel.deleteChat(chat) }
-                        )
-                    }
+                    SwipeableChatCard(
+                        chat = chat,
+                        aiConfig = aiConfig,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(5.dp)
+                            .animateItem()
+                            .clickable { onClick(chat) },
+                        onDelete = { viewModel.deleteChat(chat) }
+                    )
                 }
             }
         }
@@ -244,19 +173,10 @@ fun ChatScreen(
 //----------------对话页头部--------------------
 @Composable
 fun ChatHeaderColumn(
-    selectedTag: String,
-    chatList: List<Chat>,
-    onTagSelect: (String) -> Unit,
-    onTagsDelete: (List<String>) -> Unit,
     isCollapsed: Boolean = false
 ) {
-    var isRolled by remember { mutableStateOf(false) }
-    var showAiSettings by remember { mutableStateOf(false) }
-
     val topPadding by androidx.compose.animation.core.animateDpAsState(targetValue = if (isCollapsed) 10.dp else 40.dp, label = "topPadding")
     val titleFontSize by androidx.compose.animation.core.animateFloatAsState(targetValue = if (isCollapsed) 24f else 35f, label = "titleFontSize")
-    val subtitleHeight by androidx.compose.animation.core.animateDpAsState(targetValue = if (isCollapsed) 0.dp else 22.dp, label = "subtitleHeight")
-    val subtitleAlpha by androidx.compose.animation.core.animateFloatAsState(targetValue = if (isCollapsed) 0f else 1f, label = "subtitleAlpha")
 
     Column {
         Row(
@@ -266,44 +186,12 @@ fun ChatHeaderColumn(
                 .padding(20.dp, topPadding, 20.dp, 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val displayTitle = selectedTag
-            Text(displayTitle, fontSize = titleFontSize.sp, modifier = Modifier.clickable { isRolled = !isRolled })
-            Icon(
-                imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "展开",
-                modifier = Modifier
-                    .padding(top = 5.dp)
-                    .toggleRotateEffect(isRotated = isRolled)
-            )
+            Text("AI列表", fontSize = titleFontSize.sp)
             Spacer(modifier = Modifier.weight(1f))
-            Text("☰", fontSize = 30.sp, modifier = Modifier
-                .padding(8.dp)
-//                .clickable { showAiSettings = true }
-            )
         }
         
         Spacer(modifier = Modifier.height(if(isCollapsed) 10.dp else 20.dp))
-
-        AnimatedVisibility(
-            visible = isRolled,
-            enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
-            exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
-        ) {
-            ChatTagSetting(
-                chatList = chatList,
-                selectedTag = selectedTag,
-                onTagSelect = { tag ->
-                    onTagSelect(tag)
-                    isRolled = false
-                },
-                onTagsDelete = onTagsDelete
-            )
-        }
     }
-
-//    if (showAiSettings) {
-//        SettingScreen(onDismiss = { showAiSettings = false })
-//    }
 }
 
 
@@ -426,7 +314,7 @@ fun ChatCard(chat: Chat, aiConfig: AiChatConfig?, modifier: Modifier) {
 
 //----------------添加Chat按钮--------------------
 @Composable
-fun AddChatButton(tag: String) {
+fun AddChatButton() {
     val viewModel: ChatViewModel = viewModel()
     val interactionSource = remember { MutableInteractionSource() }
 
@@ -434,7 +322,7 @@ fun AddChatButton(tag: String) {
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(MaterialTheme.diaryColors.primary),
         contentPadding = PaddingValues(0.dp),
-        onClick = { viewModel.addChat("新对话", tag) },
+        onClick = { viewModel.addChat("新对话", UNCLASSIFIED_TAG_NAME) },
         interactionSource = interactionSource,
         modifier = Modifier
             .padding(bottom = 20.dp, end = 12.dp)

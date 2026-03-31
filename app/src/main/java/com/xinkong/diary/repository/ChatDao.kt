@@ -97,4 +97,20 @@ interface ChatDao {
 
     @Query("SELECT * FROM user_chat_configs WHERE chatId = :chatId LIMIT 1")
     suspend fun getUserConfigOnce(chatId: Long): UserChatConfig?
+    
+    // ========== 群聊成员相关 GroupChatMember ==========
+    @Insert
+    suspend fun insertGroupChatMember(member: GroupChatMember)
+    
+    @Delete
+    suspend fun deleteGroupChatMember(member: GroupChatMember)
+    
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId")
+    fun getGroupChatMembers(groupChatId: Long): Flow<List<GroupChatMember>>
+    
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId")
+    suspend fun getGroupChatMembersOnce(groupChatId: Long): List<GroupChatMember>
+    
+    @Query("DELETE FROM group_chat_members WHERE groupChatId = :groupChatId AND sourceAiId = :sourceAiId")
+    suspend fun removeGroupChatMember(groupChatId: Long, sourceAiId: Long)
 }
