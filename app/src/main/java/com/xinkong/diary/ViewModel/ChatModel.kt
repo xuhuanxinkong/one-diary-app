@@ -812,12 +812,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun buildContextMessages(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>): List<Map<String, Any>> {
         val messages = mutableListOf<Map<String, Any>>()
 
-        // system 消息：上下文资料和身份设定
-        val systemContent = buildSystemMessage(chatId, currentAiConfig, enabledTools)
-        if (systemContent.isNotEmpty()) {
-            messages.add(mapOf("role" to "system", "content" to systemContent))
-        }
-
         // 获取全部配置用于映射名字
         val userConfig = chatDao.getUserConfigOnce(chatId)
         val aiConfigs = chatDao.getAiConfigOnce(chatId)
@@ -829,6 +823,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 历史消息（此时已经包含了最新的用户消息或者其他 AI 的回复）
         // 使用用户设置的轮数，每轮包含一来一回，所以乘2再加1确保最新消息
         val history = chatDao.getMessagesOnce(chatId).takeLast(historyRounds * 2 + 1)
+
+        // system 消息：上下文资料和身份设定（传入历史消息以获取时间信息）
+        val systemContent = buildSystemMessage(chatId, currentAiConfig, enabledTools, history)
+        if (systemContent.isNotEmpty()) {
+            messages.add(mapOf("role" to "system", "content" to systemContent))
+        }
+
         history.forEach { msg ->
             val isUserMessage = msg.role == userRole
             val isCurrentAiMessage =
@@ -881,9 +882,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 构建 system 消息：用户资料 + AI 资料
+     * 构建 system 消息：用户资料 + AI 资料 + 时间上下文
      */
-    private suspend fun buildSystemMessage(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>): String {
+    private suspend fun buildSystemMessage(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>, history: List<ChatMessage> = emptyList()): String {
         val userContext = buildContextFromConfig(
             chatDao.getUserConfigOnce(chatId)?.referencedDiaryId
         )
@@ -903,8 +904,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                   rules.isNotEmpty() || 
                                   currentAiConfig.promptStyle.isNotBlank()
         
+        // 构建对话时间上下文信息
+        val timeContextInfo = buildString {
+            append("【时间上下文】\n")
+            append("当前时间：$currentTime\n")
+            
+            if (history.isNotEmpty()) {
+                // 最新一条消息的时间（通常是刚发送的用户消息）
+                val latestMsgTime = history.lastOrNull()?.date
+                if (latestMsgTime != null) {
+                    append("用户当前消息时间：$latestMsgTime\n")
+                }
+                
+                // 上一条消息的时间（倒数第二条）
+                if (history.size >= 2) {
+                    val previousMsgTime = history[history.size - 2].date
+                    append("上一条对话时间：$previousMsgTime\n")
+                }
+                
+                // 历史记忆中最早一条消息的时间
+                val earliestMsgTime = history.firstOrNull()?.date
+                if (earliestMsgTime != null && history.size > 1) {
+                    append("记忆中最早对话时间：$earliestMsgTime（共${history.size}条历史消息）\n")
+                }
+            }
+        }
+        
         return buildString {
-            append("当前系统时间：$currentTime\n\n")
+            append(timeContextInfo)
+            append("\n")
             // 结构化身份设定
             if (hasStructuredPrompt) {
                 append("【身份设定】\n")
