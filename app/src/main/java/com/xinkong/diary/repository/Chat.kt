@@ -110,6 +110,7 @@ data class UserChatConfig(
 /**
  * 群聊成员关系表：记录群聊中包含哪些AI（通过引用原始AI的ID）
  * 这样可以在群聊设置中从AI列表选择AI添加到群聊
+ * 群聊特有的设置（如回复顺序、是否启用）保存在此表中
  */
 @Entity(
     tableName = "group_chat_members",
@@ -126,8 +127,10 @@ data class UserChatConfig(
 data class GroupChatMember(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
-    val groupChatId: Long, // 群聊的ID
-    val sourceAiId: Long   // 引用的原始AI配置ID（来自AI列表）
+    val groupChatId: Long,   // 群聊的ID
+    val sourceAiId: Long,    // 引用的原始AI配置ID（来自AI列表）
+    val replyOrder: Int = 0, // 群聊中的回复顺序
+    val isEnabled: Boolean = true // 该AI在群聊中是否启用
 )
 
 

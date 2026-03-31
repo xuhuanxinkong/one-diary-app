@@ -102,15 +102,21 @@ interface ChatDao {
     @Insert
     suspend fun insertGroupChatMember(member: GroupChatMember)
     
+    @Update
+    suspend fun updateGroupChatMember(member: GroupChatMember)
+    
     @Delete
     suspend fun deleteGroupChatMember(member: GroupChatMember)
     
-    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId")
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY replyOrder ASC")
     fun getGroupChatMembers(groupChatId: Long): Flow<List<GroupChatMember>>
     
-    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId")
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY replyOrder ASC")
     suspend fun getGroupChatMembersOnce(groupChatId: Long): List<GroupChatMember>
     
     @Query("DELETE FROM group_chat_members WHERE groupChatId = :groupChatId AND sourceAiId = :sourceAiId")
     suspend fun removeGroupChatMember(groupChatId: Long, sourceAiId: Long)
+    
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId AND sourceAiId = :sourceAiId LIMIT 1")
+    suspend fun getGroupChatMemberBySourceAi(groupChatId: Long, sourceAiId: Long): GroupChatMember?
 }

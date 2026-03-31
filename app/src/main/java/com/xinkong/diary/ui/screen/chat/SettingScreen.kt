@@ -31,10 +31,7 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,9 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,9 +55,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.xinkong.diary.data.AiResponse
-
-import com.xinkong.diary.Http.AiHttp
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
@@ -77,35 +69,19 @@ fun SettingScreen(
     onBack: () -> Unit,
     onTitleChange: (String) -> Unit,
     onBackgroundChange: (String) -> Unit,
-    onGroupAvatarChange: (String) -> Unit = {},
     onHistoryRoundsChange: (Int) -> Unit = {},
-    onAvatarClick: (String, Long?) -> Unit = {_, _ ->},
-    isGroupChat: Boolean = false  // 是否为群聊，群聊才显示添加AI按钮
+    onAvatarClick: (String, Long?) -> Unit = {_, _ ->}
 ) {
     val chatViewModel: ChatViewModel = viewModel()
     val aiConfigs by chatViewModel.findAiConfig(chat.id)
         .collectAsStateWithLifecycle(emptyList())
     val userConfig by chatViewModel.findUserConfig(chat.id)
         .collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
-    
-    // 获取所有可用的AI（从AI列表，即非群聊的Chat）
-    val allChats by chatViewModel.chatListState.collectAsStateWithLifecycle(emptyList())
-    val availableAis = remember(allChats) {
-        allChats.filter { !it.isGroupChat }
-    }
-    
-    var showAddAiDialog by remember { mutableStateOf(false) }
 
     val backgroundPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.toString()?.let(onBackgroundChange)
-    }
-    
-    val groupAvatarPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.toString()?.let(onGroupAvatarChange)
     }
 
     Scaffold(
@@ -119,18 +95,8 @@ fun SettingScreen(
                 .background(Color(0xFFF5F5F5)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // AI 头像（群聊时显示添加按钮，点击弹出选择对话框）
-            AvatarRow(
-                aiConfigs = aiConfigs,
-                userConfig = userConfig,
-                onAvatarClick = onAvatarClick,
-                onAddAiClick = if (isGroupChat) {{ showAddAiDialog = true }} else null
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-            Divider(color = Color.LightGray, thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+            
             // 对话名称设置
             Column(
                 modifier = Modifier
@@ -149,30 +115,6 @@ fun SettingScreen(
                     hasBackground = chat.backgroundUri.isNotEmpty(),
                     onClick = { backgroundPicker.launch("image/*") }
                 )
-                
-                // 群聊头像设置（仅群聊显示）
-                if (isGroupChat) {
-                    Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { groupAvatarPicker.launch("image/*") }
-                            .padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "群聊头像",
-                            fontSize = 14.sp,
-                            color = Color.DarkGray
-                        )
-                        Text(
-                            if (chat.groupAvatarUri.isNotEmpty()) "已设置" else "未设置",
-                            fontSize = 14.sp,
-                            color = if (chat.groupAvatarUri.isNotEmpty()) MaterialTheme.diaryColors.primary else Color.Gray
-                        )
-                    }
-                }
 
                 // 记忆对话轮数设置
                 Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
@@ -223,141 +165,52 @@ fun SettingScreen(
                     }
                 }
             }
-        }
-    }
-    
-    // 添加AI选择对话框（群聊专用）
-    if (showAddAiDialog) {
-        AddAiToGroupDialog(
-            availableChats = availableAis,
-            existingAiConfigs = aiConfigs,
-            chatViewModel = chatViewModel,
-            groupChatId = chat.id,
-            onDismiss = { showAddAiDialog = false }
-        )
-    }
-}
-
-/**
- * 添加AI到群聊的对话框
- */
-@Composable
-fun AddAiToGroupDialog(
-    availableChats: List<Chat>,
-    existingAiConfigs: List<AiChatConfig>,
-    chatViewModel: ChatViewModel,
-    groupChatId: Long,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    
-    // 获取每个单聊的AI配置
-    var aiList by remember { mutableStateOf<List<AiChatConfig>>(emptyList()) }
-    
-    androidx.compose.runtime.LaunchedEffect(availableChats) {
-        val ais = mutableListOf<AiChatConfig>()
-        for (chat in availableChats) {
-            val configs = chatViewModel.findAiConfigOnce(chat.id)
-            configs.firstOrNull()?.let { ais.add(it) }
-        }
-        aiList = ais
-    }
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("添加AI到群聊") },
-        text = {
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // 对话成员
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(300.dp)
+                    .padding(horizontal = 16.dp)
+                    .background(Color.White, RoundedCornerShape(12.dp))
+                    .padding(16.dp)
             ) {
-                if (aiList.isEmpty()) {
-                    Text("暂无可添加的AI", color = Color.Gray)
-                } else {
-                    androidx.compose.foundation.lazy.LazyColumn {
-                        items(aiList) { aiConfig ->
-                            // 检查是否已在群聊中
-                            val isAlreadyAdded = existingAiConfigs.any { it.name == aiConfig.name }
-                            
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(enabled = !isAlreadyAdded) {
-                                        chatViewModel.addAiToGroupChat(groupChatId, aiConfig)
-                                        onDismiss()
-                                    }
-                                    .padding(vertical = 12.dp, horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // AI头像
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFE8F5E9)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (aiConfig.avatarUri.isNotEmpty()) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context)
-                                                .data(aiConfig.avatarUri)
-                                                .crossfade(true)
-                                                .build(),
-                                            contentDescription = "AI头像",
-                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Text(
-                                            aiConfig.name.take(1),
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.diaryColors.primary
-                                        )
-                                    }
-                                }
-                                
-                                Spacer(modifier = Modifier.width(12.dp))
-                                
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        aiConfig.name,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (isAlreadyAdded) Color.Gray else Color.Black
-                                    )
-                                    if (aiConfig.model.isNotEmpty()) {
-                                        Text(
-                                            aiConfig.model,
-                                            fontSize = 12.sp,
-                                            color = Color.Gray
-                                        )
-                                    }
-                                }
-                                
-                                if (isAlreadyAdded) {
-                                    Text(
-                                        "已添加",
-                                        fontSize = 12.sp,
-                                        color = Color.Gray
-                                    )
-                                }
-                            }
-                            Divider(color = Color(0xFFF0F0F0))
-                        }
+                Text(
+                    "对话成员",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                // 用户项
+                ChatMemberItem(
+                    name = userConfig.name.ifEmpty { "用户" },
+                    subtitle = "我",
+                    avatarUri = userConfig.avatarUri,
+                    avatarColor = Color(0xFF5B9BD5),
+                    onClick = { onAvatarClick("user", null) }
+                )
+                Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                
+                // AI成员列表
+                aiConfigs.forEach { aiConfig ->
+                    ChatMemberItem(
+                        name = aiConfig.name,
+                        subtitle = aiConfig.model.ifEmpty { "AI助手" },
+                        avatarUri = aiConfig.avatarUri,
+                        avatarColor = Color(0xFFE8F5E9),
+                        onClick = { onAvatarClick("assistant", aiConfig.id) }
+                    )
+                    if (aiConfig != aiConfigs.last()) {
+                        Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
         }
-    )
+    }
 }
 
 
@@ -388,98 +241,75 @@ fun SettingTopBar(onBack: () -> Unit) {
     }
 }
 
-
+/**
+ * 对话成员列表项（单聊用）
+ */
 @Composable
-fun AvatarRow(
-    aiConfigs: List<AiChatConfig>,
-    userConfig: UserChatConfig,
-    onAvatarClick: (String, Long?) -> Unit = {_, _ ->},
-    onAddAiClick: (() -> Unit)? = null  // null表示不显示添加按钮
+fun ChatMemberItem(
+    name: String,
+    subtitle: String,
+    avatarUri: String,
+    avatarColor: Color,
+    onClick: () -> Unit
 ) {
     val context = LocalContext.current
-    LazyRow(
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.Start,
+    
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp)
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        item {
-            // 用户 头像
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF5B9BD5))
-                        .clickable{onAvatarClick("user", null)},
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (userConfig.avatarUri.isNotEmpty()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context).data(userConfig.avatarUri).crossfade(true).build(),
-                            contentDescription = "用户头像",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text("我", color = Color.White, fontSize = 16.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-        }
-
-        items(aiConfigs) { aiConfig ->
-            // AI 头像
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF5B9BD5))
-                        .clickable{onAvatarClick("assistant", aiConfig.id)},
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (aiConfig.avatarUri.isNotEmpty()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context).data(aiConfig.avatarUri).crossfade(true).build(),
-                            contentDescription = "AI头像",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text("AI", color = Color.White, fontSize = 16.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-        }
-
-        // 添加按钮（仅在群聊设置时显示）
-        if (onAddAiClick != null) {
-            item {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier
-                            .size(60.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFE0E0E0))
-                            .clickable { onAddAiClick() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = "添加",
-                            tint = Color.Gray,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
+        // 头像
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(avatarColor),
+            contentAlignment = Alignment.Center
+        ) {
+            if (avatarUri.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context).data(avatarUri).crossfade(true).build(),
+                    contentDescription = "头像",
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(
+                    name.take(1),
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        // 名称和副标题
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+        }
+        
+        // 右箭头
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color.Gray,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 

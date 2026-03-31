@@ -343,6 +343,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun findAiConfig(chatId: Long): Flow<List<AiChatConfig>> = chatDao.findAiConfig(chatId)
     
     suspend fun findAiConfigOnce(chatId: Long): List<AiChatConfig> = chatDao.getAiConfigOnce(chatId)
+    
+    suspend fun getAiConfigById(aiId: Long): AiChatConfig? = chatDao.getAiConfigById(aiId)
 
     fun addAiConfig(chatId: Long) {
         viewModelScope.launch { chatDao.insertAiConfig(AiChatConfig(chatId = chatId)) }
@@ -427,7 +429,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 创建群聊：选择多个已有的AI配置，复制到新的群聊对话中
+     * 创建群聊：选择多个已有的AI配置，通过引用模式关联到新群聊（不复制配置）
      */
     fun createGroupChat(selectedAis: List<AiChatConfig>) {
         if (selectedAis.size < 2) return
@@ -442,75 +444,39 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
             val chatId = chatDao.insertChat(chat)
             
-            // 复制选中的AI配置到新群聊，并记录成员关系
+            // 只记录成员关系（引用模式），不复制AI配置
             selectedAis.forEachIndexed { index, aiConfig ->
-                chatDao.insertAiConfig(
-                    AiChatConfig(
-                        chatId = chatId,
-                        name = aiConfig.name,
-                        avatarUri = aiConfig.avatarUri,
-                        baseUrl = aiConfig.baseUrl,
-                        apiKey = aiConfig.apiKey,
-                        model = aiConfig.model,
-                        enableStream = aiConfig.enableStream,
-                        enableWebSearch = aiConfig.enableWebSearch,
-                        enableImageSupport = aiConfig.enableImageSupport,
-                        enableReadNotes = aiConfig.enableReadNotes,
-                        enableWriteNote = aiConfig.enableWriteNote,
-                        enableEditNote = aiConfig.enableEditNote,
-                        boundFolder = aiConfig.boundFolder,
-                        promptRole = aiConfig.promptRole,
-                        promptDomain = aiConfig.promptDomain,
-                        promptRules = aiConfig.promptRules,
-                        promptStyle = aiConfig.promptStyle,
-                        promptExtra = aiConfig.promptExtra,
+                chatDao.insertGroupChatMember(
+                    GroupChatMember(
+                        groupChatId = chatId, 
+                        sourceAiId = aiConfig.id,
                         replyOrder = index,
                         isEnabled = true
                     )
                 )
-                // 记录群聊成员关系
-                chatDao.insertGroupChatMember(GroupChatMember(groupChatId = chatId, sourceAiId = aiConfig.id))
             }
             chatDao.insertUserConfig(UserChatConfig(chatId = chatId))
         }
     }
     
     /**
-     * 从AI列表中添加AI到群聊
+     * 从AI列表中添加AI到群聊（引用模式）
      */
     fun addAiToGroupChat(groupChatId: Long, sourceAiConfig: AiChatConfig) {
         viewModelScope.launch {
-            // 获取当前群聊中AI数量作为replyOrder
-            val existingConfigs = chatDao.getAiConfigOnce(groupChatId)
-            val newOrder = existingConfigs.size
+            // 获取当前群聊中成员数量作为replyOrder
+            val existingMembers = chatDao.getGroupChatMembersOnce(groupChatId)
+            val newOrder = existingMembers.size
             
-            // 复制AI配置到群聊
-            chatDao.insertAiConfig(
-                AiChatConfig(
-                    chatId = groupChatId,
-                    name = sourceAiConfig.name,
-                    avatarUri = sourceAiConfig.avatarUri,
-                    baseUrl = sourceAiConfig.baseUrl,
-                    apiKey = sourceAiConfig.apiKey,
-                    model = sourceAiConfig.model,
-                    enableStream = sourceAiConfig.enableStream,
-                    enableWebSearch = sourceAiConfig.enableWebSearch,
-                    enableImageSupport = sourceAiConfig.enableImageSupport,
-                    enableReadNotes = sourceAiConfig.enableReadNotes,
-                    enableWriteNote = sourceAiConfig.enableWriteNote,
-                    enableEditNote = sourceAiConfig.enableEditNote,
-                    boundFolder = sourceAiConfig.boundFolder,
-                    promptRole = sourceAiConfig.promptRole,
-                    promptDomain = sourceAiConfig.promptDomain,
-                    promptRules = sourceAiConfig.promptRules,
-                    promptStyle = sourceAiConfig.promptStyle,
-                    promptExtra = sourceAiConfig.promptExtra,
+            // 只记录成员关系，不复制AI配置
+            chatDao.insertGroupChatMember(
+                GroupChatMember(
+                    groupChatId = groupChatId, 
+                    sourceAiId = sourceAiConfig.id,
                     replyOrder = newOrder,
                     isEnabled = true
                 )
             )
-            // 记录群聊成员关系
-            chatDao.insertGroupChatMember(GroupChatMember(groupChatId = groupChatId, sourceAiId = sourceAiConfig.id))
         }
     }
     
@@ -523,6 +489,58 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 chatDao.getAiConfigOnce(chat.id).firstOrNull()
             }
         }
+    }
+    
+    // ========== 群聊成员管理（引用模式） ==========
+    
+    /**
+     * 获取群聊成员列表（包含 replyOrder、isEnabled 等群聊特有设置）
+     */
+    fun getGroupChatMembers(groupChatId: Long): Flow<List<GroupChatMember>> = 
+        chatDao.getGroupChatMembers(groupChatId)
+    
+    /**
+     * 获取群聊中引用的源AI配置列表（按回复顺序排列）
+     * 通过成员关系表查询对应的源AI配置
+     */
+    fun getGroupChatSourceAiConfigs(groupChatId: Long): Flow<List<AiChatConfig>> {
+        return chatDao.getGroupChatMembers(groupChatId).map { members ->
+            members.filter { it.isEnabled }.mapNotNull { member ->
+                chatDao.getAiConfigById(member.sourceAiId)
+            }
+        }
+    }
+    
+    /**
+     * 获取群聊中引用的源AI配置列表（一次性获取）
+     */
+    suspend fun getGroupChatSourceAiConfigsOnce(groupChatId: Long): List<AiChatConfig> {
+        val members = chatDao.getGroupChatMembersOnce(groupChatId)
+        return members.filter { it.isEnabled }.mapNotNull { member ->
+            chatDao.getAiConfigById(member.sourceAiId)
+        }
+    }
+    
+    /**
+     * 获取群聊成员对应的源AI所在的Chat（用于导航到源AI设置界面）
+     */
+    suspend fun getSourceChatForAi(sourceAiId: Long): Chat? {
+        val config = chatDao.getAiConfigById(sourceAiId) ?: return null
+        return chatDao.getChatByIdSuspend(config.chatId)
+    }
+    
+    /**
+     * 更新群聊成员设置（回复顺序、启用状态等）
+     */
+    fun updateGroupChatMember(member: GroupChatMember) {
+        viewModelScope.launch { chatDao.updateGroupChatMember(member) }
+    }
+    
+    /**
+     * 从群聊中移除成员（引用模式）
+     */
+    fun removeAiFromGroupChat(groupChatId: Long, sourceAiId: Long) {
+        viewModelScope.launch { chatDao.removeGroupChatMember(groupChatId, sourceAiId) }
     }
 
     // ========== AI 工具方法 ==========

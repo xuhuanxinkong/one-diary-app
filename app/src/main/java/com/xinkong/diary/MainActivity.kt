@@ -11,7 +11,11 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -23,6 +27,7 @@ import com.xinkong.diary.ViewModel.DiaryViewModel
 import com.xinkong.diary.ViewModel.NavigationViewModel
 import com.xinkong.diary.ViewModel.Route
 import com.xinkong.diary.ui.screen.chat.DetailScreen
+import com.xinkong.diary.ui.screen.chat.GroupSettingScreen
 import com.xinkong.diary.ui.screen.chat.SettingScreen
 import com.xinkong.diary.ui.screen.chat.TalkScreen
 import com.xinkong.diary.repository.AiChatConfig
@@ -104,7 +109,11 @@ fun DiaryApp() {
                         chat = it,
                         onBack = { navViewModel.navigateBack() },
                         onAvatarClick = { role, aiId ->
-                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId, isGroupChat = true))
+                            // 群聊中点击AI头像，导航到源AI的设置界面
+                            if (role == "assistant" && aiId != null) {
+                                navViewModel.navigateTo(Route.SourceAiDetail(aiId))
+                            }
+                            // 用户头像暂不处理
                         },
                         onSetting = {
                             navViewModel.navigateTo(Route.GroupChatSetting(it.id))
@@ -139,16 +148,12 @@ fun DiaryApp() {
                         onBackgroundChange = { backgroundUri ->
                             chatViewModel.updateChat(it.copy(backgroundUri = backgroundUri))
                         },
-                        onGroupAvatarChange = { avatarUri ->
-                            chatViewModel.updateChat(it.copy(groupAvatarUri = avatarUri))
-                        },
                         onHistoryRoundsChange = { rounds ->
                             chatViewModel.updateChat(it.copy(historyRounds = rounds))
                         },
                         onAvatarClick = { role, aiId ->
                             navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId, isGroupChat = false))
-                        },
-                        isGroupChat = false
+                        }
                     )
                 }
             }
@@ -156,7 +161,7 @@ fun DiaryApp() {
                 val chat by chatViewModel.findChat(route.chatId)
                     .collectAsStateWithLifecycle(initialValue = null)
                 chat?.let {
-                    SettingScreen(
+                    GroupSettingScreen(
                         chat = it,
                         onBack = { navViewModel.navigateBack() },
                         onTitleChange = { newTitle ->
@@ -171,10 +176,36 @@ fun DiaryApp() {
                         onHistoryRoundsChange = { rounds ->
                             chatViewModel.updateChat(it.copy(historyRounds = rounds))
                         },
-                        onAvatarClick = { role, aiId ->
-                            navViewModel.navigateTo(Route.RoleDetail(it.id, role, aiId, isGroupChat = true))
+                        onAiClick = { sourceAiId ->
+                            // 导航到源AI的设置界面（通过源AI所在的Chat）
+                            navViewModel.navigateTo(Route.SourceAiDetail(sourceAiId))
                         },
-                        isGroupChat = true
+                        onUserClick = {
+                            // 导航到用户设置界面（群聊中的用户身份）
+                            navViewModel.navigateTo(Route.RoleDetail(it.id, "user", null, isGroupChat = true))
+                        }
+                    )
+                }
+            }
+            entry<Route.SourceAiDetail> { route ->
+                // 根据 sourceAiId 查找对应的 Chat 和 AiConfig，然后显示详情页
+                val sourceAiId = route.sourceAiId
+                var sourceChat by remember { mutableStateOf<com.xinkong.diary.repository.Chat?>(null) }
+                var sourceAiConfig by remember { mutableStateOf<AiChatConfig?>(null) }
+                
+                LaunchedEffect(sourceAiId) {
+                    // 获取源AI配置和对应的Chat
+                    sourceChat = chatViewModel.getSourceChatForAi(sourceAiId)
+                    sourceAiConfig = chatViewModel.getAiConfigById(sourceAiId)
+                }
+                
+                sourceChat?.let { chat ->
+                    DetailScreen(
+                        chat = chat,
+                        role = "assistant",
+                        aiId = sourceAiId,
+                        onBack = { navViewModel.navigateBack() },
+                        isGroupChat = false  // 编辑的是源AI（单聊），不是群聊
                     )
                 }
             }

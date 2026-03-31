@@ -125,7 +125,27 @@ fun TalkScreen(
     val aiState by viewModel.aiState.collectAsStateWithLifecycle()
     val pendingToolUI by viewModel.pendingToolUI.collectAsStateWithLifecycle()
     val messages by viewModel.getMessages(chat.id).collectAsStateWithLifecycle(initialValue = emptyList())
-    val aiConfigs by viewModel.findAiConfig(chat.id).collectAsStateWithLifecycle(emptyList())
+    
+    // 根据是否为群聊，获取不同来源的AI配置
+    // 单聊：直接从 ai_chat_configs 表获取
+    // 群聊：从成员关系表获取源AI配置
+    val aiConfigsFromChat by viewModel.findAiConfig(chat.id).collectAsStateWithLifecycle(emptyList())
+    val groupMembers by viewModel.getGroupChatMembers(chat.id).collectAsStateWithLifecycle(emptyList())
+    val sourceAiConfigs by viewModel.getGroupChatSourceAiConfigs(chat.id).collectAsStateWithLifecycle(emptyList())
+    
+    // 群聊时使用成员关系中的配置，单聊时使用直接配置
+    val aiConfigs = if (isGroupChat) {
+        // 将成员的 isEnabled 和 replyOrder 与源AI配置合并
+        groupMembers.filter { it.isEnabled }.mapNotNull { member ->
+            sourceAiConfigs.find { it.id == member.sourceAiId }?.copy(
+                replyOrder = member.replyOrder,
+                isEnabled = member.isEnabled
+            )
+        }.sortedBy { it.replyOrder }
+    } else {
+        aiConfigsFromChat
+    }
+    
     val currentTypingAi by viewModel.currentTypingAi.collectAsStateWithLifecycle()
     val userConfig by viewModel.findUserConfig(chat.id).collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 

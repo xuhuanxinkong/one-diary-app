@@ -64,6 +64,10 @@ sealed class Route {
     // 对话设置页（群聊，可添加AI）
     @Serializable
     data class GroupChatSetting(val chatId: Long) : Route()
+    
+    // 源AI详情页（从群聊中点击AI导航到源AI所在的单聊设置）
+    @Serializable
+    data class SourceAiDetail(val sourceAiId: Long) : Route()
 
     // 标签管理页 (type: "diary" 或 "chat")
     @Serializable

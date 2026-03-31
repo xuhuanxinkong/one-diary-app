@@ -12,7 +12,7 @@ import com.xinkong.diary.data.AlarmEntity
     entities = [Diary::class, Chat::class,
         ChatMessage::class, AiChatConfig::class, UserChatConfig::class, GroupChatMember::class,
         DiaryTag::class, ChatTag::class, TagFolder::class, AlarmEntity::class],
-    version = 32,
+    version = 33,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

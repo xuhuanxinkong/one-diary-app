@@ -80,8 +80,6 @@ import com.xinkong.diary.repository.DiarySaver
 import com.xinkong.diary.ui.animation.pressScaleEffect
 import com.xinkong.diary.ui.animation.toggleRotateEffect
 import com.xinkong.diary.ui.screen.chat.AiListScreen
-import com.xinkong.diary.ui.screen.chat.ChatScreen
-import com.xinkong.diary.ui.screen.chat.TalkScreen
 import com.xinkong.diary.ui.theme.DiarydTheme
 import com.xinkong.diary.ui.theme.ThemeDefault
 import com.xinkong.diary.ui.theme.currentDiaryColors
