@@ -32,6 +32,7 @@ import com.xinkong.diary.ui.screen.home.HomeScreen
 import com.xinkong.diary.ui.screen.tag.TagManageRoute
 import com.xinkong.diary.ui.theme.DiarydTheme
 
+//666
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
