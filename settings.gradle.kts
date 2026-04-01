@@ -3,9 +3,8 @@ pluginManagement {
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
         maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
-        // 移除 google() 和它的过滤条件
-        mavenCentral()
         gradlePluginPortal()
+        mavenCentral()
     }
 }
 

@@ -871,9 +871,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 userRole
             }
             
-            // 格式：不要使用 AI 容易学习并复制的格式
-            // 使用 <> 标签式格式，AI 不会在回复中使用这种格式
-            val formattedContent = "<msg time=\"${msg.date}\" from=\"${senderName}\">${msg.content}</msg>"
+            // 时间和发送者信息已在系统提示词中提供，消息内容保持简洁
+            val formattedContent = msg.content
             messages.add(mapOf("role" to actualRole, "content" to formattedContent))
         }
 
@@ -985,6 +984,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             append("【重要】回复时直接输出内容，绝对不要在开头添加你的名字、时间标识或任何前缀（如\"${currentAiConfig.name}：\"或\"[时间:...]\"）。\n\n")
             if (userContext.isNotEmpty()) append("【用户资料】\n$userContext\n\n")
             if (aiContext.isNotEmpty()) append("【你的背景资料】\n$aiContext\n\n")
+            
+            // RAG 检索相关笔记（限制在 AI 绑定的文件夹内）
+            if (currentAiConfig.enableReadNotes && history.isNotEmpty()) {
+                val lastUserMessage = history.lastOrNull { it.role == userRole }?.content ?: ""
+                if (lastUserMessage.isNotBlank()) {
+                    val ragContext = com.xinkong.diary.rag.RAG.prepareContext(
+                        getApplication(),
+                        lastUserMessage,
+                        boundFolder = currentAiConfig.boundFolder.ifBlank { null },
+                        maxResults = 3
+                    )
+                    if (ragContext.isNotBlank()) {
+                        append(ragContext)
+                        append("\n")
+                    }
+                }
+            }
+            
             if ("read_notes" in enabledTools || "write_note" in enabledTools || "edit_note" in enabledTools) {
                 append("【工具协议】\n")
                 append("你可使用函数工具（例如 read_notes、write_note、edit_note）。如果你觉得需要使用工具，必须通过标准的 tool_calls 格式结构返回，不要在对话中用文本或者 markdown 告诉用户你在使用工具。\n")

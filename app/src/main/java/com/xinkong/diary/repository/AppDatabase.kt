@@ -11,8 +11,8 @@ import com.xinkong.diary.data.AlarmEntity
 @Database(
     entities = [Diary::class, Chat::class,
         ChatMessage::class, AiChatConfig::class, UserChatConfig::class, GroupChatMember::class,
-        DiaryTag::class, ChatTag::class, TagFolder::class, AlarmEntity::class],
-    version = 33,
+        DiaryTag::class, ChatTag::class, TagFolder::class, AlarmEntity::class, EmbeddingRecord::class],
+    version = 35,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -21,6 +21,7 @@ abstract class AppDatabase: RoomDatabase(){
     abstract fun chatDao(): ChatDao
     abstract fun tagDao(): TagDao
     abstract fun alarmDao(): AlarmDao
+    abstract fun embeddingDao(): EmbeddingDao
     companion object{
         private var INSTANCE: AppDatabase?=null
         fun getDatabase(context: Context): AppDatabase{

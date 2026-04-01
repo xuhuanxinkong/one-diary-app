@@ -59,6 +59,15 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                 type = type
             )
             diaryDao.insert(diary)
+            
+            // 异步创建 RAG 索引
+            try {
+                val insertedDiary = diaryDao.getDiaryById(diary.id) ?: diary
+                com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+            } catch (e: Exception) {
+                // 索引失败不影响主流程
+                e.printStackTrace()
+            }
         }
     }
 
@@ -66,12 +75,30 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteDiary(diary: Diary) {
         viewModelScope.launch {
             diaryDao.delete(diary)
+            
+            // 删除 RAG 索引
+            try {
+                com.xinkong.diary.rag.RAG.deleteIndex(
+                    getApplication(),
+                    com.xinkong.diary.rag.index.IndexManager.SOURCE_TYPE_DIARY,
+                    diary.id
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
     // 更新
     fun updateDiary(diary: Diary) {
         viewModelScope.launch {
             diaryDao.update(diary = diary)
+            
+            // 更新 RAG 索引
+            try {
+                com.xinkong.diary.rag.RAG.indexDiary(getApplication(), diary)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 

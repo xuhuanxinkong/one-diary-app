@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.serialization)
+    id("io.objectbox")
 }
 
 android {
@@ -65,6 +66,10 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.material.icons.extended)
+    
+    // RAG: ONNX Runtime + ObjectBox
+    implementation(libs.onnxruntime.android)
+    implementation(libs.objectbox.android)
 
 
 
