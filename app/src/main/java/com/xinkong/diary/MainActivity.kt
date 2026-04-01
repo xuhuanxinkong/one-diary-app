@@ -219,6 +219,8 @@ fun DiaryApp() {
             entry<Route.AlarmEdit> { route ->
                 AlarmEditScreen(
                     id = route.id,
+                    isAiReminder = route.isAiReminder,
+                    selectedAiId = route.selectedAiId,
                     alarmViewModel = alarmViewModel,
                     chatViewModel = chatViewModel,
                     onBack = { navViewModel.navigateBack() }

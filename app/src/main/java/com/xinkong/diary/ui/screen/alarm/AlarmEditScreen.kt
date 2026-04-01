@@ -40,6 +40,8 @@ import org.json.JSONObject
 @Composable
 fun AlarmEditScreen(
     id: Int,
+    isAiReminder: Boolean,
+    selectedAiId: Long? = null,
     alarmViewModel: AlarmViewModel,
     chatViewModel: ChatViewModel,
     onBack: () -> Unit
@@ -51,10 +53,11 @@ fun AlarmEditScreen(
             initialAlarm = alarmViewModel.getAlarmById(id)
         }
     }
-    val defaultAlarm = remember {
+    val defaultAlarm = remember(isAiReminder) {
         AlarmEntity(
             hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY),
-            minute = java.util.Calendar.getInstance().get(java.util.Calendar.MINUTE)
+            minute = java.util.Calendar.getInstance().get(java.util.Calendar.MINUTE),
+            actionType = if (isAiReminder) "PROCESS_NOTE" else "REMIND"
         )
     }
     var alarm by remember(initialAlarm) {
@@ -67,23 +70,41 @@ fun AlarmEditScreen(
         return
     }
 
-    // 新增：闹钟类型分段按钮，初始化与 alarm.actionType 绑定
-    var alarmType by remember(alarm.actionType) { mutableStateOf(if (alarm.actionType == "PROCESS_NOTE") 1 else 0) } // 0=闹钟 1=Ai提醒
+    // 根据传入参数或现有闹钟类型决定模式
+    val alarmType = if (isNew) {
+        if (isAiReminder) 1 else 0
+    } else {
+        if (alarm.actionType == "PROCESS_NOTE") 1 else 0
+    }
+    
     var showDurationSheet by remember { mutableStateOf(false) }
     var showSnoozeSheet by remember { mutableStateOf(false) }
     var showRingtoneSheet by remember { mutableStateOf(false) }
     val allAiConfigs by chatViewModel.allAiConfigsState.collectAsStateWithLifecycle()
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
-    var selectedAiId by remember(initialAlarm?.taskPayload) {
-        mutableStateOf(extractAiIdFromTaskPayload(initialAlarm?.taskPayload))
+    
+    // AI提醒模式：直接使用传入的selectedAiId，不需要用户选择
+    var currentAiId by remember(initialAlarm?.taskPayload, selectedAiId) {
+        mutableStateOf(
+            if (isNew && selectedAiId != null) selectedAiId
+            else extractAiIdFromTaskPayload(initialAlarm?.taskPayload)
+        )
     }
-    val selectedAi = allAiConfigs.firstOrNull { it.id == selectedAiId }
-    val selectedAiChat = chatList.firstOrNull { it.id == selectedAi?.chatId }
+    val currentAi = allAiConfigs.firstOrNull { it.id == currentAiId }
+    val currentAiChat = chatList.firstOrNull { it.id == currentAi?.chatId }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (isNew) "新建闹钟" else "编辑闹钟") },
+                title = { 
+                    Text(
+                        if (isNew) {
+                            if (alarmType == 1) "新建AI提醒" else "新建闹钟"
+                        } else {
+                            if (alarmType == 1) "编辑AI提醒" else "编辑闹钟"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = { onBack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "取消")
@@ -92,7 +113,7 @@ fun AlarmEditScreen(
                 actions = {
                     TextButton(onClick = {
                         val payload = if (alarmType == 1) {
-                            buildAiTaskPayload(selectedAi)
+                            buildAiTaskPayload(currentAi)
                         } else null
                         alarmViewModel.saveAlarm(alarm.copy(taskPayload = payload))
                         onBack()
@@ -131,28 +152,11 @@ fun AlarmEditScreen(
                     .padding(vertical = 16.dp)
             )
 
-            // 闹钟类型分段按钮
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                SegmentedButton(
-                    options = listOf("闹钟", "Ai提醒"),
-                    selectedIndex = alarmType,
-                    onOptionSelected = {
-                        alarmType = it
-                        alarm = alarm.copy(actionType = if (it == 0) "REMIND" else "PROCESS_NOTE")
-                    }
-                )
-            }
-
             // 名称输入框
             OutlinedTextField(
                 value = alarm.name,
                 onValueChange = { alarm = alarm.copy(name = it) },
-                label = { Text("闹钟名称") },
+                label = { Text(if (alarmType == 1) "提醒名称" else "闹钟名称") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 8.dp),
@@ -241,21 +245,26 @@ fun AlarmEditScreen(
                         )
                     }
                 } else {
-                    // Ai提醒模式
+                    // Ai提醒模式 - 简化：AI已自动选择，只显示AI信息和提示词
                     Column(modifier = Modifier.padding(0.dp)) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp, 16.dp, 16.dp, 0.dp),
+                                .padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (selectedAi != null) {
+                            if (currentAi != null) {
                                 AiAvatar(
-                                    avatarUri = selectedAi.avatarUri,
-                                    name = selectedAi.name,
+                                    avatarUri = currentAi.avatarUri,
+                                    name = currentAi.name,
                                     size = 56.dp,
                                     fontSize = 18.sp
                                 )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(currentAi.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    Text(currentAiChat?.title ?: "未找到所属对话", color = Color.Gray, fontSize = 13.sp)
+                                }
                             } else {
                                 Box(
                                     modifier = Modifier.size(56.dp).background(Color(0xFF5B9BD5), CircleShape),
@@ -263,68 +272,14 @@ fun AlarmEditScreen(
                                 ) {
                                     Text("AI", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                                 }
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                if (selectedAi != null) {
-                                    Text(selectedAi.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                    Text(selectedAiChat?.title ?: "未找到所属对话", color = Color.Gray, fontSize = 13.sp)
-                                } else {
-                                    Text("Ai助手", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                    Text("AI描述/模型名", color = Color.Gray, fontSize = 13.sp)
-                                }
-                            }
-                            Button(onClick = { selectedAiId = null }) {
-                                Text(if (selectedAi != null) "清除" else "未选择")
-                            }
-                        }
-                        Divider(color = Color.LightGray.copy(alpha = 0.5f), modifier = Modifier.padding(top = 16.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .border(1.dp, Color.LightGray.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                                .heightIn(max = 220.dp)
-                                .verticalScroll(rememberScrollState())
-                                .padding(12.dp)
-                        ) {
-                            Column {
-                                Text("选择提醒 AI：", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
-                                allAiConfigs.forEach { config ->
-                                    val isSelected = selectedAiId == config.id
-                                    val chatName = chatList.firstOrNull { it.id == config.chatId }?.title ?: "未命名对话"
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { selectedAiId = if (isSelected) null else config.id }
-                                            .padding(vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        AiAvatar(
-                                            avatarUri = config.avatarUri,
-                                            name = config.name,
-                                            size = 40.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(text = config.name)
-                                            Text(text = chatName, color = Color.Gray, fontSize = 12.sp)
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .size(24.dp)
-                                                .border(1.dp, if (isSelected) Color(0xFF07C160) else Color.Gray, CircleShape)
-                                                .background(if (isSelected) Color(0xFF07C160) else Color.Transparent, CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isSelected) {
-                                                Text("✓", color = Color.White, fontSize = 12.sp)
-                                            }
-                                        }
-                                    }
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("未选择AI", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    Text("请从AI列表中选择", color = Color.Gray, fontSize = 13.sp)
                                 }
                             }
                         }
+                        Divider(color = Color.LightGray.copy(alpha = 0.5f))
                         // 提示词（实际用remark字段）
                         OutlinedTextField(
                             value = alarm.remark,
@@ -332,7 +287,7 @@ fun AlarmEditScreen(
                             label = { Text("提示词") },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp, 8.dp, 16.dp, 16.dp),
+                                .padding(16.dp),
                             minLines = 2
                         )
                     }
@@ -597,8 +552,20 @@ fun TimeWheelPicker(
 ) {
     val itemHeight = 60.dp
     val itemHeightPx = with(LocalDensity.current) { itemHeight.toPx() }
+    val coroutineScope = rememberCoroutineScope()
     val hourState = rememberLazyListState(initialFirstVisibleItemIndex = initialHour)
     val minuteState = rememberLazyListState(initialFirstVisibleItemIndex = initialMinute)
+
+    // 计算当前选中的小时和分钟
+    fun getSelectedHour(): Int {
+        return hourState.firstVisibleItemIndex + 
+            if (hourState.firstVisibleItemScrollOffset > itemHeightPx / 2) 1 else 0
+    }
+    
+    fun getSelectedMinute(): Int {
+        return minuteState.firstVisibleItemIndex + 
+            if (minuteState.firstVisibleItemScrollOffset > itemHeightPx / 2) 1 else 0
+    }
 
     Row(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(24.dp)),
@@ -659,11 +626,22 @@ fun TimeWheelPicker(
             }
         }
         
-        LaunchedEffect(hourState.isScrollInProgress, minuteState.isScrollInProgress) {
-            if (!hourState.isScrollInProgress && !minuteState.isScrollInProgress) {
-                val selH = hourState.firstVisibleItemIndex + if (hourState.firstVisibleItemScrollOffset > itemHeightPx / 2) 1 else 0
-                val selM = minuteState.firstVisibleItemIndex + if (minuteState.firstVisibleItemScrollOffset > itemHeightPx / 2) 1 else 0
-                onTimeChanged(selH, selM)
+        // 滚动停止后自动对齐并更新时间
+        LaunchedEffect(hourState.isScrollInProgress) {
+            if (!hourState.isScrollInProgress) {
+                val targetHour = getSelectedHour().coerceIn(0, 23)
+                // 滚动到精确位置
+                hourState.animateScrollToItem(targetHour)
+                onTimeChanged(targetHour, getSelectedMinute().coerceIn(0, 59))
+            }
+        }
+        
+        LaunchedEffect(minuteState.isScrollInProgress) {
+            if (!minuteState.isScrollInProgress) {
+                val targetMinute = getSelectedMinute().coerceIn(0, 59)
+                // 滚动到精确位置
+                minuteState.animateScrollToItem(targetMinute)
+                onTimeChanged(getSelectedHour().coerceIn(0, 23), targetMinute)
             }
         }
     }

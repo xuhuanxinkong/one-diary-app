@@ -74,7 +74,7 @@ sealed class Route {
     data class TagManage(val type: String) : Route()
 
     @Serializable
-    data class AlarmEdit(val id: Int) : Route()
+    data class AlarmEdit(val id: Int, val isAiReminder: Boolean = false, val selectedAiId: Long? = null) : Route()
 
     // 其他页面
 }

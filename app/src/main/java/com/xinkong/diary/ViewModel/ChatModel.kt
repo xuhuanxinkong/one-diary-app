@@ -215,9 +215,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
             chatDao.insertMessage(userMsg)
 
-            // 获取当前对话的首个 AI，只有他拥有操作笔记工具的权限
-            val firstAiId = chatDao.getAiConfigOnce(chatId).firstOrNull()?.id
-
             // 2. 轮流调用 AI
             for (config in selectedAIs) {
                 _aiState.value = AiState.Loading
@@ -228,12 +225,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         add("query_chat_history")
                         if (config.enableWebSearch) add("web_search_baidu")
                         if (config.enableImageSupport) add("image_recognition")
-                        // 只有第一个 AI 才有笔记工具权限
-                        if (config.id == firstAiId) {
-                            if (config.enableReadNotes) add("read_notes")
-                            if (config.enableWriteNote) add("write_note")
-                            if (config.enableEditNote) add("edit_note")
-                        }
+                        // 每个 AI 都有笔记工具权限（已隔离文件夹）
+                        if (config.enableReadNotes) add("read_notes")
+                        if (config.enableWriteNote) add("write_note")
+                        if (config.enableEditNote) add("edit_note")
                     }
                 }
 
@@ -274,16 +269,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         taskPrompt: String,
         referencedDiaryIdOverride: String? = null
     ): Result<String> {
-        val firstAiId = chatDao.getAiConfigOnce(chatId).firstOrNull()?.id
         val enabledTools = mutableSetOf<String>().apply {
             if (!aiConfig.enableStream) {
                 add("query_chat_history")
                 if (aiConfig.enableWebSearch) add("web_search_baidu")
-                if (aiConfig.id == firstAiId) {
-                    if (aiConfig.enableReadNotes) add("read_notes")
-                    if (aiConfig.enableWriteNote) add("write_note")
-                    if (aiConfig.enableEditNote) add("edit_note")
-                }
+                // 每个 AI 都有笔记工具权限（已隔离文件夹）
+                if (aiConfig.enableReadNotes) add("read_notes")
+                if (aiConfig.enableWriteNote) add("write_note")
+                if (aiConfig.enableEditNote) add("edit_note")
             }
         }
 
@@ -1443,9 +1436,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             saveReplySelection(chatId, selectedAIs)
 
-            // 获取当前对话的首个 AI
-            val firstAiId = chatDao.getAiConfigOnce(chatId).firstOrNull()?.id
-            
             // 轮流回复：等待上一个 AI 回复完成后再请求下一个
             for (config in selectedAIs) {
                     _aiState.value = AiState.Loading
@@ -1455,11 +1445,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         if (!config.enableStream) {
                             add("query_chat_history")
                             add("web_search_baidu")
-                            if (config.id == firstAiId) {
-                                if (config.enableReadNotes) add("read_notes")
-                                if (config.enableWriteNote) add("write_note")
-                                if (config.enableEditNote) add("edit_note")
-                            }
+                            // 每个 AI 都有笔记工具权限（已隔离文件夹）
+                            if (config.enableReadNotes) add("read_notes")
+                            if (config.enableWriteNote) add("write_note")
+                            if (config.enableEditNote) add("edit_note")
                         }
                     }
                     val messages = buildContextMessages(chatId, config, enabledTools)

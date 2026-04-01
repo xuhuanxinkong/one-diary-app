@@ -263,8 +263,9 @@ fun HomeScreen(){
                     }
                 )
                 Tab.ALARM -> AlarmScreen(
-                    onAddAlarm = { navViewModel.navigateTo(Route.AlarmEdit(0)) },
-                    onEditAlarm = { id -> navViewModel.navigateTo(Route.AlarmEdit(id)) }
+                    onAddAlarm = { isAiReminder, selectedAiId -> navViewModel.navigateTo(Route.AlarmEdit(0, isAiReminder, selectedAiId)) },
+                    onEditAlarm = { id, isAiReminder -> navViewModel.navigateTo(Route.AlarmEdit(id, isAiReminder)) },
+                    chatViewModel = chatViewModel
                 )
             }
         }
