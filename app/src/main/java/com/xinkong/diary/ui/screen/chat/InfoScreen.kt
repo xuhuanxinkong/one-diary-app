@@ -315,64 +315,64 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                         )
                     }
 
-
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "允许AI新增本地笔记",
-                        fontSize = 14.sp,
-                        color = Color.DarkGray,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Switch(
-                        checked = enableWriteNote,
-                        onCheckedChange = { checked ->
-                            enableWriteNote = checked
-                            chatViewModel.updateAiConfig(
-                                config.copy(enableWriteNote = checked)
-                            )
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = MaterialTheme.diaryColors.primary
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "允许AI新增本地笔记",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
                         )
-                    )
+                        Switch(
+                            checked = enableWriteNote,
+                            onCheckedChange = { checked ->
+                                enableWriteNote = checked
+                                chatViewModel.updateAiConfig(
+                                    config.copy(enableWriteNote = checked)
+                                )
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "允许AI修改本地笔记",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = enableEditNote,
+                            onCheckedChange = { checked ->
+                                enableEditNote = checked
+                                chatViewModel.updateAiConfig(
+                                    config.copy(enableEditNote = checked)
+                                )
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        "允许AI修改本地笔记",
-                        fontSize = 14.sp,
-                        color = Color.DarkGray,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Switch(
-                        checked = enableEditNote,
-                        onCheckedChange = { checked ->
-                            enableEditNote = checked
-                            chatViewModel.updateAiConfig(
-                                config.copy(enableEditNote = checked)
-                            )
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = MaterialTheme.diaryColors.primary
-                        )
-                    )
-                }
+
                 Divider(color = Color.LightGray.copy(alpha = 0.5f))
                 // ========== 工具栏 ==========
                 SettingSectionHeader(

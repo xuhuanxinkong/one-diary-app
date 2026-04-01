@@ -139,7 +139,7 @@ fun AlarmScreen(
                         onClick = { isClockCollapsed = !isClockCollapsed },
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(24.dp)
+                            .padding(top = 30.dp, end = 24.dp)
                     ) {
                         Icon(
                             imageVector = if (isClockCollapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
@@ -516,7 +516,7 @@ fun DigitalClockCanvas() {
     Box(
         modifier = Modifier
 
-            .fillMaxSize(0.9f)
+            .fillMaxSize(0.93f)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null
@@ -543,7 +543,7 @@ fun DigitalClockCanvas() {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 // 按要求整体缩放使其正好放在时钟图片中
-                modifier = Modifier.scale(0.65f) 
+                modifier = Modifier.scale(0.65f)
             ) {
                 // 十位和个位 小时
                 SevenSegmentDigit(displayHour / 10,showZero = true)
@@ -578,7 +578,7 @@ fun DigitalClockCanvas() {
                 fontWeight = FontWeight.Bold,
                 color = Color.DarkGray,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.offset(85.dp,y=30.dp)
+                modifier = Modifier.offset(80.dp,y=30.dp)
             )
         }
     }
