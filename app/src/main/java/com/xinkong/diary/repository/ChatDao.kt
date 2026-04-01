@@ -119,4 +119,7 @@ interface ChatDao {
     
     @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId AND sourceAiId = :sourceAiId LIMIT 1")
     suspend fun getGroupChatMemberBySourceAi(groupChatId: Long, sourceAiId: Long): GroupChatMember?
+    
+    @Query("SELECT * FROM group_chat_members")
+    fun getAllGroupChatMembers(): Flow<List<GroupChatMember>>
 }

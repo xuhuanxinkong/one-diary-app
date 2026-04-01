@@ -221,7 +221,7 @@ fun AlarmScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .padding(end = 8.dp, top = 8.dp),
+                        .padding(end = 4.dp, top = 8.dp, start = 28.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(filteredAlarms, key = { it.id }) { alarm ->
@@ -401,7 +401,7 @@ private fun SwipeToDeleteAlarmCard(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(color, RoundedCornerShape(16.dp))
-                    .padding(horizontal = 20.dp),
+                    .padding(end =  20.dp, start = 30.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
                 if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
@@ -674,71 +674,71 @@ fun getSegmentStates(digit: Int): BooleanArray {
     }
 }
 
-@Composable
-fun AlarmCard(
-    alarm: AlarmEntity,
-    onCheckedChange: (Boolean) -> Unit,
-    onClick: () -> Unit
-) {
-    val isAiReminder = alarm.actionType == "PROCESS_NOTE"
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .clickable { onClick() },
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(20.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = String.format("%02d:%02d", alarm.hour, alarm.minute),
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.W600,
-                        color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface else Color.Gray
-                    )
-                    if (isAiReminder) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .background(Color(0xFF5B9BD5).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                "AI",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF5B9BD5)
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-
-                val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
-
-                Text(
-                    text = alarm.name + remarkStr,
-                    fontSize = 14.sp,
-                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha=0.7f) else Color.Gray,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-            }
-            Switch(
-                checked = alarm.isActive,
-                onCheckedChange = onCheckedChange,
-                modifier = Modifier.scale(1.1f)
-            )
-        }
-    }
-}
+//@Composable
+//fun AlarmCard(
+//    alarm: AlarmEntity,
+//    onCheckedChange: (Boolean) -> Unit,
+//    onClick: () -> Unit
+//) {
+//    val isAiReminder = alarm.actionType == "PROCESS_NOTE"
+//    Card(
+//        modifier = Modifier
+//            .fillMaxWidth()
+//            .padding(horizontal = 12.dp)
+//            .clickable { onClick() },
+//        shape = RoundedCornerShape(20.dp),
+//        colors = CardDefaults.cardColors(
+//            containerColor = MaterialTheme.colorScheme.surfaceVariant
+//        )
+//    ) {
+//        Row(
+//            modifier = Modifier
+//                .padding(20.dp)
+//                .fillMaxWidth(),
+//            horizontalArrangement = Arrangement.SpaceBetween,
+//            verticalAlignment = Alignment.CenterVertically
+//        ) {
+//            Column(modifier = Modifier.weight(1f)) {
+//                Row(verticalAlignment = Alignment.CenterVertically) {
+//                    Text(
+//                        text = String.format("%02d:%02d", alarm.hour, alarm.minute),
+//                        fontSize = 42.sp,
+//                        fontWeight = FontWeight.W600,
+//                        color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface else Color.Gray
+//                    )
+//                    if (isAiReminder) {
+//                        Spacer(modifier = Modifier.width(8.dp))
+//                        Box(
+//                            modifier = Modifier
+//                                .background(Color(0xFF5B9BD5).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+//                                .padding(horizontal = 8.dp, vertical = 4.dp)
+//                        ) {
+//                            Text(
+//                                "AI",
+//                                fontSize = 12.sp,
+//                                fontWeight = FontWeight.Bold,
+//                                color = Color(0xFF5B9BD5)
+//                            )
+//                        }
+//                    }
+//                }
+//                Spacer(modifier = Modifier.height(6.dp))
+//
+//                val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
+//
+//                Text(
+//                    text = alarm.name + remarkStr,
+//                    fontSize = 14.sp,
+//                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha=0.7f) else Color.Gray,
+//                    maxLines = 1,
+//                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+//                )
+//            }
+//            Switch(
+//                checked = alarm.isActive,
+//                onCheckedChange = onCheckedChange,
+//                modifier = Modifier.scale(1.1f)
+//            )
+//        }
+//    }
+//}

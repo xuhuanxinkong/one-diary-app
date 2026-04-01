@@ -102,6 +102,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+    
+    // 群聊成员数量映射（groupChatId -> 成员数量）
+    val groupMemberCountState: StateFlow<Map<Long, Int>> = chatDao.getAllGroupChatMembers()
+        .map { members ->
+            members.groupBy { it.groupChatId }.mapValues { it.value.size }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyMap()
+        )
 
     // ---- AI 状态 ----
     private val _aiState = MutableStateFlow<AiState>(AiState.Idle)

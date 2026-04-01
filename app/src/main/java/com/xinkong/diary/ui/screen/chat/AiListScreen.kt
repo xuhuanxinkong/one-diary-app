@@ -84,6 +84,7 @@ fun AiListScreen(
     val chatList by viewModel.chatListState.collectAsStateWithLifecycle()
     val aiList by viewModel.AiListState.collectAsStateWithLifecycle()
     val tagFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
+    val groupMemberCount by viewModel.groupMemberCountState.collectAsStateWithLifecycle()
     
     // Tab状态: 0 = AI助手列表, 1 = 群聊
     var selectedTab by remember { mutableStateOf(0) }
@@ -204,11 +205,17 @@ fun AiListScreen(
                 items(filteredList, key = { it.id }) { chat ->
                     val chatAiConfigs = aiList.filter { it.chatId == chat.id }
                     val primaryAiConfig = chatAiConfigs.firstOrNull()
+                    // 群聊人数 = 群聊成员数 + 1（用户），单聊显示1
+                    val memberCount = if (chat.isGroupChat) {
+                        (groupMemberCount[chat.id] ?: 0) + 1
+                    } else {
+                        1
+                    }
                     
                     SwipeableAiCard(
                         chat = chat,
                         aiConfig = primaryAiConfig,
-                        aiCount = chatAiConfigs.size,
+                        aiCount = memberCount,
                         isGroupChat = selectedTab == 1,
                         modifier = Modifier
                             .fillMaxWidth()
