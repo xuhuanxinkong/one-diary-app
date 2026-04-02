@@ -26,6 +26,10 @@ data class AlarmEntity(
     val ringtoneUri: String = "",
     
     // ======== AI后台任务与提醒扩展 ========
+    // 关联的AI配置ID，0表示用户手动创建的提醒
+    val aiConfigId: Long = 0L,
+    // 关联的聊天会话ID
+    val chatId: Long = 0L,
     // 动作类型: "REMIND"(纯提醒/闹钟), "PROCESS_NOTE"(后台AI处理笔记), 等
     val actionType: String = "REMIND",
     // 任务状态: "PENDING", "RUNNING", "COMPLETED", "FAILED"

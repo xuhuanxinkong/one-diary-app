@@ -12,6 +12,12 @@ interface AlarmDao {
     @Query("SELECT * FROM alarms WHERE id = :id LIMIT 1")
     fun getAlarmById(id: Int): Flow<AlarmEntity?>
 
+    @Query("SELECT * FROM alarms WHERE aiConfigId = :aiConfigId ORDER BY hour ASC, minute ASC")
+    fun getAlarmsByAiConfigId(aiConfigId: Long): Flow<List<AlarmEntity>>
+
+    @Query("SELECT * FROM alarms WHERE chatId = :chatId ORDER BY hour ASC, minute ASC")
+    fun getAlarmsByChatId(chatId: Long): Flow<List<AlarmEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAlarm(alarm: AlarmEntity): Long
 

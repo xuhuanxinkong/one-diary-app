@@ -173,7 +173,8 @@ class RAGSearchService private constructor(
     suspend fun prepareContext(
         query: String,
         boundFolder: String? = null,
-        maxResults: Int = 5
+        maxResults: Int = 5,
+        maxTotalLength: Int = 1000
     ): String = withContext(Dispatchers.IO) {
         val folders = if (!boundFolder.isNullOrBlank()) listOf(boundFolder) else null
         
@@ -181,7 +182,7 @@ class RAGSearchService private constructor(
             topK = maxResults,
             minScore = 0.5f,
             searchDiaries = true,
-            searchMessages = false,
+            searchMessages = true,  // 也搜索对话历史
             folders = folders
         )
         
@@ -189,27 +190,28 @@ class RAGSearchService private constructor(
         
         if (results.isEmpty()) return@withContext ""
         
-        buildString {
-            append("【相关笔记参考】\n\n")
+        val fullText = buildString {
+            append("【相关参考】")
             
             for ((index, result) in results.withIndex()) {
                 when (result) {
                     is RAGSearchResult.DiaryResult -> {
-                        append("${index + 1}. ")
+                        append("${index + 1}.")
                         if (result.diary.title.isNotBlank()) {
-                            append("【${result.diary.title}】")
+                            append("${result.diary.title}：")
                         }
-                        append("\n")
-                        append(result.textChunk)
-                        append("\n\n")
+                        append(result.textChunk.take(200))
+                        append(" ")
                     }
                     is RAGSearchResult.ChatMessageResult -> {
-                        append("${index + 1}. [对话记录]\n")
-                        append(result.textChunk)
-                        append("\n\n")
+                        append("${index + 1}.[对话]${result.textChunk.take(150)} ")
                     }
                 }
             }
         }
+        
+        if (fullText.length > maxTotalLength) {
+            fullText.take(maxTotalLength) + "..."
+        } else fullText
     }
 }

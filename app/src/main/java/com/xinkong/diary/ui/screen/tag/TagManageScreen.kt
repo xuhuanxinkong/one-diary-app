@@ -7,8 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 
 import androidx.compose.material3.*
@@ -75,7 +74,7 @@ fun TagManageScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onEditFolder(folderName) }
+                                    .clickable { onSwitchFolder(folderName) }
                                     .padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -83,13 +82,15 @@ fun TagManageScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(folderName, fontSize = 18.sp, modifier = Modifier.weight(1f))
                                 
-                                val isCurrent = (currentFolder == folderName)
-                                IconButton(onClick = { if (!isCurrent) onSwitchFolder(folderName) }) {
-                                    Icon(
-                                        imageVector = if (isCurrent) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (isCurrent) "当前选中" else "切换到此文件夹",
-                                        tint = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Gray
-                                    )
+                                // 编辑按钮（只有非默认文件夹才显示）
+                                if (folderName != "我的笔记") {
+                                    IconButton(onClick = { onEditFolder(folderName) }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "编辑文件夹",
+                                            tint = Color.Gray
+                                        )
+                                    }
                                 }
                                 
                                 TextButton(onClick = { onAddTag(folderName) }) {
@@ -241,9 +242,7 @@ fun TagManageRoute(
             )
         },
         onEditFolder = { folderName ->
-            if (folderName != "我的笔记") {
-                editingFolder = folderName
-            }
+            editingFolder = folderName
         },
         onAddTag = { folderName ->
             editingTag = null
@@ -256,6 +255,7 @@ fun TagManageRoute(
         },
         onSwitchFolder = { folderName ->
             diaryViewModel.updateCurrentFolder(folderName)
+            onBack()
         }
     )
 

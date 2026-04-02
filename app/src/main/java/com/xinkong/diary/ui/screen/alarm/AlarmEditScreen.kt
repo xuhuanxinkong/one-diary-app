@@ -130,7 +130,7 @@ fun AlarmEditScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = Color.White
                 )
             )
         }
@@ -139,7 +139,7 @@ fun AlarmEditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(MaterialTheme.colorScheme.background)
+                .background(Color(0xFFF5F5F5))
         ) {
             // 时间滚轮
             TimeWheelPicker(
@@ -151,17 +151,26 @@ fun AlarmEditScreen(
                     .height(220.dp)
                     .padding(vertical = 16.dp)
             )
-
-            // 名称输入框
-            OutlinedTextField(
-                value = alarm.name,
-                onValueChange = { alarm = alarm.copy(name = it) },
-                label = { Text(if (alarmType == 1) "提醒名称" else "闹钟名称") },
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                singleLine = true
-            )
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color.White
+                )
+            ) {
+                // 名称输入框
+                OutlinedTextField(
+                    value = alarm.name,
+                    onValueChange = { alarm = alarm.copy(name = it) },
+                    label = { Text(if (alarmType == 1) "提醒名称" else "闹钟名称") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    singleLine = true
+                )
+            }
 
             // 主体卡片
             Card(
@@ -170,7 +179,7 @@ fun AlarmEditScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = Color.White
                 )
             ) {
                 if (alarmType == 0) {
@@ -246,7 +255,7 @@ fun AlarmEditScreen(
                     }
                 } else {
                     // Ai提醒模式 - 简化：AI已自动选择，只显示AI信息和提示词
-                    Column(modifier = Modifier.padding(0.dp)) {
+                    Column(modifier = Modifier.padding(0.dp).background(Color.White)) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -279,7 +288,7 @@ fun AlarmEditScreen(
                                 }
                             }
                         }
-                        Divider(color = Color.LightGray.copy(alpha = 0.5f))
+
                         // 提示词（实际用remark字段）
                         OutlinedTextField(
                             value = alarm.remark,
@@ -568,7 +577,7 @@ fun TimeWheelPicker(
     }
 
     Row(
-        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(24.dp)),
+        modifier = modifier.background(Color.White, RoundedCornerShape(24.dp)),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {

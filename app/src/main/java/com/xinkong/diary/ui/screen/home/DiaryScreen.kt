@@ -142,7 +142,15 @@ fun DiaryEditorWebView(
 
                         @JavascriptInterface
                         fun getContent(): String {
-                            return diary.content
+                            // 优先使用HTML内容，如果为空则用纯文本包装成简单HTML
+                            return if (diary.content.isNotBlank()) {
+                                diary.content
+                            } else if (diary.text.isNotBlank()) {
+                                // 将纯文本转换为基础HTML（按换行分段）
+                                diary.text.split("\n").joinToString("") { "<p>$it</p>" }
+                            } else {
+                                ""
+                            }
                         }
 
                         @JavascriptInterface

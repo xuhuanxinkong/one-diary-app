@@ -100,6 +100,22 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import android.Manifest
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.RecognitionListener
+import android.os.Bundle
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -355,6 +371,12 @@ fun TalkScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    focusManager.clearFocus()
+                }
         ) {
             if (chat.backgroundUri.isNotEmpty()) {
                 AsyncImage(
@@ -1174,6 +1196,71 @@ fun TalkInputRow(
     showAiReplyButton: Boolean = false,
     onShowAiReply: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val focusRequester = remember { FocusRequester() }
+    var isListening by remember { mutableStateOf(false) }
+    val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
+    
+    // 权限请求
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            // 权限通过，开始语音识别
+            startListening(speechRecognizer, context, onInputChange, inputText) { isListening = it }
+        } else {
+            Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    // 设置语音识别监听器
+    DisposableEffect(speechRecognizer) {
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                isListening = false
+            }
+            override fun onError(error: Int) {
+                isListening = false
+                val errorMsg = when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH -> "未识别到语音"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "语音输入超时"
+                    SpeechRecognizer.ERROR_NETWORK -> "网络错误"
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
+                    else -> "识别错误"
+                }
+                Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+            }
+            override fun onResults(results: Bundle?) {
+                isListening = false
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val recognizedText = matches[0]
+                    // 追加到现有文本
+                    val newText = if (inputText.isEmpty()) recognizedText else "$inputText$recognizedText"
+                    onInputChange(newText)
+                }
+            }
+            override fun onPartialResults(partialResults: Bundle?) {
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val partialText = matches[0]
+                    // 实时显示部分识别结果
+                    val newText = if (inputText.isEmpty()) partialText else "$inputText$partialText"
+                    onInputChange(newText)
+                }
+            }
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        
+        onDispose {
+            speechRecognizer.destroy()
+        }
+    }
+    
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1185,19 +1272,54 @@ fun TalkInputRow(
             value = inputText,
             onValueChange = onInputChange,
             textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
+            keyboardOptions = KeyboardOptions.Default,
+            singleLine = false,
+            maxLines = 6,
             modifier = Modifier
                 .weight(1f)
                 .background(Color.White, shape = RoundedCornerShape(6.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .focusRequester(focusRequester),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (inputText.isEmpty()) {
-                        Text("输入消息...", color = Color.Gray, fontSize = 16.sp)
+                        Text(
+                            if (isListening) "正在聆听..." else "输入消息...", 
+                            color = if (isListening) Color(0xFF07C160) else Color.Gray, 
+                            fontSize = 16.sp
+                        )
                     }
                     innerTextField()
                 }
             }
         )
+        Spacer(modifier = Modifier.width(4.dp))
+        // 语音输入按钮
+        IconButton(
+            onClick = {
+                if (isListening) {
+                    // 停止语音识别
+                    speechRecognizer.stopListening()
+                    isListening = false
+                } else {
+                    // 检查权限
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) 
+                        == PackageManager.PERMISSION_GRANTED) {
+                        startListening(speechRecognizer, context, onInputChange, inputText) { isListening = it }
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = if (isListening) "停止" else "语音输入",
+                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
         Spacer(modifier = Modifier.width(4.dp))
         // 群聊时显示AI回复顺序按钮
         if (showAiReplyButton) {
@@ -1237,6 +1359,23 @@ fun TalkInputRow(
             )
         }
     }
+}
+
+private fun startListening(
+    speechRecognizer: SpeechRecognizer,
+    context: android.content.Context,
+    onInputChange: (String) -> Unit,
+    currentText: String,
+    onListeningChange: (Boolean) -> Unit
+) {
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+    }
+    onListeningChange(true)
+    speechRecognizer.startListening(intent)
 }
 
 @Composable

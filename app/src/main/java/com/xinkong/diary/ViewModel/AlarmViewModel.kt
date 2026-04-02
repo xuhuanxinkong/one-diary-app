@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.xinkong.diary.data.AlarmEntity
 import com.xinkong.diary.repository.AlarmRepository
 import com.xinkong.diary.repository.AppDatabase
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -14,11 +15,11 @@ import kotlinx.coroutines.launch
 class AlarmViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: AlarmRepository
+    private val alarmDao = AppDatabase.getDatabase(application).alarmDao()
 
     val alarms: StateFlow<List<AlarmEntity>>
 
     init {
-        val alarmDao = AppDatabase.getDatabase(application).alarmDao()
         repository = AlarmRepository(application, alarmDao)
 
         alarms = repository.getAllAlarms().stateIn(
@@ -34,6 +35,14 @@ class AlarmViewModel(application: Application) : AndroidViewModel(application) {
             SharingStarted.WhileSubscribed(5000),
             null
         )
+    }
+    
+    fun getAlarmsByAiConfigId(aiConfigId: Long): Flow<List<AlarmEntity>> {
+        return alarmDao.getAlarmsByAiConfigId(aiConfigId)
+    }
+    
+    fun getAlarmsByChatId(chatId: Long): Flow<List<AlarmEntity>> {
+        return alarmDao.getAlarmsByChatId(chatId)
     }
 
     suspend fun getAlarmById(id: Int) = repository.getAlarmByIdSync(id)

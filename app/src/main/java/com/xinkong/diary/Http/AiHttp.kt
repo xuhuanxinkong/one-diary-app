@@ -85,7 +85,7 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "edit_note")
-            put("description", "修改已有的本地笔记")
+            put("description", "修改已有的本地笔记（全量替换，适合小内容修改）")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -112,11 +112,58 @@ class AiHttp {
         })
     }
 
-    private val getTagsAndFoldersToolSchema = JSONObject().apply {
+    // 批量编辑笔记工具 - 支持多种原子操作组合
+    private val batchEditNoteToolSchema = JSONObject().apply {
         put("type", "function")
         put("function", JSONObject().apply {
-            put("name", "get_tags_and_folders")
-            put("description", "获取本地所有的文件夹和标签，以了解现有的分类结构")
+            put("name", "batch_edit_note")
+            put("description", "批量编辑笔记，支持多种操作组合：set_title(改标题)、append(追加内容)、replace(查找替换)。一次调用可执行多个操作。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("id", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "笔记ID")
+                    })
+                    put("operations", JSONObject().apply {
+                        put("type", "array")
+                        put("description", "操作列表，按顺序执行")
+                        put("items", JSONObject().apply {
+                            put("type", "object")
+                            put("properties", JSONObject().apply {
+                                put("op", JSONObject().apply {
+                                    put("type", "string")
+                                    put("enum", JSONArray().put("set_title").put("append").put("replace"))
+                                    put("description", "操作类型：set_title=改标题, append=追加内容, replace=查找替换")
+                                })
+                                put("value", JSONObject().apply {
+                                    put("type", "string")
+                                    put("description", "set_title和append时的新内容")
+                                })
+                                put("old", JSONObject().apply {
+                                    put("type", "string")
+                                    put("description", "replace时要查找的原文本")
+                                })
+                                put("new", JSONObject().apply {
+                                    put("type", "string")
+                                    put("description", "replace时的替换文本，删除时传空字符串")
+                                })
+                            })
+                            put("required", JSONArray().put("op"))
+                        })
+                    })
+                })
+                put("required", JSONArray().put("id").put("operations"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val listFolderNotesToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "list_folder_notes")
+            put("description", "列出你的记忆库（绑定文件夹）中的所有笔记，获取完整的笔记列表（包含ID、标题、日期、简介）")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject())
@@ -171,6 +218,33 @@ class AiHttp {
                     })
                 })
                 put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val setAlarmToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "set_alarm")
+            put("description", "设置一个AI自动任务提醒。在指定时间到达时，AI将自动执行taskPrompt中描述的任务。仅用于安排AI自己的日程任务，不用于设置普通闹钟或提醒用户。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("name", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "任务名称，简短描述这个AI任务的内容")
+                    })
+                    put("dateTime", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "执行时间，格式为 yyyy-MM-dd HH:mm，例如 2024-12-25 09:00")
+                    })
+                    put("taskPrompt", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "AI任务提示词，描述AI到时需要执行的具体任务，例如：'总结今天的笔记并给出行动建议'")
+                    })
+                })
+                put("required", JSONArray().put("name").put("dateTime").put("taskPrompt"))
                 put("additionalProperties", false)
             })
         })
@@ -377,6 +451,8 @@ class AiHttp {
                     put("search_recency_filter", "year")
                 }
                 
+                Log.d(TAG, "百度搜索请求: keyword=$keyword")
+                
                 val request = Request.Builder()
                     .url(url)
                     .header("Authorization", "Bearer $apiKey")
@@ -384,17 +460,61 @@ class AiHttp {
                     .build()
                     
                 val response = client.newCall(request).execute()
+                val responseBody = response.body?.string() ?: ""
+                Log.d(TAG, "百度搜索响应码: ${response.code}, body长度: ${responseBody.length}")
+                
                 if (response.isSuccessful) {
-                    val respJson = JSONObject(response.body?.string() ?: "")
-                    val content = respJson.optJSONArray("choices")
+                    val respJson = JSONObject(responseBody)
+                    var content: String? = null
+                    
+                    // 优先从choices数组获取内容（某些API格式）
+                    content = respJson.optJSONArray("choices")
                         ?.optJSONObject(0)
                         ?.optJSONObject("message")
-                        ?.optString("content", "未返回结果")
-                    Result.success(content ?: "未返回结果")
+                        ?.optString("content", null)
+                    
+                    // 如果choices中没有，从references数组获取搜索结果
+                    if (content.isNullOrBlank()) {
+                        val references = respJson.optJSONArray("references")
+                        if (references != null && references.length() > 0) {
+                            val sb = StringBuilder()
+                            for (i in 0 until minOf(references.length(), 10)) {
+                                val item = references.optJSONObject(i) ?: continue
+                                val title = item.optString("title", "")
+                                val snippet = item.optString("content", item.optString("snippet", ""))
+                                val url = item.optString("url", "")
+                                val date = item.optString("date", "")
+                                val website = item.optString("website", "")
+                                if (title.isNotBlank() || snippet.isNotBlank()) {
+                                    sb.append("【${i + 1}】$title")
+                                    if (date.isNotBlank()) sb.append("（$date）")
+                                    sb.append("\n$snippet")
+                                    if (website.isNotBlank()) sb.append("\n来源: $website")
+                                    if (url.isNotBlank()) sb.append(" $url")
+                                    sb.append("\n\n")
+                                }
+                            }
+                            content = sb.toString().ifBlank { null }
+                        }
+                    }
+                    
+                    // 检查是否有error信息
+                    if (content.isNullOrBlank()) {
+                        val errorMsg = respJson.optString("error_msg", respJson.optString("message", ""))
+                        if (errorMsg.isNotBlank()) {
+                            content = "搜索返回错误: $errorMsg"
+                        }
+                    }
+                    
+                    Log.d(TAG, "百度搜索解析结果: ${content?.take(200)}")
+                    Result.success(content ?: "搜索未返回有效结果")
                 } else {
-                    Result.failure(IOException("搜索请求失败: ${response.code}"))
+                    val errorBody = responseBody.take(500)
+                    Log.e(TAG, "百度搜索失败: code=${response.code}, body=$errorBody")
+                    Result.failure(IOException("搜索请求失败: ${response.code}, $errorBody"))
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "百度搜索异常", e)
                 Result.failure(e)
             }
         }
@@ -414,19 +534,23 @@ class AiHttp {
             val toolsArray = JSONArray()
             if (enabledTools.contains("read_notes")) {
                 toolsArray.put(readNotesToolSchema)
-                toolsArray.put(getTagsAndFoldersToolSchema)
+                toolsArray.put(listFolderNotesToolSchema)
             }
             if (enabledTools.contains("write_note")) {
                 toolsArray.put(writeNoteToolSchema)
             }
             if (enabledTools.contains("edit_note")) {
                 toolsArray.put(editNoteToolSchema)
+                toolsArray.put(batchEditNoteToolSchema)
             }
             if (enabledTools.contains("query_chat_history")) {
                 toolsArray.put(queryChatHistoryToolSchema)
             }
             if (enabledTools.contains("web_search_baidu")) {
                 toolsArray.put(webSearchBaiduToolSchema)
+            }
+            if (enabledTools.contains("set_alarm")) {
+                toolsArray.put(setAlarmToolSchema)
             }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)

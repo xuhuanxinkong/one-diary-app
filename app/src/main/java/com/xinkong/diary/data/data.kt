@@ -64,11 +64,37 @@ sealed interface ToolTask {
         override val description = "AI 请求修改你的笔记 (ID: $id;标题：$noteTitle)"
     }
 
-    data class GetTagsAndFolders(
-        override val toolCall: AiToolCall
+    data class NoteOperation(
+        val op: String,  // "set_title", "append", "replace"
+        val value: String? = null,
+        val old: String? = null,
+        val new: String? = null
+    )
+
+    data class BatchEditNote(
+        override val toolCall: AiToolCall,
+        val id: Long,
+        val operations: List<NoteOperation>
     ) : ToolTask {
-        override val title: String = "读取分类与标签"
-        override val description = "AI 请求读取所有日记的分类与标签"
+        override val title: String = "批量编辑笔记 ID:$id"
+        override val description: String = buildString {
+            append("AI 请求批量编辑笔记：")
+            operations.forEach { op ->
+                when (op.op) {
+                    "set_title" -> append("改标题「${op.value}」; ")
+                    "append" -> append("追加内容; ")
+                    "replace" -> append("替换「${op.old?.take(15)}...」; ")
+                }
+            }
+        }
+    }
+
+    data class ListFolderNotes(
+        override val toolCall: AiToolCall,
+        val folder: String
+    ) : ToolTask {
+        override val title: String = "查看记忆库笔记列表"
+        override val description = "AI 请求查看记忆库「$folder」中的所有笔记"
     }
 
     data class QueryChatHistory(
@@ -88,5 +114,15 @@ sealed interface ToolTask {
     ) : ToolTask {
         override val title: String = "网络搜索：$keyword"
         override val description: String = "AI 请求通过百度智能云进行网络搜索：$keyword"
+    }
+
+    data class SetAlarm(
+        override val toolCall: AiToolCall,
+        val name: String,
+        val dateTime: String,  // 格式: yyyy-MM-dd HH:mm
+        val taskPrompt: String  // AI任务提示词
+    ) : ToolTask {
+        override val title: String = "设置AI任务：$name"
+        override val description: String = "AI 请求设置AI任务「$name」，时间：$dateTime，任务：$taskPrompt"
     }
 }

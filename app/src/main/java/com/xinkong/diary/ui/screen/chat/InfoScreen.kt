@@ -70,6 +70,8 @@ import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.UserChatConfig
 import com.xinkong.diary.repository.Diary
+import com.xinkong.diary.data.AlarmEntity
+import com.xinkong.diary.ViewModel.AlarmViewModel
 import com.xinkong.diary.ui.screen.home.AiSection
 import com.xinkong.diary.ui.screen.home.SettingSectionHeader
 import com.xinkong.diary.ui.theme.diaryColors
@@ -102,15 +104,21 @@ fun DetailScreen(
 fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Boolean = false){
 
     val chatViewModel: ChatViewModel = viewModel()
+    val alarmViewModel: AlarmViewModel = viewModel()
     val configs by chatViewModel.findAiConfig(chat.id)
         .collectAsStateWithLifecycle(emptyList())
     val config = configs.find { it.id == aiId } ?: configs.firstOrNull() ?: AiChatConfig(chatId = chat.id)
     // 群聊中可以删除任何AI（移除）；单聊中不能删除AI
     val canDelete = isGroupChat
+    
+    // 获取该AI设置的提醒列表
+    val aiAlarms by alarmViewModel.getAlarmsByAiConfigId(config.id)
+        .collectAsStateWithLifecycle(emptyList())
 
     var enableReadNotes by remember(config.enableReadNotes) { mutableStateOf(config.enableReadNotes) }
     var enableWriteNote by remember(config.enableWriteNote) { mutableStateOf(config.enableWriteNote) }
     var enableEditNote by remember(config.enableEditNote) { mutableStateOf(config.enableEditNote) }
+    var enableSetAlarm by remember(config.enableSetAlarm) { mutableStateOf(config.enableSetAlarm) }
     var enableStream by remember(config.enableStream) { mutableStateOf(config.enableStream) }
     var enableImageSupport by remember(config.enableImageSupport) { mutableStateOf(config.enableImageSupport) }
     var enableWebSearch by remember(config.enableWebSearch) { mutableStateOf(config.enableWebSearch) }
@@ -122,10 +130,12 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
     var contextExpanded by remember { mutableStateOf(true) }
     var functionExpanded by remember { mutableStateOf(true) }
     var toolsExpanded by remember { mutableStateOf(true) }
+    var alarmsExpanded by remember { mutableStateOf(true) }
     
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("api_keys", android.content.Context.MODE_PRIVATE)
     var baiduApiKey by remember { mutableStateOf(prefs.getString("baidu_api_key", "") ?: "") }
+    val scope = rememberCoroutineScope()
 
 
     Scaffold(
@@ -264,56 +274,6 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                         )
                     }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "开启真流式回答",
-                            fontSize = 14.sp,
-                            color = Color.DarkGray,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = enableStream,
-                            onCheckedChange = { checked ->
-                                enableStream = checked
-                                chatViewModel.updateAiConfig(
-                                    config.copy(enableStream = checked)
-                                )
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = MaterialTheme.diaryColors.primary
-                            )
-                        )
-                    }
-
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("开启网页搜索",
-                            fontSize = 14.sp,
-                            color = Color.DarkGray,
-                            modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = enableWebSearch,
-                            onCheckedChange = { checked ->
-                                enableWebSearch = checked
-                                chatViewModel.updateAiConfig(config.copy(enableWebSearch = checked))
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = MaterialTheme.diaryColors.primary
-                            )
-                        )
-                    }
 
                     Row(
                         modifier = Modifier
@@ -362,6 +322,86 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                                 enableEditNote = checked
                                 chatViewModel.updateAiConfig(
                                     config.copy(enableEditNote = checked)
+                                )
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "允许AI设置提醒",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = enableSetAlarm,
+                            onCheckedChange = { checked ->
+                                enableSetAlarm = checked
+                                chatViewModel.updateAiConfig(
+                                    config.copy(enableSetAlarm = checked)
+                                )
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("开启网页搜索",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = enableWebSearch,
+                            onCheckedChange = { checked ->
+                                enableWebSearch = checked
+                                chatViewModel.updateAiConfig(config.copy(enableWebSearch = checked))
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "开启真流式回答",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = enableStream,
+                            onCheckedChange = { checked ->
+                                enableStream = checked
+                                chatViewModel.updateAiConfig(
+                                    config.copy(enableStream = checked)
                                 )
                             },
                             colors = SwitchDefaults.colors(
@@ -559,8 +599,73 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                 }
                 }
                 
-
-                
+                // ========== AI提醒列表 ==========
+                if (aiAlarms.isNotEmpty()) {
+                    Divider(color = Color.LightGray.copy(alpha = 0.5f))
+                    SettingSectionHeader(
+                        title = "AI设置的提醒 (${aiAlarms.size})",
+                        isExpanded = alarmsExpanded,
+                        onClick = { alarmsExpanded = !alarmsExpanded }
+                    )
+                    if (alarmsExpanded) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        aiAlarms.forEach { alarm ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .background(
+                                        Color.LightGray.copy(alpha = 0.1f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        alarm.name,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.DarkGray
+                                    )
+                                    Text(
+                                        String.format("%02d:%02d", alarm.hour, alarm.minute) +
+                                            if (alarm.remark.isNotEmpty()) " - ${alarm.remark}" else "",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Switch(
+                                        checked = alarm.isActive,
+                                        onCheckedChange = { checked ->
+                                            alarmViewModel.toggleAlarm(alarm, checked)
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = MaterialTheme.diaryColors.primary
+                                        )
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            scope.launch {
+                                                alarmViewModel.deleteAlarm(alarm.id)
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "删除提醒",
+                                            tint = Color.Gray,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
             }
 

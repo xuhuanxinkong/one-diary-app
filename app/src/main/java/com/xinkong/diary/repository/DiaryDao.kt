@@ -65,4 +65,7 @@ interface DiaryDao {
         """
     )
     fun searchAllByKeyword(keyword: String): Flow<List<Diary>>
+
+    @Query("SELECT * FROM diaries WHERE tagFolder = :folder ORDER BY id DESC")
+    suspend fun getDiariesByFolder(folder: String): List<Diary>
 }

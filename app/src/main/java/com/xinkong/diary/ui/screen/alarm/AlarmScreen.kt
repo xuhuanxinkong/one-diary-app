@@ -538,7 +538,7 @@ fun DigitalClockCanvas() {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             // y轴往下稍微偏移以修正表盘视觉中心，x轴水平微调
-            modifier = Modifier.offset(x=(-2).dp ,y = 10.dp)
+            modifier = Modifier.offset(x=(-8).dp ,y = 10.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
