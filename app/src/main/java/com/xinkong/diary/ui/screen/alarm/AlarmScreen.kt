@@ -64,7 +64,8 @@ import androidx.compose.ui.text.style.TextAlign
 fun AlarmScreen(
     onAddAlarm: (Boolean, Long?) -> Unit,  // Boolean 表示是否是AI提醒, Long? 是AI的ID
     onEditAlarm: (Int, Boolean) -> Unit,  // Int是id, Boolean是否是AI提醒
-    chatViewModel: ChatViewModel
+    chatViewModel: ChatViewModel,
+    initialSelectedAiId: Long? = null  // 从编辑界面返回时自动选中的AI
 ) {
     val alarmViewModel: AlarmViewModel = viewModel()
     val alarms by alarmViewModel.alarms.collectAsStateWithLifecycle()
@@ -73,7 +74,7 @@ fun AlarmScreen(
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
     
     // 选中的分类：null 表示"用户"(普通闹钟)，否则是 AI 的 id
-    var selectedCategory by remember { mutableStateOf<Long?>(null) }
+    var selectedCategory by remember(initialSelectedAiId) { mutableStateOf(initialSelectedAiId) }
     
     // 是否收起顶部时钟区域
     var isClockCollapsed by remember { mutableStateOf(false) }

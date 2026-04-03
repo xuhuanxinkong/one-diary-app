@@ -109,13 +109,14 @@ import androidx.compose.ui.focus.focusRequester
 import android.Manifest
 import android.content.Intent
 import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.RecognitionListener
-import android.os.Bundle
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import com.huawei.hms.mlsdk.asr.MLAsrConstants
+import com.huawei.hms.mlsdk.asr.MLAsrListener
+import com.huawei.hms.mlsdk.asr.MLAsrRecognizer
+import android.os.Bundle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1198,66 +1199,140 @@ fun TalkInputRow(
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
+    // 记录开始识别时的文本，用于追加
+    var textBeforeListening by remember { mutableStateOf("") }
     var isListening by remember { mutableStateOf(false) }
-    val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
+    
+    // 检测是否为华为/荣耀设备
+    val isHuaweiDevice = remember {
+        val manufacturer = android.os.Build.MANUFACTURER.lowercase()
+        manufacturer.contains("huawei") || manufacturer.contains("honor")
+    }
+    
+    // 华为 ML Kit 语音识别器（仅华为设备创建）
+    val mlAsrRecognizer = remember { 
+        if (isHuaweiDevice) MLAsrRecognizer.createAsrRecognizer(context) else null 
+    }
+    
+    // 使用 rememberUpdatedState 确保回调中使用最新的值
+    val currentOnInputChange by androidx.compose.runtime.rememberUpdatedState(onInputChange)
+    val currentTextBefore by androidx.compose.runtime.rememberUpdatedState(textBeforeListening)
+    
+    // 系统语音识别（非华为设备使用）
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            if (!matches.isNullOrEmpty()) {
+                val recognizedText = matches[0]
+                val newText = if (textBeforeListening.isEmpty()) recognizedText else "$textBeforeListening$recognizedText"
+                onInputChange(newText)
+            }
+        }
+    }
+    
+    // 设置华为语音识别监听器（仅华为设备）
+    if (isHuaweiDevice && mlAsrRecognizer != null) {
+        DisposableEffect(Unit) {
+            mlAsrRecognizer.setAsrListener(object : MLAsrListener {
+                override fun onStartListening() {
+                    android.util.Log.d("VoiceInput", "华为 ML Kit: 开始聆听")
+                }
+                
+                override fun onStartingOfSpeech() {
+                    android.util.Log.d("VoiceInput", "华为 ML Kit: 检测到说话")
+                }
+                
+                override fun onVoiceDataReceived(data: ByteArray?, energy: Float, bundle: Bundle?) {}
+                
+                override fun onRecognizingResults(partialResults: Bundle?) {
+                    val partial = partialResults?.getString(MLAsrRecognizer.RESULTS_RECOGNIZING)
+                    android.util.Log.d("VoiceInput", "华为 ML Kit 实时结果: $partial")
+                    if (!partial.isNullOrEmpty()) {
+                        val newText = if (currentTextBefore.isEmpty()) partial else "$currentTextBefore$partial"
+                        currentOnInputChange(newText)
+                    }
+                }
+                
+                override fun onResults(results: Bundle?) {
+                    isListening = false
+                    val finalResult = results?.getString(MLAsrRecognizer.RESULTS_RECOGNIZED)
+                    android.util.Log.d("VoiceInput", "华为 ML Kit 最终结果: $finalResult")
+                    if (!finalResult.isNullOrEmpty()) {
+                        val newText = if (currentTextBefore.isEmpty()) finalResult else "$currentTextBefore$finalResult"
+                        currentOnInputChange(newText)
+                    }
+                }
+                
+                override fun onError(error: Int, errorMessage: String?) {
+                    isListening = false
+                    android.util.Log.e("VoiceInput", "华为 ML Kit 错误: $error - $errorMessage")
+                    val msg = when (error) {
+                        MLAsrConstants.ERR_NO_NETWORK -> "网络不可用"
+                        MLAsrConstants.ERR_SERVICE_UNAVAILABLE -> "服务不可用"
+                        MLAsrConstants.ERR_NO_UNDERSTAND -> "未识别到语音"
+                        else -> errorMessage ?: "识别错误"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
+                
+                override fun onState(state: Int, params: Bundle?) {
+                    android.util.Log.d("VoiceInput", "华为 ML Kit 状态: $state")
+                }
+            })
+            
+            onDispose {
+                mlAsrRecognizer.destroy()
+            }
+        }
+    }
+    
+    // 启动语音识别
+    fun startVoiceRecognition() {
+        textBeforeListening = inputText
+        isListening = true
+        
+        if (isHuaweiDevice && mlAsrRecognizer != null) {
+            // 华为设备：使用 ML Kit
+            val intent = Intent(MLAsrConstants.ACTION_HMS_ASR_SPEECH).apply {
+                putExtra(MLAsrConstants.LANGUAGE, "zh-CN")
+                putExtra(MLAsrConstants.FEATURE, MLAsrConstants.FEATURE_WORDFLUX)
+                putExtra(MLAsrConstants.PUNCTUATION_ENABLE, true)
+            }
+            mlAsrRecognizer.startRecognizing(intent)
+        } else {
+            // 其他设备：使用系统语音识别
+            isListening = false // 系统界面会接管
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "请说话...")
+            }
+            try {
+                speechLauncher.launch(intent)
+            } catch (e: Exception) {
+                Toast.makeText(context, "您的设备不支持语音识别", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    // 停止语音识别
+    fun stopVoiceRecognition() {
+        if (isHuaweiDevice && mlAsrRecognizer != null) {
+            mlAsrRecognizer.destroy()
+        }
+        isListening = false
+    }
     
     // 权限请求
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            // 权限通过，开始语音识别
-            startListening(speechRecognizer, context, onInputChange, inputText) { isListening = it }
+            startVoiceRecognition()
         } else {
             Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
-        }
-    }
-    
-    // 设置语音识别监听器
-    DisposableEffect(speechRecognizer) {
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                isListening = false
-            }
-            override fun onError(error: Int) {
-                isListening = false
-                val errorMsg = when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH -> "未识别到语音"
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "语音输入超时"
-                    SpeechRecognizer.ERROR_NETWORK -> "网络错误"
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "网络超时"
-                    else -> "识别错误"
-                }
-                Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-            }
-            override fun onResults(results: Bundle?) {
-                isListening = false
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val recognizedText = matches[0]
-                    // 追加到现有文本
-                    val newText = if (inputText.isEmpty()) recognizedText else "$inputText$recognizedText"
-                    onInputChange(newText)
-                }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val partialText = matches[0]
-                    // 实时显示部分识别结果
-                    val newText = if (inputText.isEmpty()) partialText else "$inputText$partialText"
-                    onInputChange(newText)
-                }
-            }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-        
-        onDispose {
-            speechRecognizer.destroy()
         }
     }
     
@@ -1268,6 +1343,33 @@ fun TalkInputRow(
             .padding(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+
+        Spacer(modifier = Modifier.width(4.dp))
+        // 语音输入按钮
+        IconButton(
+            onClick = {
+                if (isListening) {
+                    stopVoiceRecognition()
+                } else {
+                    // 检查权限
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                        startVoiceRecognition()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = if (isListening) "停止" else "语音输入",
+                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
         BasicTextField(
             value = inputText,
             onValueChange = onInputChange,
@@ -1284,8 +1386,8 @@ fun TalkInputRow(
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (inputText.isEmpty()) {
                         Text(
-                            if (isListening) "正在聆听..." else "输入消息...", 
-                            color = if (isListening) Color(0xFF07C160) else Color.Gray, 
+                            if (isListening) "正在聆听..." else "输入消息...",
+                            color = if (isListening) Color(0xFF07C160) else Color.Gray,
                             fontSize = 16.sp
                         )
                     }
@@ -1293,33 +1395,7 @@ fun TalkInputRow(
                 }
             }
         )
-        Spacer(modifier = Modifier.width(4.dp))
-        // 语音输入按钮
-        IconButton(
-            onClick = {
-                if (isListening) {
-                    // 停止语音识别
-                    speechRecognizer.stopListening()
-                    isListening = false
-                } else {
-                    // 检查权限
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) 
-                        == PackageManager.PERMISSION_GRANTED) {
-                        startListening(speechRecognizer, context, onInputChange, inputText) { isListening = it }
-                    } else {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
-            },
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                contentDescription = if (isListening) "停止" else "语音输入",
-                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
-                modifier = Modifier.size(24.dp)
-            )
-        }
+
         Spacer(modifier = Modifier.width(4.dp))
         // 群聊时显示AI回复顺序按钮
         if (showAiReplyButton) {
@@ -1359,23 +1435,6 @@ fun TalkInputRow(
             )
         }
     }
-}
-
-private fun startListening(
-    speechRecognizer: SpeechRecognizer,
-    context: android.content.Context,
-    onInputChange: (String) -> Unit,
-    currentText: String,
-    onListeningChange: (Boolean) -> Unit
-) {
-    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-    }
-    onListeningChange(true)
-    speechRecognizer.startListening(intent)
 }
 
 @Composable

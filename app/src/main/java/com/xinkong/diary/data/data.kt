@@ -120,9 +120,25 @@ sealed interface ToolTask {
         override val toolCall: AiToolCall,
         val name: String,
         val dateTime: String,  // 格式: yyyy-MM-dd HH:mm
-        val taskPrompt: String  // AI任务提示词
+        val taskPrompt: String,  // AI任务提示词
+        val repeatDays: List<Int> = emptyList()  // 重复日期 1-7 对应周一到周日
     ) : ToolTask {
         override val title: String = "设置AI任务：$name"
-        override val description: String = "AI 请求设置AI任务「$name」，时间：$dateTime，任务：$taskPrompt"
+        override val description: String = buildString {
+            append("AI 请求设置AI任务「$name」，时间：$dateTime")
+            if (repeatDays.isNotEmpty()) {
+                val dayNames = listOf("", "周一", "周二", "周三", "周四", "周五", "周六", "周日")
+                append("，重复：${repeatDays.mapNotNull { dayNames.getOrNull(it) }.joinToString(",")}")
+            }
+            append("，任务：$taskPrompt")
+        }
+    }
+
+    data class CancelAlarm(
+        override val toolCall: AiToolCall,
+        val alarmId: Int
+    ) : ToolTask {
+        override val title: String = "取消AI任务：ID $alarmId"
+        override val description: String = "AI 请求取消任务提醒 (ID: $alarmId)"
     }
 }

@@ -289,6 +289,49 @@ fun AlarmEditScreen(
                             }
                         }
 
+                        Divider(color = Color.LightGray.copy(alpha = 0.5f))
+                        
+                        // 重复选择器（与普通闹钟共用）
+                        Column(modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 0.dp)) {
+                            Text("重复", fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                val days = listOf("日", "一", "二", "三", "四", "五", "六")
+                                days.forEachIndexed { index, day ->
+                                    val dayValue = index + 1
+                                    val isSelected = alarm.repeatDays.contains(dayValue)
+                                    val actBorderColor by animateColorAsState(if (isSelected) MaterialTheme.diaryColors.background3 else Color.Transparent, label = "borderColor")
+                                    val actBgColor by animateColorAsState(if (isSelected) MaterialTheme.diaryColors.background3 else Color.LightGray.copy(alpha=0.2f), label = "bgColor")
+                                    val actContentColor by animateColorAsState(if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface, label = "textColor")
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .shadow(if (isSelected) 4.dp else 0.dp, shape = RoundedCornerShape(12.dp))
+                                            .background(
+                                                color = actBgColor,
+                                                shape = RoundedCornerShape(12.dp)
+                                            )
+                                            .border(1.dp, actBorderColor, RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                val newDays = if (isSelected) {
+                                                    alarm.repeatDays - dayValue
+                                                } else {
+                                                    alarm.repeatDays + dayValue
+                                                }
+                                                alarm = alarm.copy(repeatDays = newDays.sorted())
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = day, color = actContentColor, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                    }
+                                }
+                            }
+                        }
+
+                        Divider(color = Color.LightGray.copy(alpha = 0.5f))
+
                         // 提示词（实际用remark字段）
                         OutlinedTextField(
                             value = alarm.remark,

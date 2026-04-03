@@ -29,4 +29,10 @@ interface AlarmDao {
 
     @Query("SELECT * FROM alarms WHERE id = :id LIMIT 1")
     suspend fun getAlarmByIdSync(id: Int): AlarmEntity?
+
+    @Query("SELECT * FROM alarms WHERE aiConfigId = :aiConfigId AND isActive = 1 ORDER BY hour ASC, minute ASC")
+    suspend fun getActiveAlarmsByAiConfigIdSync(aiConfigId: Long): List<AlarmEntity>
+
+    @Query("DELETE FROM alarms WHERE id = :id")
+    suspend fun deleteAlarmById(id: Int)
 }

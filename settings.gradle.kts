@@ -3,6 +3,8 @@ pluginManagement {
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
         maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        // 华为 Maven 仓库
+        maven { url = uri("https://developer.huawei.com/repo/") }
         gradlePluginPortal()
         mavenCentral()
     }
@@ -13,7 +15,8 @@ dependencyResolutionManagement {
     repositories {
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
-        // 移除 google()
+        // 华为 Maven 仓库
+        maven { url = uri("https://developer.huawei.com/repo/") }
         mavenCentral()
     }
 }

@@ -251,7 +251,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         if (config.enableReadNotes) add("read_notes")
                         if (config.enableWriteNote) add("write_note")
                         if (config.enableEditNote) add("edit_note")
-                        if (config.enableSetAlarm) add("set_alarm")
+                        if (config.enableSetAlarm) {
+                            add("set_alarm")
+                            add("cancel_alarm")
+                        }
                     }
                 }
 
@@ -300,7 +303,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (aiConfig.enableReadNotes) add("read_notes")
                 if (aiConfig.enableWriteNote) add("write_note")
                 if (aiConfig.enableEditNote) add("edit_note")
-                if (aiConfig.enableSetAlarm) add("set_alarm")
+                if (aiConfig.enableSetAlarm) {
+                    add("set_alarm")
+                    add("cancel_alarm")
+                }
             }
         }
 
@@ -846,6 +852,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 hour = hour,
                                 minute = minute,
                                 isActive = true,
+                                repeatDays = currentTask.repeatDays,
                                 remark = currentTask.taskPrompt,
                                 aiConfigId = batch.aiConfig.id,
                                 chatId = batch.chatId,
@@ -856,12 +863,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             val savedAlarm = alarm.copy(id = newId)
                             ChainAlarmHelper.scheduleNextAlarm(getApplication(), savedAlarm)
                             
-                            "AI任务设置成功：「${currentTask.name}」将于 ${currentTask.dateTime} 执行任务"
+                            val repeatInfo = if (currentTask.repeatDays.isNotEmpty()) {
+                                val dayNames = listOf("", "周一", "周二", "周三", "周四", "周五", "周六", "周日")
+                                "，重复：${currentTask.repeatDays.mapNotNull { dayNames.getOrNull(it) }.joinToString(",")}"
+                            } else ""
+                            "AI任务设置成功：「${currentTask.name}」将于 ${currentTask.dateTime} 执行任务$repeatInfo"
                         } else {
                             "提醒设置失败：无法解析时间格式 ${currentTask.dateTime}"
                         }
                     } catch (e: Exception) {
                         "提醒设置失败：${e.message}"
+                    }
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = "",
+                        toolResult = resultText
+                    )
+                }
+                is ToolTask.CancelAlarm -> {
+                    val resultText = try {
+                        val alarm = alarmDao.getAlarmByIdSync(currentTask.alarmId)
+                        if (alarm != null && alarm.aiConfigId == batch.aiConfig.id) {
+                            ChainAlarmHelper.cancelAlarm(getApplication(), alarm.id)
+                            alarmDao.deleteAlarmById(currentTask.alarmId)
+                            "已取消任务提醒：「${alarm.name}」(ID: ${currentTask.alarmId})"
+                        } else if (alarm == null) {
+                            "取消失败：未找到ID为 ${currentTask.alarmId} 的提醒"
+                        } else {
+                            "取消失败：无权取消其他AI的提醒"
+                        }
+                    } catch (e: Exception) {
+                        "取消失败：${e.message}"
                     }
                     buildToolResultMessage(
                         toolName = currentTask.toolCall.functionName,
@@ -1014,18 +1047,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                   rules.isNotEmpty() || 
                                   currentAiConfig.promptStyle.isNotBlank()
         
-        // 构建对话时间上下文信息（精简版）
-        val timeContextInfo = buildString {
-            append("【时间】$currentTime")
-            if (history.size >= 2) {
-                append("（上次对话：${history[history.size - 2].date}）")
-            }
-            append("\n")
-        }
-        
         return buildString {
-            append(timeContextInfo)
-            append("\n")
+            // ===== 静态内容放前面 =====
+            
             // 结构化身份设定
             if (hasStructuredPrompt) {
                 append("【身份设定】\n")
@@ -1055,6 +1079,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (userContext.isNotEmpty()) append("【用户】$userContext\n")
             if (aiContext.isNotEmpty()) append("【背景】$aiContext\n")
             
+            // 工具说明
+            val toolsList = mutableListOf<String>()
+            if ("read_notes" in enabledTools) toolsList.add("read_notes")
+            if ("write_note" in enabledTools) toolsList.add("write_note")
+            if ("edit_note" in enabledTools) toolsList.add("edit_note/batch_edit_note")
+            if ("set_alarm" in enabledTools) toolsList.add("set_alarm")
+            if ("cancel_alarm" in enabledTools) toolsList.add("cancel_alarm")
+            if ("web_search_baidu" in enabledTools) toolsList.add("web_search_baidu")
+            
+            if (toolsList.isNotEmpty()) {
+                append("【工具】可用：${toolsList.joinToString("/")}，通过 tool_calls 调用。")
+                if (currentAiConfig.boundFolder.isNotBlank()) {
+                    append("限定文件夹：${currentAiConfig.boundFolder}")
+                }
+                append("\n")
+            }
+            
+            // ===== 动态内容放后面 =====
+            
             // 注入记忆库概览（绑定文件夹的笔记列表，限5篇）
             if (currentAiConfig.boundFolder.isNotBlank()) {
                 val folderNotes = diaryDao.getDiariesByFolder(currentAiConfig.boundFolder)
@@ -1062,7 +1105,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     append("【记忆库】${currentAiConfig.boundFolder}（${folderNotes.size}篇）：")
                     append(folderNotes.take(5).joinToString("、") { "[${it.id}]${it.title}" })
                     if (folderNotes.size > 5) append("...等")
-                    append("\n\n")
+                    append("\n")
                 }
             }
             
@@ -1083,12 +1126,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             
-            if ("read_notes" in enabledTools || "write_note" in enabledTools || "edit_note" in enabledTools) {
-                append("【工具】可用：read_notes/write_note/edit_note/batch_edit_note，通过 tool_calls 调用。")
-                if (currentAiConfig.boundFolder.isNotBlank()) {
-                    append("限定文件夹：${currentAiConfig.boundFolder}")
+            // 注入AI的提醒列表
+            if ("set_alarm" in enabledTools || "cancel_alarm" in enabledTools) {
+                val myAlarms = alarmDao.getActiveAlarmsByAiConfigIdSync(currentAiConfig.id)
+                if (myAlarms.isNotEmpty()) {
+                    append("【我的提醒】(${myAlarms.size}项)\n")
+                    myAlarms.forEach { alarm ->
+                        val timeStr = String.format("%02d:%02d", alarm.hour, alarm.minute)
+                        val repeatStr = if (alarm.repeatDays.isEmpty()) "仅一次" else {
+                            val dayNames = listOf("", "周一", "周二", "周三", "周四", "周五", "周六", "周日")
+                            alarm.repeatDays.mapNotNull { dayNames.getOrNull(it) }.joinToString(",")
+                        }
+                        append("- [ID:${alarm.id}] ${alarm.name} $timeStr $repeatStr")
+                        if (alarm.remark.isNotBlank()) append(" 任务:${alarm.remark.take(20)}")
+                        append("\n")
+                    }
                 }
-                append("\n")
+            }
+            
+            // 时间信息放最后
+            append("【时间】$currentTime")
+            if (history.size >= 2) {
+                append("（上次对话：${history[history.size - 2].date}）")
             }
         }.trim()
     }
@@ -1314,8 +1373,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val name = json.optString("name").trim()
                         val dateTime = json.optString("dateTime").trim()
                         val taskPrompt = json.optString("taskPrompt", "").trim()
+                        val repeatDays = mutableListOf<Int>()
+                        if (json.has("repeatDays")) {
+                            val arr = json.optJSONArray("repeatDays")
+                            if (arr != null) {
+                                for (i in 0 until arr.length()) {
+                                    val day = arr.optInt(i, 0)
+                                    if (day in 1..7) repeatDays.add(day)
+                                }
+                            }
+                        }
                         if (name.isNotEmpty() && dateTime.isNotEmpty() && taskPrompt.isNotEmpty()) {
-                            tasks.add(ToolTask.SetAlarm(call, name, dateTime, taskPrompt))
+                            tasks.add(ToolTask.SetAlarm(call, name, dateTime, taskPrompt, repeatDays.sorted()))
+                        }
+                    } catch (e: Exception) {}
+                }
+                call.type == "function" && call.functionName == "cancel_alarm" && "cancel_alarm" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val alarmId = json.optInt("alarmId", 0)
+                        if (alarmId > 0) {
+                            tasks.add(ToolTask.CancelAlarm(call, alarmId))
                         }
                     } catch (e: Exception) {}
                 }
@@ -1549,6 +1627,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             hour = hour,
                             minute = minute,
                             isActive = true,
+                            repeatDays = task.repeatDays,
                             remark = task.taskPrompt,
                             aiConfigId = aiConfigId,
                             chatId = chatId,
@@ -1559,12 +1638,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         val savedAlarm = alarm.copy(id = newId)
                         ChainAlarmHelper.scheduleNextAlarm(getApplication(), savedAlarm)
                         
-                        "AI任务设置成功：「${task.name}」将于 ${task.dateTime} 执行任务"
+                        val repeatInfo = if (task.repeatDays.isNotEmpty()) {
+                            val dayNames = listOf("", "周一", "周二", "周三", "周四", "周五", "周六", "周日")
+                            "，重复：${task.repeatDays.mapNotNull { dayNames.getOrNull(it) }.joinToString(",")}"
+                        } else ""
+                        "AI任务设置成功：「${task.name}」将于 ${task.dateTime} 执行任务$repeatInfo"
                     } else {
                         "提醒设置失败：无法解析时间格式 ${task.dateTime}"
                     }
                 } catch (e: Exception) {
                     "提醒设置失败：${e.message}"
+                }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = "",
+                    toolResult = resultText
+                )
+            }
+            is ToolTask.CancelAlarm -> {
+                val resultText = try {
+                    val alarm = alarmDao.getAlarmByIdSync(task.alarmId)
+                    if (alarm != null && alarm.aiConfigId == aiConfigId) {
+                        ChainAlarmHelper.cancelAlarm(getApplication(), alarm.id)
+                        alarmDao.deleteAlarmById(task.alarmId)
+                        "已取消任务提醒：「${alarm.name}」(ID: ${task.alarmId})"
+                    } else if (alarm == null) {
+                        "取消失败：未找到ID为 ${task.alarmId} 的提醒"
+                    } else {
+                        "取消失败：无权取消其他AI的提醒"
+                    }
+                } catch (e: Exception) {
+                    "取消失败：${e.message}"
                 }
                 buildToolResultMessage(
                     toolName = task.toolCall.functionName,
@@ -1670,7 +1775,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             if (config.enableReadNotes) add("read_notes")
                             if (config.enableWriteNote) add("write_note")
                             if (config.enableEditNote) add("edit_note")
-                            if (config.enableSetAlarm) add("set_alarm")
+                            if (config.enableSetAlarm) {
+                                add("set_alarm")
+                                add("cancel_alarm")
+                            }
                         }
                     }
                     val messages = buildContextMessages(chatId, config, enabledTools)

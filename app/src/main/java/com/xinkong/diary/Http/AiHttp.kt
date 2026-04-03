@@ -227,24 +227,52 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "set_alarm")
-            put("description", "设置一个AI自动任务提醒。在指定时间到达时，AI将自动执行taskPrompt中描述的任务。仅用于安排AI自己的日程任务，不用于设置普通闹钟或提醒用户。")
+            put("description", "设置AI自动任务提醒。时间到达时AI将自动执行taskPrompt任务。可设置每天/每周重复。查看【我的提醒】了解已设置的任务。")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
                     put("name", JSONObject().apply {
                         put("type", "string")
-                        put("description", "任务名称，简短描述这个AI任务的内容")
+                        put("description", "任务名称，简短描述任务内容")
                     })
                     put("dateTime", JSONObject().apply {
                         put("type", "string")
-                        put("description", "执行时间，格式为 yyyy-MM-dd HH:mm，例如 2024-12-25 09:00")
+                        put("description", "首次执行时间，格式 yyyy-MM-dd HH:mm，如 2024-12-25 09:00")
                     })
                     put("taskPrompt", JSONObject().apply {
                         put("type", "string")
-                        put("description", "AI任务提示词，描述AI到时需要执行的具体任务，例如：'总结今天的笔记并给出行动建议'")
+                        put("description", "AI任务提示词，描述到时执行的具体任务")
+                    })
+                    put("repeatDays", JSONObject().apply {
+                        put("type", "array")
+                        put("items", JSONObject().apply {
+                            put("type", "integer")
+                            put("minimum", 1)
+                            put("maximum", 7)
+                        })
+                        put("description", "重复日期，1-7对应周一至周日。如[1,2,3,4,5]表示工作日每天，空数组或不填表示仅执行一次")
                     })
                 })
                 put("required", JSONArray().put("name").put("dateTime").put("taskPrompt"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val cancelAlarmToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "cancel_alarm")
+            put("description", "取消已设置的AI任务提醒。查看【我的提醒】获取任务ID。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("alarmId", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "要取消的提醒ID，从【我的提醒】列表中获取")
+                    })
+                })
+                put("required", JSONArray().put("alarmId"))
                 put("additionalProperties", false)
             })
         })
@@ -551,6 +579,9 @@ class AiHttp {
             }
             if (enabledTools.contains("set_alarm")) {
                 toolsArray.put(setAlarmToolSchema)
+            }
+            if (enabledTools.contains("cancel_alarm")) {
+                toolsArray.put(cancelAlarmToolSchema)
             }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)
