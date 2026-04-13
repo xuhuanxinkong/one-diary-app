@@ -75,6 +75,9 @@ dependencies {
     // 华为 ML Kit 语音识别
     implementation("com.huawei.hms:ml-computer-voice-asr:3.12.0.301")
     implementation("com.huawei.hms:ml-computer-voice-asr-plugin:3.12.0.301")
+    
+    // 华为 ML Kit TTS 语音合成
+    implementation("com.huawei.hms:ml-computer-voice-tts:3.12.0.301")
 
 
 

@@ -292,7 +292,7 @@ fun AlarmEditScreen(
                         Divider(color = Color.LightGray.copy(alpha = 0.5f))
                         
                         // 重复选择器（与普通闹钟共用）
-                        Column(modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 0.dp)) {
+                        Column(modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 8.dp)) {
                             Text("重复", fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
