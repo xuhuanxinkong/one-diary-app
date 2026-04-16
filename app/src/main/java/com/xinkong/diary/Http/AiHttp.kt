@@ -33,7 +33,7 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "read_notes")
-            put("description", "按关键词读取本地笔记摘要")
+            put("description", "按关键词读取本地记忆库笔记摘要（来源为本地记忆库，不是互联网）")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -159,19 +159,6 @@ class AiHttp {
         })
     }
 
-    private val listFolderNotesToolSchema = JSONObject().apply {
-        put("type", "function")
-        put("function", JSONObject().apply {
-            put("name", "list_folder_notes")
-            put("description", "列出你的记忆库（绑定文件夹）中的所有笔记，获取完整的笔记列表（包含ID、标题、日期、简介）")
-            put("parameters", JSONObject().apply {
-                put("type", "object")
-                put("properties", JSONObject())
-                put("additionalProperties", false)
-            })
-        })
-    }
-
     private val queryChatHistoryToolSchema = JSONObject().apply {
         put("type", "function")
         put("function", JSONObject().apply {
@@ -208,7 +195,7 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "web_search_baidu")
-            put("description", "使用百度智能云进行搜索，获取最新的网页信息。当你需要了解超出训练数据截止日期的事情、实时动态或检索具体资料时使用。")
+            put("description", "使用百度智能云进行互联网网页搜索（来源为互联网，不是本地记忆库）。当你需要实时动态或外部资料时使用。")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -223,11 +210,11 @@ class AiHttp {
         })
     }
 
-    private val setAlarmToolSchema = JSONObject().apply {
+    private val createPlanToolSchema = JSONObject().apply {
         put("type", "function")
         put("function", JSONObject().apply {
-            put("name", "set_alarm")
-            put("description", "设置AI自动任务提醒。时间到达时AI将自动执行taskPrompt任务。可设置每天/每周重复。查看【我的提醒】了解已设置的任务。")
+            put("name", "create_plan")
+            put("description", "制定AI自动执行计划。时间到达时AI将自动执行taskPrompt计划。可设置每天/每周重复。查看【我的提醒】了解已制定的计划。")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -259,11 +246,11 @@ class AiHttp {
         })
     }
 
-    private val cancelAlarmToolSchema = JSONObject().apply {
+    private val cancelPlanToolSchema = JSONObject().apply {
         put("type", "function")
         put("function", JSONObject().apply {
-            put("name", "cancel_alarm")
-            put("description", "取消已设置的AI任务提醒。查看【我的提醒】获取任务ID。")
+            put("name", "cancel_plan")
+            put("description", "取消已制定的AI执行计划。查看【我的提醒】获取计划ID。")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -290,8 +277,20 @@ class AiHttp {
         return withContext(Dispatchers.IO) {
             try {
                 val chatUrl = resolveCompletionsUrl(config.baseUrl)
-                val requestPayload = buildRequestJson(config.model, messages, enabledTools)
-                val body = buildRequestBody(config.model, messages, enabledTools)
+                val requestPayload = buildRequestJson(
+                    model = config.model,
+                    messages = messages,
+                    enabledTools = enabledTools,
+                    baseUrl = config.baseUrl,
+                    enableDeepThink = config.enableDeepThink
+                )
+                val body = buildRequestBody(
+                    model = config.model,
+                    messages = messages,
+                    enabledTools = enabledTools,
+                    baseUrl = config.baseUrl,
+                    enableDeepThink = config.enableDeepThink
+                )
 
                 Log.d(TAG, "[chatWithAi] url=$chatUrl, model=${config.model}, stream=false, messages=$messages, enabledTools=$enabledTools")
                 Log.d(TAG, "[chatWithAi] request payload: $requestPayload")
@@ -316,8 +315,9 @@ class AiHttp {
                         val message = choicesArray.getJSONObject(0).optJSONObject("message")
                         if (message != null) {
                             val content = message.optString("content", "")
+                            val reasoningContent = extractReasoningText(message)
                             val toolCalls = parseToolCalls(message.optJSONArray("tool_calls"))
-                            Result.success(AiResponse.Message(content = content, toolCalls = toolCalls))
+                            Result.success(AiResponse.Message(content = content, toolCalls = toolCalls, reasoningContent = if (reasoningContent.isNotEmpty()) reasoningContent else null))
                         } else {
                             Result.failure(IOException("解析失败：message 字段为空"))
                         }
@@ -342,8 +342,22 @@ class AiHttp {
         enabledTools: Set<String> = emptySet()
     ): Flow<AiResponse.StreamChunk> = flow {
         val chatUrl = resolveCompletionsUrl(config.baseUrl)
-        val requestPayload = buildRequestJson(config.model, messages, enabledTools, isStream = true)
-        val body = buildRequestBody(config.model, messages, enabledTools, isStream = true)
+        val requestPayload = buildRequestJson(
+            model = config.model,
+            messages = messages,
+            enabledTools = enabledTools,
+            isStream = true,
+            baseUrl = config.baseUrl,
+            enableDeepThink = config.enableDeepThink
+        )
+        val body = buildRequestBody(
+            model = config.model,
+            messages = messages,
+            enabledTools = enabledTools,
+            isStream = true,
+            baseUrl = config.baseUrl,
+            enableDeepThink = config.enableDeepThink
+        )
 
         Log.d(TAG, "[chatWithAiStream] url=$chatUrl, model=${config.model}, stream=true, messages=$messages, enabledTools=$enabledTools")
         Log.d(TAG, "[chatWithAiStream] request payload: $requestPayload")
@@ -383,6 +397,17 @@ class AiHttp {
                             val choicesArray = json.optJSONArray("choices") ?: continue
                             if (choicesArray.length() == 0) continue
                             val delta = choicesArray.getJSONObject(0).optJSONObject("delta") ?: continue
+
+                            // 0. Reasoning Content
+                            if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
+                                emit(AiResponse.StreamChunk.ReasoningContent(delta.optString("reasoning_content", "")))
+                            }
+                            if (delta.has("reasoning") && !delta.isNull("reasoning")) {
+                                val reasoning = delta.opt("reasoning")
+                                if (reasoning is String && reasoning.isNotEmpty()) {
+                                    emit(AiResponse.StreamChunk.ReasoningContent(reasoning))
+                                }
+                            }
 
                             // 1. Text Content
                             if (delta.has("content") && !delta.isNull("content")) {
@@ -554,15 +579,37 @@ class AiHttp {
         model: String,
         messages: List<Map<String, Any>>,
         enabledTools: Set<String>,
-        isStream: Boolean = false
+        isStream: Boolean = false,
+        baseUrl: String = "",
+        enableDeepThink: Boolean = false
     ): JSONObject {
+        val requestMessages = if (enableDeepThink) {
+            val deepThinkPrompt = "[深度思考模式]请先充分思考后再回答；若模型支持，请在 reasoning_content 中输出思考过程，再在 content 中给出最终答复。"
+            val systemIndex = messages.indexOfFirst {
+                it["role"] == "system" && it["content"] is String
+            }
+            if (systemIndex >= 0) {
+                messages.mapIndexed { index, message ->
+                    if (index == systemIndex) {
+                        val merged = (message["content"] as String).trimEnd() + "\n\n" + deepThinkPrompt
+                        message.toMutableMap().apply { put("content", merged) }
+                    } else {
+                        message
+                    }
+                }
+            } else {
+                listOf(mapOf("role" to "system", "content" to deepThinkPrompt)) + messages
+            }
+        } else {
+            messages
+        }
+
         return JSONObject().apply {
             put("model", model)
-            put("messages", JSONObject.wrap(messages))
+            put("messages", JSONObject.wrap(requestMessages))
             val toolsArray = JSONArray()
             if (enabledTools.contains("read_notes")) {
                 toolsArray.put(readNotesToolSchema)
-                toolsArray.put(listFolderNotesToolSchema)
             }
             if (enabledTools.contains("write_note")) {
                 toolsArray.put(writeNoteToolSchema)
@@ -577,23 +624,55 @@ class AiHttp {
             if (enabledTools.contains("web_search_baidu")) {
                 toolsArray.put(webSearchBaiduToolSchema)
             }
-            if (enabledTools.contains("set_alarm")) {
-                toolsArray.put(setAlarmToolSchema)
+            if (enabledTools.contains("create_plan")) {
+                toolsArray.put(createPlanToolSchema)
             }
-            if (enabledTools.contains("cancel_alarm")) {
-                toolsArray.put(cancelAlarmToolSchema)
+            if (enabledTools.contains("cancel_plan")) {
+                toolsArray.put(cancelPlanToolSchema)
             }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)
                 put("tool_choice", "auto")
             }
             put("stream", isStream)
+            if (enableDeepThink && isDashScopeUrl(baseUrl)) {
+                // DashScope Qwen 深度思考兼容参数
+                put("enable_thinking", true)
+            }
         }
     }
 
-    private fun buildRequestBody(model: String, messages: List<Map<String, Any>>, enabledTools: Set<String>, isStream: Boolean = false): RequestBody {
-        val json = buildRequestJson(model, messages, enabledTools, isStream)
+    private fun buildRequestBody(
+        model: String,
+        messages: List<Map<String, Any>>,
+        enabledTools: Set<String>,
+        isStream: Boolean = false,
+        baseUrl: String = "",
+        enableDeepThink: Boolean = false
+    ): RequestBody {
+        val json = buildRequestJson(model, messages, enabledTools, isStream, baseUrl, enableDeepThink)
         return json.toString().toRequestBody(mediaType)
+    }
+
+    private fun isDashScopeUrl(baseUrl: String): Boolean {
+        return baseUrl.contains("dashscope.aliyuncs.com", ignoreCase = true)
+    }
+
+    private fun extractReasoningText(message: JSONObject): String {
+        val direct = message.optString("reasoning_content", "")
+        if (direct.isNotBlank()) return direct
+
+        val reasoning = message.opt("reasoning")
+        if (reasoning is String && reasoning.isNotBlank()) return reasoning
+        if (reasoning is JSONObject) {
+            val text = reasoning.optString("content", "")
+            if (text.isNotBlank()) return text
+        }
+
+        val alt = message.optString("reasoning", "")
+        if (alt.isNotBlank()) return alt
+
+        return ""
     }
 
     private fun parseToolCalls(toolCallsArray: JSONArray?): List<AiToolCall> {

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,7 +66,8 @@ fun AlarmScreen(
     onAddAlarm: (Boolean, Long?) -> Unit,  // Boolean 表示是否是AI提醒, Long? 是AI的ID
     onEditAlarm: (Int, Boolean) -> Unit,  // Int是id, Boolean是否是AI提醒
     chatViewModel: ChatViewModel,
-    initialSelectedAiId: Long? = null  // 从编辑界面返回时自动选中的AI
+    initialSelectedAiId: Long? = null,  // 从编辑界面返回时自动选中的AI
+    onSelectedCategoryChange: (Long?) -> Unit = {}
 ) {
     val alarmViewModel: AlarmViewModel = viewModel()
     val alarms by alarmViewModel.alarms.collectAsStateWithLifecycle()
@@ -74,10 +76,14 @@ fun AlarmScreen(
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
     
     // 选中的分类：null 表示"用户"(普通闹钟)，否则是 AI 的 id
-    var selectedCategory by remember(initialSelectedAiId) { mutableStateOf(initialSelectedAiId) }
+    var selectedCategory by rememberSaveable(initialSelectedAiId) { mutableStateOf(initialSelectedAiId) }
     
     // 是否收起顶部时钟区域
     var isClockCollapsed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedCategory) {
+        onSelectedCategoryChange(selectedCategory)
+    }
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
@@ -124,15 +130,20 @@ fun AlarmScreen(
         }
     }
 
-    Scaffold { padding ->
+    Scaffold(
+        containerColor = Color(0xFFF5F5F5), // 整个屏幕背景改为浅灰色
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { _ ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White)
         ) {
             // 上半部分：数字时钟 (可收起) + 收起按钮
             Column(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White) // 保留时钟区域为白色背景
+                    .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     // 收起/展开按钮 (始终显示在右上角)
@@ -176,15 +187,16 @@ fun AlarmScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(padding.calculateBottomPadding())
                     .weight(1f)
             ) {
                 // 左侧：用户 + AI 列表
                 Column(
                     modifier = Modifier
-                        .width(100.dp)
+                        .width(110.dp)
                         .fillMaxHeight()
-                        .padding(start = 12.dp, top = 16.dp)
+                        .background(Color.White)
+                        .padding(start = 8.dp, end = 8.dp, top = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // "用户" 选项
                     CategoryItem(
@@ -193,11 +205,20 @@ fun AlarmScreen(
                         onClick = { selectedCategory = null }
                     )
                     
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                        color = Color.LightGray.copy(alpha = 0.3f),
+                        thickness = 1.dp
+                    )
+                    
+                    Spacer(modifier = Modifier.height(6.dp))
                     
                     // AI 列表
                     LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         items(allAiConfigs, key = { it.id }) { aiConfig ->
                             AiCategoryItem(
@@ -209,39 +230,40 @@ fun AlarmScreen(
                     }
                 }
                 
-                // 中间分割线
-                VerticalDivider(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .padding(vertical = 16.dp),
-                    color = Color.LightGray.copy(alpha = 0.5f)
-                )
-                
                 // 右侧：闹钟列表
-                LazyColumn(
+                Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .padding(end = 4.dp, top = 8.dp, start = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .background(Color(0xFFF5F5F5)),
+                    contentAlignment = Alignment.TopCenter
                 ) {
-                    items(filteredAlarms, key = { it.id }) { alarm ->
-                        SwipeToDeleteAlarmCard(
-                            alarm = alarm,
-                            onCheckedChange = { isChecked ->
-                                alarmViewModel.toggleAlarm(alarm, isChecked)
-                            },
-                            onClick = { onEditAlarm(alarm.id, alarm.actionType == "PROCESS_NOTE") },
-                            onDelete = { alarmViewModel.deleteAlarm(alarm.id) }
-                        )
-                    }
-                    
-                    // 新建卡片
-                    item {
-                        AddAlarmCard(
-                            isAiReminder = selectedCategory != null,
-                            onClick = { onAddAlarm(selectedCategory != null, selectedCategory) }
-                        )
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.9f)
+                            .padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        items(filteredAlarms, key = { it.id }) { alarm ->
+                            SwipeToDeleteAlarmCard(
+                                alarm = alarm,
+                                onCheckedChange = { isChecked ->
+                                    alarmViewModel.toggleAlarm(alarm, isChecked)
+                                },
+                                onClick = { onEditAlarm(alarm.id, alarm.actionType == "PROCESS_NOTE") },
+                                onDelete = { alarmViewModel.deleteAlarm(alarm.id) }
+                            )
+                        }
+                        
+                        // 新建卡片
+                        item {
+                            AddAlarmCard(
+                                isAiReminder = selectedCategory != null,
+                                onClick = { onAddAlarm(selectedCategory != null, selectedCategory) }
+                            )
+                        }
                     }
                 }
             }
@@ -268,12 +290,12 @@ private fun CategoryItem(
     onClick: () -> Unit
 ) {
     val animatedBgColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         animationSpec = tween(300),
         label = "categoryBgColor"
     )
     val animatedTextColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
         animationSpec = tween(300),
         label = "categoryTextColor"
     )
@@ -281,13 +303,15 @@ private fun CategoryItem(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(animatedBgColor, RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(animatedBgColor)
             .clickable { onClick() }
-            .padding(vertical = 12.dp, horizontal = 8.dp)
+            .padding(vertical = 12.dp, horizontal = 12.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = name,
-            fontSize = 18.sp,
+            fontSize = 17.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
             color = animatedTextColor
         )
@@ -302,12 +326,12 @@ private fun AiCategoryItem(
     onClick: () -> Unit
 ) {
     val animatedBgColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         animationSpec = tween(300),
         label = "aiBgColor"
     )
     val animatedTextColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
         animationSpec = tween(300),
         label = "aiTextColor"
     )
@@ -315,13 +339,15 @@ private fun AiCategoryItem(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(animatedBgColor, RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(animatedBgColor)
             .clickable { onClick() }
-            .padding(vertical = 10.dp, horizontal = 8.dp)
+            .padding(vertical = 10.dp, horizontal = 6.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = aiConfig.name,
-            fontSize = 16.sp,
+            fontSize = 15.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
             color = animatedTextColor,
             maxLines = 1,
@@ -336,18 +362,24 @@ private fun AddAlarmCard(
     isAiReminder: Boolean,
     onClick: () -> Unit
 ) {
+    val addCardBorder = if (isAiReminder) Color(0xFFD6E9FF) else Color(0xFFEEEEEE)
+    val addIconTint = if (isAiReminder) Color(0xFF2F6DB2) else Color.Gray
+    val addTextTint = if (isAiReminder) Color(0xFF2F6DB2) else Color.Gray
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
+            containerColor = Color.White
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, addCardBorder)
     ) {
         Row(
             modifier = Modifier
-                .padding(16.dp)
+                .padding(vertical = 12.dp, horizontal = 10.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
@@ -355,14 +387,15 @@ private fun AddAlarmCard(
             Icon(
                 imageVector = Icons.Default.Add,
                 contentDescription = "添加",
-                tint = Color.Gray,
-                modifier = Modifier.size(20.dp)
+                tint = addIconTint,
+                modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = if (isAiReminder) "新建AI提醒" else "新建闹钟",
-                fontSize = 14.sp,
-                color = Color.Gray
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = addTextTint
             )
         }
     }
@@ -401,8 +434,8 @@ private fun SwipeToDeleteAlarmCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(color, RoundedCornerShape(16.dp))
-                    .padding(end =  20.dp, start = 30.dp),
+                    .background(color, RoundedCornerShape(20.dp))
+                    .padding(end = 24.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
                 if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
@@ -432,63 +465,62 @@ private fun CompactAlarmCard(
     onCheckedChange: (Boolean) -> Unit,
     onClick: () -> Unit
 ) {
-    val isAiReminder = alarm.actionType == "PROCESS_NOTE"
+    val cardBorder = Color(0xFFEDEDED)
+    val timeColor = if (alarm.isActive) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        Color.Gray
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = Color.White
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, cardBorder)
     ) {
         Row(
             modifier = Modifier
-                .padding(12.dp)
+                .padding(vertical = 10.dp, horizontal = 10.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isAiReminder) {
-                        Box(
-                            modifier = Modifier
-                                .background(Color(0xFF5B9BD5).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                "AI",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF5B9BD5)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                    }
+
                     // 显示时间
                     Text(
                         text = String.format("%02d:%02d", alarm.hour, alarm.minute),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface else Color.Gray
+                        color = timeColor
                     )
                 }
-                
+
+                Spacer(modifier = Modifier.height(2.dp))
+
                 val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
                 Text(
                     text = alarm.name + remarkStr,
-                    fontSize = 13.sp,
-                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f) else Color.Gray,
-                    maxLines = 2,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f) else Color.Gray,
+                    maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
             
+            Spacer(modifier = Modifier.width(6.dp))
+            
             Switch(
                 checked = alarm.isActive,
                 onCheckedChange = onCheckedChange,
-                modifier = Modifier.scale(0.8f)
+                modifier = Modifier.scale(0.68f)
             )
         }
     }

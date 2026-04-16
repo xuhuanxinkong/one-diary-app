@@ -42,7 +42,8 @@ data class ChatMessage(
     val date: String,
     val photoUris: String = "[]", // To store local file paths of images
     val toolExecutions: String = "[]", // JSON string of List<String>
-    val aiId: Long? = null // 用于记录是哪个 AI 发送的消息
+    val aiId: Long? = null, // 用于记录是哪个 AI 发送的消息
+    val reasoningContent: String? = null // 存储深度思考的内容
 )
 
 @Entity(
@@ -74,16 +75,11 @@ data class AiChatConfig(
     val enableImageSupport: Boolean = false,
     val enableWebSearch: Boolean = false,
     val enableSetAlarm: Boolean = true,
+    val enableDeepThink: Boolean = false,
     val isEnabled: Boolean = true,
     val replyOrder: Int = 0,
     // AI绑定的文件夹（AI对笔记的操作限定在此文件夹）
-    val boundFolder: String = "",
-    // 结构化系统提示词字段
-    val promptRole: String = "",        // 角色定位，如"客服"、"助手"
-    val promptDomain: String = "",      // 专业领域，如"订单查询"、"编程"
-    val promptRules: String = "[]",     // 规则列表JSON，如["无订单号→询问","遵守隐私政策"]
-    val promptStyle: String = "",       // 回复风格，如"友好耐心"、"专业简洁"
-    val promptExtra: String = ""        // 额外提示词（自由文本）
+    val boundFolder: String = ""
 )
 
 

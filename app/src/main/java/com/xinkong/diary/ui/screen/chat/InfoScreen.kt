@@ -122,6 +122,7 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
     var enableStream by remember(config.enableStream) { mutableStateOf(config.enableStream) }
     var enableImageSupport by remember(config.enableImageSupport) { mutableStateOf(config.enableImageSupport) }
     var enableWebSearch by remember(config.enableWebSearch) { mutableStateOf(config.enableWebSearch) }
+    var enableDeepThink by remember(config.enableDeepThink) { mutableStateOf(config.enableDeepThink) }
     var isEditingName by remember { mutableStateOf(false) }
     var tempName by remember(config.name) { mutableStateOf(config.name) }
 
@@ -339,7 +340,7 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "允许AI设置提醒",
+                            "允许AI制定计划",
                             fontSize = 14.sp,
                             color = Color.DarkGray,
                             modifier = Modifier.weight(1f)
@@ -374,6 +375,28 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                             onCheckedChange = { checked ->
                                 enableWebSearch = checked
                                 chatViewModel.updateAiConfig(config.copy(enableWebSearch = checked))
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("开启深度思考",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = enableDeepThink,
+                            onCheckedChange = { checked ->
+                                enableDeepThink = checked
+                                chatViewModel.updateAiConfig(config.copy(enableDeepThink = checked))
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
@@ -597,11 +620,17 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                         }
                     }
                 }
-                }
-                
-                // ========== AI提醒列表 ==========
-                if (aiAlarms.isNotEmpty()) {
-                    Divider(color = Color.LightGray.copy(alpha = 0.5f))
+            }
+
+            // ========== AI提醒列表 ==========
+            if (aiAlarms.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .background(Color.White, RoundedCornerShape(12.dp))
+                        .padding(16.dp)
+                ) {
                     SettingSectionHeader(
                         title = "AI设置的提醒 (${aiAlarms.size})",
                         isExpanded = alarmsExpanded,
@@ -666,10 +695,10 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                         }
                     }
                 }
-
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+        }
+        Spacer(modifier = Modifier.height(32.dp))
         }
 
     }

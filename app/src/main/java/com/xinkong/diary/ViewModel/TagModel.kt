@@ -120,6 +120,125 @@ class TagModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { tagDao.deleteTagFolder(folder) }
     }
 
+    /**
+     * 【重要】原子性重命名文件夹 - 防止中间状态出现新文件夹
+     * @param oldFolderName 旧文件夹名称
+     * @param newFolderName 新文件夹名称
+     * @param folderType "Diary" 或 "Chat"
+     * @param updateDiariesFn 更新日记的函数
+     * @param updateChatsFn 更新对话的函数
+     * @return 操作是否成功
+     */
+    fun renameFolderAtomic(
+        oldFolderName: String,
+        newFolderName: String,
+        folderType: String,
+        updateDiariesFn: (List<Diary>) -> Unit = {},
+        updateChatsFn: (List<Chat>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val trimmedNewFolderName = newFolderName.trim()
+                
+                // 1. 检查是否名称相同
+                if (trimmedNewFolderName == oldFolderName) return@launch
+                
+                // 2. 获取旧文件夹信息
+                val oldFolderEntity = _tagFolders.value.firstOrNull {
+                    it.name == oldFolderName && it.type == folderType
+                } ?: return@launch
+                
+                // 3. 检查新文件夹是否已存在
+                val newFolderExists = _tagFolders.value.any {
+                    it.name == trimmedNewFolderName && it.type == folderType
+                }
+                
+                // 4. 如果新文件夹不存在，创建它
+                if (!newFolderExists) {
+                    tagDao.insertTagFolder(
+                        TagFolder(
+                            name = trimmedNewFolderName,
+                            type = folderType,
+                            isHidden = oldFolderEntity.isHidden,
+                            isAiBound = oldFolderEntity.isAiBound
+                        )
+                    )
+                }
+                
+                // 5. 迁移标签和数据（重要：这是批量同步操作）
+                if (folderType == "Diary") {
+                    val tagsToMigrate = tagDao.getDiaryTagsByFolder(oldFolderName)
+                    tagsToMigrate.forEach { oldTag ->
+                        val targetExists = tagDao.getDiaryTagsByFolder(trimmedNewFolderName)
+                            .any { it.name == oldTag.name }
+                        if (!targetExists) {
+                            tagDao.insertDiaryTag(oldTag.copy(folder = trimmedNewFolderName))
+                        }
+                        tagDao.deleteDiaryTag(oldTag)
+                    }
+                } else {
+                    val tagsToMigrate = tagDao.getChatTagsByFolder(oldFolderName)
+                    tagsToMigrate.forEach { oldTag ->
+                        val targetExists = tagDao.getChatTagsByFolder(trimmedNewFolderName)
+                            .any { it.name == oldTag.name }
+                        if (!targetExists) {
+                            tagDao.insertChatTag(oldTag.copy(folder = trimmedNewFolderName))
+                        }
+                        tagDao.deleteChatTag(oldTag)
+                    }
+                }
+                
+                // 6. 删除旧文件夹（注意：必须在标签迁移之后）
+                tagDao.deleteTagFolder(oldFolderEntity)
+                
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /**
+     * 【重要】原子性删除文件夹 - 将其所有内容移至默认文件夹
+     * @param folderName 要删除的文件夹名称
+     * @param folderType "Diary" 或 "Chat"
+     * @param updateDiariesFn 更新日记的函数
+     * @param updateChatsFn 更新对话的函数
+     */
+    fun deleteFolderAtomic(
+        folderName: String,
+        folderType: String,
+        updateDiariesFn: (List<Diary>) -> Unit = {},
+        updateChatsFn: (List<Chat>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                // 1. 获取文件夹信息
+                val folderEntity = _tagFolders.value.firstOrNull {
+                    it.name == folderName && it.type == folderType
+                } ?: return@launch
+                
+                // 2. 迁移标签和数据到默认文件夹
+                if (folderType == "Diary") {
+                    val tagsToMigrate = tagDao.getDiaryTagsByFolder(folderName)
+                    tagsToMigrate.forEach { tag ->
+                        tagDao.deleteDiaryTag(tag)
+                    }
+                } else {
+                    val tagsToMigrate = tagDao.getChatTagsByFolder(folderName)
+                    tagsToMigrate.forEach { tag ->
+                        tagDao.deleteChatTag(tag)
+                    }
+                }
+                
+                // 3. 删除文件夹
+                tagDao.deleteTagFolder(folderEntity)
+                
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun buildDiaryGroupedTags(contentList: List<Diary>, includeHidden: Boolean = false): TagGroupedResult {
         return buildGroupedTags(contentList, _diaryTags.value, _tagFolders.value, "Diary", "diary", includeHidden)
     }

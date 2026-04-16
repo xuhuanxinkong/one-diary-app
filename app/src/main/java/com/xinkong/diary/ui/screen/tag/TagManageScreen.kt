@@ -422,60 +422,57 @@ fun TagManageRoute(
     }
 
     if (editingFolder != null) {
-        var newFolderName by remember { mutableStateOf(editingFolder!!) }
+        var newFolderName by remember(editingFolder) { mutableStateOf(editingFolder!!) }
+        var updateInProgress by remember { mutableStateOf(false) }
+        
         AlertDialog(
-            onDismissRequest = { editingFolder = null },
+            onDismissRequest = { if (!updateInProgress) editingFolder = null },
             containerColor = Color.White,
             title = { Text("编辑文件夹") },
             text = {
                 OutlinedTextField(
                     value = newFolderName,
                     onValueChange = { newFolderName = it },
-                    label = { Text("文件夹名称") }
+                    label = { Text("文件夹名称") },
+                    enabled = !updateInProgress
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (newFolderName.isNotBlank() && newFolderName != editingFolder) {
-                        // Rename folder
-                        if (type == "diary") {
-                            tagModel.diaryTags.value.filter { it.folder == editingFolder }.forEach { dbTag ->
-                                val targetExists = tagModel.diaryTags.value.any {
-                                    it.folder == newFolderName && it.name == dbTag.name
-                                }
-                                if (!targetExists) {
-                                    tagModel.addDiaryTag(dbTag.copy(folder = newFolderName))
-                                }
-                                diaryViewModel.listState.value
-                                    .filter { it.tag == dbTag.name && it.tagFolder == editingFolder }
-                                    .forEach { diary ->
-                                        diaryViewModel.updateDiary(
-                                            diary.copy(tag = dbTag.name, tagFolder = newFolderName)
-                                        )
+                TextButton(
+                    onClick = {
+                        val oldFolderName = editingFolder ?: return@TextButton
+                        val trimmedNewFolderName = newFolderName.trim()
+                        
+                        if (trimmedNewFolderName.isNotBlank() && trimmedNewFolderName != oldFolderName) {
+                            updateInProgress = true
+                            // 使用新的原子性方法重命名文件夹
+                            tagModel.renameFolderAtomic(
+                                oldFolderName = oldFolderName,
+                                newFolderName = trimmedNewFolderName,
+                                folderType = folderType,
+                                updateDiariesFn = { diaries ->
+                                    diaries.forEach { diary ->
+                                        diaryViewModel.updateDiary(diary)
                                     }
-                                tagModel.deleteDiaryTag(dbTag)
-                            }
-                        } else {
-                            tagModel.chatTags.value.filter { it.folder == editingFolder }.forEach { dbTag ->
-                                val targetExists = tagModel.chatTags.value.any {
-                                    it.folder == newFolderName && it.name == dbTag.name
-                                }
-                                if (!targetExists) {
-                                    tagModel.addChatTag(dbTag.copy(folder = newFolderName))
-                                }
-                                chatViewModel.chatListState.value
-                                    .filter { it.tag == dbTag.name && it.tagFolder == editingFolder }
-                                    .forEach { chat ->
-                                        chatViewModel.updateChat(
-                                            chat.copy(tag = dbTag.name, tagFolder = newFolderName)
-                                        )
+                                },
+                                updateChatsFn = { chats ->
+                                    chats.forEach { chat ->
+                                        chatViewModel.updateChat(chat)
                                     }
-                                tagModel.deleteChatTag(dbTag)
+                                }
+                            )
+                            
+                            // 如果重命名的是当前文件夹，更新当前文件夹
+                            if (currentFolder == oldFolderName) {
+                                diaryViewModel.updateCurrentFolder(trimmedNewFolderName)
                             }
+                            
+                            editingFolder = null
+                            updateInProgress = false
                         }
-                    }
-                    editingFolder = null
-                }) {
+                    },
+                    enabled = !updateInProgress
+                ) {
                     Text("保存")
                 }
             },
@@ -487,44 +484,32 @@ fun TagManageRoute(
                 val isAiBoundFolder = folderEntity?.isAiBound == true
                 
                 if (!isAiBoundFolder) {
-                    TextButton(onClick = {
-                        val folderToDelete = editingFolder ?: return@TextButton
-                        // Delete folder
-                        if (type == "diary") {
-                            tagModel.diaryTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
-                                diaryViewModel.listState.value
-                                    .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
-                                    .forEach { diary ->
-                                        diaryViewModel.updateDiary(
-                                            diary.copy(
-                                                tag = UNCLASSIFIED_TAG_NAME,
-                                                tagFolder = DEFAULT_TAG_FOLDER
-                                            )
-                                        )
+                    TextButton(
+                        onClick = {
+                            val folderToDelete = editingFolder ?: return@TextButton
+                            updateInProgress = true
+                            
+                            // 使用新的原子性方法删除文件夹
+                            tagModel.deleteFolderAtomic(
+                                folderName = folderToDelete,
+                                folderType = folderType,
+                                updateDiariesFn = { diaries ->
+                                    diaries.forEach { diary ->
+                                        diaryViewModel.updateDiary(diary)
                                     }
-                                tagModel.deleteDiaryTag(dbTag)
-                            }
-                        } else {
-                            tagModel.chatTags.value.filter { it.folder == folderToDelete }.forEach { dbTag ->
-                                chatViewModel.chatListState.value
-                                    .filter { it.tag == dbTag.name && it.tagFolder == folderToDelete }
-                                    .forEach { chat ->
-                                        chatViewModel.updateChat(
-                                            chat.copy(
-                                                tag = UNCLASSIFIED_TAG_NAME,
-                                                tagFolder = DEFAULT_TAG_FOLDER
-                                            )
-                                        )
+                                },
+                                updateChatsFn = { chats ->
+                                    chats.forEach { chat ->
+                                        chatViewModel.updateChat(chat)
                                     }
-                                tagModel.deleteChatTag(dbTag)
-                            }
-                        }
-                        val folder = tagModel.tagFolders.value.firstOrNull {
-                            it.name == folderToDelete && it.type == folderType
-                        } ?: TagFolder(name = folderToDelete, type = folderType, isHidden = false)
-                        tagModel.deleteTagFolder(folder)
-                        editingFolder = null
-                    }) {
+                                }
+                            )
+                            
+                            editingFolder = null
+                            updateInProgress = false
+                        },
+                        enabled = !updateInProgress
+                    ) {
                         Text("删除", color = Color.Red)
                     }
                 } else {

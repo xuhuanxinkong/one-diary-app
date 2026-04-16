@@ -91,6 +91,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.MarkUnreadChatAlt
@@ -122,12 +123,14 @@ fun HomeScreen(){
     val tagModel: TagModel = viewModel()
     
     val contentList by diaryViewModel.listState.collectAsStateWithLifecycle()
+    val currentFolder by diaryViewModel.currentFolder.collectAsStateWithLifecycle()
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val diaryTags by tagModel.diaryTags.collectAsStateWithLifecycle()
     val chatTags by tagModel.chatTags.collectAsStateWithLifecycle()
     val tagFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
 
     var homeSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
+    var alarmSelectedAiId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val homeTagDisplayMap = remember(contentList, diaryTags, tagFolders) {
         tagModel.buildDiaryGroupedTags(contentList)
@@ -135,6 +138,21 @@ fun HomeScreen(){
             .values
             .flatten()
             .associateBy { it.folder to it.name }
+    }
+
+    LaunchedEffect(currentFolder, homeTagDisplayMap) {
+        val currentSelectionValid =
+            homeSelectedTag.first == currentFolder && homeTagDisplayMap.containsKey(homeSelectedTag)
+        if (!currentSelectionValid) {
+            val fallback = when {
+                homeTagDisplayMap.containsKey(currentFolder to UNCLASSIFIED_TAG_NAME) -> {
+                    currentFolder to UNCLASSIFIED_TAG_NAME
+                }
+                else -> homeTagDisplayMap.keys.firstOrNull { it.first == currentFolder }
+                    ?: (currentFolder to UNCLASSIFIED_TAG_NAME)
+            }
+            homeSelectedTag = fallback
+        }
     }
 
     LaunchedEffect(homeSelectedTag, homeTagDisplayMap) {
@@ -265,7 +283,11 @@ fun HomeScreen(){
                 Tab.ALARM -> AlarmScreen(
                     onAddAlarm = { isAiReminder, selectedAiId -> navViewModel.navigateTo(Route.AlarmEdit(0, isAiReminder, selectedAiId)) },
                     onEditAlarm = { id, isAiReminder -> navViewModel.navigateTo(Route.AlarmEdit(id, isAiReminder)) },
-                    chatViewModel = chatViewModel
+                    chatViewModel = chatViewModel,
+                    initialSelectedAiId = alarmSelectedAiId,
+                    onSelectedCategoryChange = { selectedAiId ->
+                        alarmSelectedAiId = selectedAiId
+                    }
                 )
             }
         }
@@ -348,11 +370,13 @@ fun ContentShow(
 
     Scaffold (
         floatingActionButton={ if (!isSelectionMode && !isSearchMode) AddButton(selectedTag) },
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
     ){ innerPadding ->
         Column(modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.diaryColors.background2)
-            .padding(innerPadding)
+            .padding(top = 36.dp) // 补齐之前因为去除 WindowInsets 而丢失的顶部状态栏距离
+            .padding(innerPadding) // 保留 FAB 所需要的底部安全边距
         ) {
             if (isSelectionMode) {
                 SelectionModeTopBar(
@@ -483,23 +507,44 @@ fun HeaderColumn(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val displayTitle = selectedTag.second
-            Text(displayTitle, fontSize = titleFontSize.sp, modifier = Modifier.clickable{isRolled = !isRolled })
-            Icon(imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "展开",
-                modifier = Modifier.padding(top = 5.dp).toggleRotateEffect(isRotated = isRolled))
-            Spacer(modifier = Modifier.weight(1f))
+            
+            // 用一个带有 weight 的内部 Row 以确保不会将最右侧的设置按钮挤出去
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { isRolled = !isRolled },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = displayTitle,
+                    fontSize = titleFontSize.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false) // 分配剩余所有空间以支持截断，不够长时不强制撑满
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "展开",
+                    modifier = Modifier
+                        .padding(start = 4.dp, top = 5.dp)
+                        .toggleRotateEffect(isRotated = isRolled)
+                )
+            }
+            
             Text("☰", fontSize = 30.sp, modifier=Modifier.padding(8.dp).clickable { showSettings = true })
         }
         Box(modifier = Modifier
             .fillMaxWidth()
             .height(subtitleHeight)
             .graphicsLayer { alpha = subtitleAlpha }
-            .padding(start = 20.dp)
+            .padding(start = 20.dp, end = 20.dp)
         ) {
             Text(
-                "当前文件夹：${selectedTag.first}",
+                text = "当前文件夹：${selectedTag.first}",
                 fontSize = 15.sp,
                 color = Color.Gray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.align(Alignment.BottomStart)
             )
         }
@@ -723,9 +768,8 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             Icon(
                 imageVector = Icons.Default.NoteAlt,
                 contentDescription = "笔记",
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text("笔记", fontSize = 10.sp)
         }
 
@@ -745,9 +789,8 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             Icon(
                 imageVector = Icons.Default.MarkUnreadChatAlt,
                 contentDescription = "对话",
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text("对话", fontSize = 10.sp)
         }
 
@@ -767,9 +810,8 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             Icon(
                 imageVector = Icons.Default.Notifications,
                 contentDescription = "闹钟",
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text("闹钟", fontSize = 10.sp)
         }
     }

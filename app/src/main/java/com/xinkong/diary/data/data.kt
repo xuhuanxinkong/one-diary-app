@@ -4,7 +4,7 @@ package com.xinkong.diary.data
 sealed class AiState{
     object Idle: AiState()
     object Loading: AiState()
-    data class Streaming(val partialContent: String): AiState()
+    data class Streaming(val partialContent: String, val partialReasoning: String? = null): AiState()
     data class Success(val result:String): AiState()
     data class Error(val message: String): AiState()
 }
@@ -12,11 +12,13 @@ sealed class AiState{
 sealed class AiResponse {
     data class Message(
         val content: String,
-        val toolCalls: List<AiToolCall>
+        val toolCalls: List<AiToolCall>,
+        val reasoningContent: String? = null
     ) : AiResponse()
 
     sealed class StreamChunk {
         data class Content(val text: String) : StreamChunk()
+        data class ReasoningContent(val text: String) : StreamChunk()
         data class ToolCalls(val toolCalls: List<AiToolCall>) : StreamChunk()
         object End : StreamChunk()
     }
@@ -89,14 +91,6 @@ sealed interface ToolTask {
         }
     }
 
-    data class ListFolderNotes(
-        override val toolCall: AiToolCall,
-        val folder: String
-    ) : ToolTask {
-        override val title: String = "查看记忆库笔记列表"
-        override val description = "AI 请求查看记忆库「$folder」中的所有笔记"
-    }
-
     data class QueryChatHistory(
         override val toolCall: AiToolCall,
         val keyword: String,
@@ -123,14 +117,14 @@ sealed interface ToolTask {
         val taskPrompt: String,  // AI任务提示词
         val repeatDays: List<Int> = emptyList()  // 重复日期 1-7 对应周一到周日
     ) : ToolTask {
-        override val title: String = "设置AI任务：$name"
+        override val title: String = "制定计划：$name"
         override val description: String = buildString {
-            append("AI 请求设置AI任务「$name」，时间：$dateTime")
+            append("AI 请求制定计划「$name」，时间：$dateTime")
             if (repeatDays.isNotEmpty()) {
                 val dayNames = listOf("", "周一", "周二", "周三", "周四", "周五", "周六", "周日")
                 append("，重复：${repeatDays.mapNotNull { dayNames.getOrNull(it) }.joinToString(",")}")
             }
-            append("，任务：$taskPrompt")
+            append("，计划内容：$taskPrompt")
         }
     }
 
@@ -138,7 +132,7 @@ sealed interface ToolTask {
         override val toolCall: AiToolCall,
         val alarmId: Int
     ) : ToolTask {
-        override val title: String = "取消AI任务：ID $alarmId"
-        override val description: String = "AI 请求取消任务提醒 (ID: $alarmId)"
+        override val title: String = "取消计划：ID $alarmId"
+        override val description: String = "AI 请求取消计划 (ID: $alarmId)"
     }
 }

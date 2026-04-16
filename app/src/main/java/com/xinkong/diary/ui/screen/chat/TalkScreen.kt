@@ -117,6 +117,8 @@ import com.huawei.hms.mlsdk.asr.MLAsrConstants
 import com.huawei.hms.mlsdk.asr.MLAsrListener
 import com.huawei.hms.mlsdk.asr.MLAsrRecognizer
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -180,6 +182,28 @@ fun TalkScreen(
     
     var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var selectedImageBase64 by remember { mutableStateOf<String?>(null) }
+    var textToSpeech by remember { mutableStateOf<TextToSpeech?>(null) }
+    var ttsReady by remember { mutableStateOf(false) }
+
+    DisposableEffect(context) {
+        var engine: TextToSpeech? = null
+        engine = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val result = engine?.setLanguage(Locale.CHINESE) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                ttsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+            } else {
+                ttsReady = false
+            }
+        }
+        textToSpeech = engine
+
+        onDispose {
+            engine?.stop()
+            engine?.shutdown()
+            textToSpeech = null
+            ttsReady = false
+        }
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -402,6 +426,23 @@ fun TalkScreen(
                     onAnimationEnd = { animatingMessageId = null },
                     onAvatarClick = onAvatarClick,
                     onMessageLongPress = { messageToDelete = it },
+                    onReadAloud = { content ->
+                        if (content.isBlank()) return@ChatMessageShow
+                        if (!ttsReady || textToSpeech == null) {
+                            Toast.makeText(context, "朗读暂不可用", Toast.LENGTH_SHORT).show()
+                        } else {
+                            textToSpeech?.stop()
+                            val speakResult = textToSpeech?.speak(
+                                content,
+                                TextToSpeech.QUEUE_FLUSH,
+                                null,
+                                "chat_read_${System.currentTimeMillis()}"
+                            )
+                            if (speakResult == TextToSpeech.ERROR) {
+                                Toast.makeText(context, "朗读失败", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
                     isMultiSelectMode = isMultiSelectMode,
                     selectedMessages = selectedMessages,
                     onToggleSelect = { msg ->
@@ -497,6 +538,7 @@ fun ChatMessageShow(
     onAnimationEnd: () -> Unit = {},
     onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
     onMessageLongPress: (ChatMessage) -> Unit = {},
+    onReadAloud: (String) -> Unit = {},
     isMultiSelectMode: Boolean = false,
     selectedMessages: List<ChatMessage> = emptyList(),
     onToggleSelect: (ChatMessage) -> Unit = {},
@@ -552,6 +594,7 @@ fun ChatMessageShow(
                 date = message.date,
                 photoUris = photoUris,
                 toolExecutions = tools,
+                reasoningContent = message.reasoningContent,
                 onAvatarClick = {
                     if (!isMultiSelectMode) onAvatarClick(if (isUserMessage) "user" else "assistant", message.aiId)
                 },
@@ -559,6 +602,7 @@ fun ChatMessageShow(
                 onDelete = { onMessageLongPress(message) },
                 onQuote = { },
                 onMultiSelect = { onEnterMultiSelect(message) },
+                onReadAloud = { onReadAloud(message.content) },
                 isMultiSelectMode = isMultiSelectMode,
                 isSelected = isSelected,
                 onToggleSelect = { onToggleSelect(message) },
@@ -595,14 +639,38 @@ fun ChatMessageShow(
                         }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .background(Color.White, shape = RoundedCornerShape(8.dp))
-                            .padding(12.dp)
+                            .fillMaxWidth(0.78f)
                             .widthIn(max = 260.dp)
+                            .background(Color.White, shape = RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
                         val streaming = aiState as? AiState.Streaming
                         if (streaming != null) {
+                            streaming.partialReasoning?.let {
+                                if (it.isNotEmpty()) {
+                                    ExpandableAnim(
+                                        title = "思考过程",
+                                        modifier = Modifier.padding(bottom = 6.dp),
+                                        isExpandedAtStart = false
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .widthIn(max = 220.dp)
+                                                .background(Color(0xFFF0F0F0), RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                        ) {
+                                            ExpandableMessageContent(
+                                                content = streaming.partialReasoning,
+                                                textColor = Color.DarkGray,
+                                                isAnimating = false,
+                                                isSelectable = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             ExpandableMessageContent(
                                 content = streaming.partialContent,
                                 textColor = Color.Black,
@@ -816,7 +884,8 @@ fun ChatMessageMenu(
     onDelete: () -> Unit,
     onQuote: () -> Unit,
     onCopy: () -> Unit,
-    onMultiSelect: () -> Unit
+    onMultiSelect: () -> Unit,
+    onReadAloud: () -> Unit
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -850,6 +919,13 @@ fun ChatMessageMenu(
                 onMultiSelect()
             }
         )
+        DropdownMenuItem(
+            text = { Text("朗读") },
+            onClick = {
+                onDismissRequest()
+                onReadAloud()
+            }
+        )
     }
 }
 
@@ -863,11 +939,13 @@ fun ChatBubble(
     date: String = "",
     photoUris: List<String> = emptyList(),
     toolExecutions: List<String> = emptyList(),
+    reasoningContent: String? = null,
     onAvatarClick: () -> Unit = {},
     showDelete: Boolean = false,
     onDelete: () -> Unit = {},
     onQuote: () -> Unit = {},
     onMultiSelect: () -> Unit = {},
+    onReadAloud: () -> Unit = {},
     isMultiSelectMode: Boolean = false,
     isSelected: Boolean = false,
     onToggleSelect: () -> Unit = {},
@@ -987,7 +1065,8 @@ fun ChatBubble(
                                 onDelete = onDelete,
                                 onQuote = onQuote,
                                 onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                                onMultiSelect = onMultiSelect
+                                onMultiSelect = onMultiSelect,
+                                onReadAloud = onReadAloud
                             )
                         }
                     }
@@ -1078,13 +1157,36 @@ fun ChatBubble(
                                     .background(Color.White, shape = RoundedCornerShape(8.dp))
                                     .padding(12.dp)
                             ) {
-                                ExpandableMessageContent(
-                                    content = content,
-                                    textColor = Color.Black,
-                                    isAnimating = isAnimating,
-                                    isSelectable = allowSelection,
-                                    onAnimationEnd = onAnimationEnd
-                                )
+                                Column {
+                                    if (!reasoningContent.isNullOrBlank()) {
+                                        ExpandableAnim(
+                                            title = "深度思考",
+                                            modifier = Modifier.padding(bottom = 6.dp),
+                                            isExpandedAtStart = false
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(Color(0xFFF5F5F5), RoundedCornerShape(6.dp))
+                                                    .padding(8.dp)
+                                            ) {
+                                                ExpandableMessageContent(
+                                                    content = reasoningContent,
+                                                    textColor = Color.DarkGray,
+                                                    isAnimating = false, // 已完成思考过程不播放动画
+                                                    isSelectable = allowSelection
+                                                )
+                                            }
+                                        }
+                                    }
+                                    ExpandableMessageContent(
+                                        content = content,
+                                        textColor = Color.Black,
+                                        isAnimating = isAnimating,
+                                        isSelectable = allowSelection,
+                                        onAnimationEnd = onAnimationEnd
+                                    )
+                                }
                             }
                             ChatMessageMenu(
                                 expanded = showMenu,
@@ -1092,7 +1194,8 @@ fun ChatBubble(
                                 onDelete = onDelete,
                                 onQuote = onQuote,
                                 onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                                onMultiSelect = onMultiSelect
+                                onMultiSelect = onMultiSelect,
+                                onReadAloud = onReadAloud
                             )
                         }
                     }
@@ -1210,8 +1313,10 @@ fun TalkInputRow(
     }
     
     // 华为 ML Kit 语音识别器（仅华为设备创建）
-    val mlAsrRecognizer = remember { 
-        if (isHuaweiDevice) MLAsrRecognizer.createAsrRecognizer(context) else null 
+    var mlAsrRecognizer by remember {
+        mutableStateOf(
+            if (isHuaweiDevice) MLAsrRecognizer.createAsrRecognizer(context) else null
+        )
     }
     
     // 使用 rememberUpdatedState 确保回调中使用最新的值
@@ -1234,8 +1339,9 @@ fun TalkInputRow(
     
     // 设置华为语音识别监听器（仅华为设备）
     if (isHuaweiDevice && mlAsrRecognizer != null) {
-        DisposableEffect(Unit) {
-            mlAsrRecognizer.setAsrListener(object : MLAsrListener {
+        DisposableEffect(mlAsrRecognizer) {
+            val recognizer = mlAsrRecognizer
+            recognizer?.setAsrListener(object : MLAsrListener {
                 override fun onStartListening() {
                     android.util.Log.d("VoiceInput", "华为 ML Kit: 开始聆听")
                 }
@@ -1283,8 +1389,24 @@ fun TalkInputRow(
             })
             
             onDispose {
-                mlAsrRecognizer.destroy()
+                recognizer?.destroy()
             }
+        }
+    }
+
+    fun startSystemSpeechRecognition() {
+        // 系统界面会接管录音流程
+        isListening = false
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "请说话...")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        try {
+            speechLauncher.launch(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "您的设备不支持语音识别", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -1293,34 +1415,37 @@ fun TalkInputRow(
         textBeforeListening = inputText
         isListening = true
         
-        if (isHuaweiDevice && mlAsrRecognizer != null) {
+        if (isHuaweiDevice) {
             // 华为设备：使用 ML Kit
+            if (mlAsrRecognizer == null) {
+                mlAsrRecognizer = MLAsrRecognizer.createAsrRecognizer(context)
+            }
             val intent = Intent(MLAsrConstants.ACTION_HMS_ASR_SPEECH).apply {
                 putExtra(MLAsrConstants.LANGUAGE, "zh-CN")
                 putExtra(MLAsrConstants.FEATURE, MLAsrConstants.FEATURE_WORDFLUX)
                 putExtra(MLAsrConstants.PUNCTUATION_ENABLE, true)
             }
-            mlAsrRecognizer.startRecognizing(intent)
+            try {
+                mlAsrRecognizer?.startRecognizing(intent) ?: startSystemSpeechRecognition()
+            } catch (e: Exception) {
+                // 华为识别器异常时回退到系统识别
+                startSystemSpeechRecognition()
+            }
         } else {
             // 其他设备：使用系统语音识别
-            isListening = false // 系统界面会接管
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "请说话...")
-            }
-            try {
-                speechLauncher.launch(intent)
-            } catch (e: Exception) {
-                Toast.makeText(context, "您的设备不支持语音识别", Toast.LENGTH_SHORT).show()
-            }
+            startSystemSpeechRecognition()
         }
     }
     
     // 停止语音识别
     fun stopVoiceRecognition() {
         if (isHuaweiDevice && mlAsrRecognizer != null) {
-            mlAsrRecognizer.destroy()
+            try {
+                mlAsrRecognizer?.destroy()
+                mlAsrRecognizer = MLAsrRecognizer.createAsrRecognizer(context)
+            } catch (_: Exception) {
+                // 已销毁或未启动时忽略
+            }
         }
         isListening = false
     }
@@ -1343,38 +1468,19 @@ fun TalkInputRow(
             .padding(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-
-        Spacer(modifier = Modifier.width(4.dp))
-        // 语音输入按钮
-        IconButton(
-            onClick = {
-                if (isListening) {
-                    stopVoiceRecognition()
-                } else {
-                    // 检查权限
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                        == PackageManager.PERMISSION_GRANTED) {
-                        startVoiceRecognition()
-                    } else {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
-            },
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                contentDescription = if (isListening) "停止" else "语音输入",
-                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-
         BasicTextField(
             value = inputText,
             onValueChange = onInputChange,
             textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
-            keyboardOptions = KeyboardOptions.Default,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+            keyboardActions = KeyboardActions(
+                onSend = {
+                    onInputChange("$inputText\n")
+                },
+                onDone = {
+                    onInputChange("$inputText\n")
+                }
+            ),
             singleLine = false,
             maxLines = 6,
             modifier = Modifier
@@ -1395,6 +1501,31 @@ fun TalkInputRow(
                 }
             }
         )
+
+        Spacer(modifier = Modifier.width(4.dp))
+        // 语音输入按钮（输入框右侧）
+        IconButton(
+            onClick = {
+                if (isListening) {
+                    stopVoiceRecognition()
+                } else {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                        startVoiceRecognition()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = if (isListening) "停止语音" else "语音输入",
+                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.width(4.dp))
         // 群聊时显示AI回复顺序按钮

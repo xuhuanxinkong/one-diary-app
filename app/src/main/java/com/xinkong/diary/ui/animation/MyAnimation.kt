@@ -39,9 +39,10 @@ import androidx.compose.ui.unit.sp
 fun ExpandableAnim(
     title: String,
     modifier: Modifier = Modifier,
+    isExpandedAtStart: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(isExpandedAtStart) }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(

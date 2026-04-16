@@ -204,7 +204,7 @@ fun AlarmEditScreen(
                         )
                         Divider(color = Color.LightGray.copy(alpha = 0.5f))
                         // 重复
-                        Column(modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 0.dp)) {
+                        Column(modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 12.dp)) {
                             Text("重复", fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -216,7 +216,7 @@ fun AlarmEditScreen(
                                     val isSelected = alarm.repeatDays.contains(dayValue)
                                     val actBorderColor by animateColorAsState(if (isSelected) MaterialTheme.diaryColors.background3 else Color.Transparent, label = "borderColor")
                                     val actBgColor by animateColorAsState(if (isSelected) MaterialTheme.diaryColors.background3 else Color.LightGray.copy(alpha=0.2f), label = "bgColor")
-                                    val actContentColor by animateColorAsState(if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface, label = "textColor")
+                                    val actContentColor =Color.Black
                                     Box(
                                         modifier = Modifier
                                             .size(42.dp)
@@ -292,7 +292,7 @@ fun AlarmEditScreen(
                         Divider(color = Color.LightGray.copy(alpha = 0.5f))
                         
                         // 重复选择器（与普通闹钟共用）
-                        Column(modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 8.dp)) {
+                        Column(modifier = Modifier.padding(16.dp, 8.dp, 16.dp, 12.dp)) {
                             Text("重复", fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -304,7 +304,7 @@ fun AlarmEditScreen(
                                     val isSelected = alarm.repeatDays.contains(dayValue)
                                     val actBorderColor by animateColorAsState(if (isSelected) MaterialTheme.diaryColors.background3 else Color.Transparent, label = "borderColor")
                                     val actBgColor by animateColorAsState(if (isSelected) MaterialTheme.diaryColors.background3 else Color.LightGray.copy(alpha=0.2f), label = "bgColor")
-                                    val actContentColor by animateColorAsState(if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface, label = "textColor")
+                                    val actContentColor = Color.Black
                                     Box(
                                         modifier = Modifier
                                             .size(42.dp)
@@ -329,7 +329,6 @@ fun AlarmEditScreen(
                                 }
                             }
                         }
-
                         Divider(color = Color.LightGray.copy(alpha = 0.5f))
 
                         // 提示词（实际用remark字段）

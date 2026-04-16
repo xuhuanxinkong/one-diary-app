@@ -188,7 +188,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             it.name == config.boundFolder && it.isAiBound 
                         }
                         if (folderToDelete != null) {
-                            tagDao.deleteTagFolder(folderToDelete)
+                            // 同步解绑而不是删除文件夹
+                            tagDao.insertTagFolder(folderToDelete.copy(isAiBound = false))
                         }
                     }
                 }
@@ -252,8 +253,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         if (config.enableWriteNote) add("write_note")
                         if (config.enableEditNote) add("edit_note")
                         if (config.enableSetAlarm) {
-                            add("set_alarm")
-                            add("cancel_alarm")
+                                add("create_plan")
+                                add("cancel_plan")
                         }
                     }
                 }
@@ -304,8 +305,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (aiConfig.enableWriteNote) add("write_note")
                 if (aiConfig.enableEditNote) add("edit_note")
                 if (aiConfig.enableSetAlarm) {
-                    add("set_alarm")
-                    add("cancel_alarm")
+                    add("create_plan")
+                    add("cancel_plan")
                 }
             }
         }
@@ -389,22 +390,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     /**
-     * 删除AI并自动删除绑定的文件夹
+     * 删除AI并解绑其绑定的文件夹（不自动删除文件夹）
      */
     fun deleteAiConfigWithFolder(config: AiChatConfig) {
         viewModelScope.launch {
-            // 如果有绑定文件夹，删除该文件夹
-            if (config.boundFolder.isNotBlank()) {
-                val tagDao = AppDatabase.getDatabase(getApplication()).tagDao()
-                // 查找并删除绑定的文件夹
-                val folders = tagDao.getAllTagFolders().first()
-                val folderToDelete = folders.find { it.name == config.boundFolder }
-                if (folderToDelete != null) {
-                    tagDao.deleteTagFolder(folderToDelete)
-                }
-            }
-            // 删除AI配置
+            // 先删除AI配置，再判断该文件夹是否还有AI占用，避免状态判断误差
             chatDao.deleteAiConfig(config)
+
+            if (config.boundFolder.isBlank()) return@launch
+
+            val stillBound = chatDao.getAllAiConfigs().first().any {
+                it.boundFolder == config.boundFolder
+            }
+            if (stillBound) return@launch
+
+            val folders = tagDao.getAllTagFolders().first()
+            folders
+                .filter { it.name == config.boundFolder && it.isAiBound }
+                .forEach { folder ->
+                    tagDao.insertTagFolder(folder.copy(isAiBound = false))
+                }
         }
     }
 
@@ -607,6 +612,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         var fullContent = ""
+        var fullReasoning = ""
         var capturedToolCalls = listOf<AiToolCall>()
         var chunkCount = 0
 
@@ -615,10 +621,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             aiHttp.chatWithAiStream(config, messages, enabledTools).collect { chunk ->
                 chunkCount++
                 when (chunk) {
+                    is AiResponse.StreamChunk.ReasoningContent -> {
+                        if (chunk.text.isNotEmpty()) {
+                            fullReasoning += chunk.text
+                            _aiState.value = AiState.Streaming(
+                                partialContent = buildStreamingDisplayContent(fullContent, config),
+                                partialReasoning = fullReasoning
+                            )
+                        }
+                    }
                     is AiResponse.StreamChunk.Content -> {
                         if (chunk.text.isNotEmpty()) {
                             fullContent += chunk.text
-                            _aiState.value = AiState.Streaming(buildStreamingDisplayContent(fullContent, config))
+                            _aiState.value = AiState.Streaming(
+                                partialContent = buildStreamingDisplayContent(fullContent, config),
+                                partialReasoning = if (fullReasoning.isNotEmpty()) fullReasoning else null
+                            )
                         }
                     }
                     is AiResponse.StreamChunk.ToolCalls -> {
@@ -629,25 +647,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             Log.d(
                 TAG,
-                "requestAiResponse: stream finished, chunks=$chunkCount, contentLen=${fullContent.length}, toolCalls=${capturedToolCalls.size}"
+                "requestAiResponse: stream finished, chunks=$chunkCount, contentLen=${fullContent.length}, reasoningLen=${fullReasoning.length}, toolCalls=${capturedToolCalls.size}"
             )
-            if (fullContent.isBlank() && capturedToolCalls.isEmpty()) {
+            if (fullContent.isBlank() && fullReasoning.isBlank() && capturedToolCalls.isEmpty()) {
                 // Some providers ignore stream mode and return non-SSE payload; fallback in that case.
                 Log.w(TAG, "requestAiResponse: stream yielded no content/toolCalls, fallback to non-stream")
                 aiHttp.chatWithAi(config, messages, enabledTools)
             } else {
                 Log.d(TAG, "requestAiResponse: use stream result directly")
-                Result.success(AiResponse.Message(content = fullContent, toolCalls = capturedToolCalls))
+                Result.success(AiResponse.Message(
+                    content = fullContent, 
+                    toolCalls = capturedToolCalls, 
+                    reasoningContent = if (fullReasoning.isNotEmpty()) fullReasoning else null
+                ))
             }
         } catch (e: Exception) {
             // If we already got stream chunks, prefer partial stream result and avoid duplicate requests.
-            if (fullContent.isNotBlank() || capturedToolCalls.isNotEmpty()) {
+            if (fullContent.isNotBlank() || fullReasoning.isNotBlank() || capturedToolCalls.isNotEmpty()) {
                 Log.w(
                     TAG,
                     "stream ended with exception but has partial result, use partial stream output: ${e.message}",
                     e
                 )
-                Result.success(AiResponse.Message(content = fullContent, toolCalls = capturedToolCalls))
+                Result.success(AiResponse.Message(
+                    content = fullContent, 
+                    toolCalls = capturedToolCalls, 
+                    reasoningContent = if (fullReasoning.isNotEmpty()) fullReasoning else null
+                ))
             } else {
                 // Some providers fail on stream mode or tool+stream combinations; fallback improves reliability.
                 Log.e(TAG, "stream request failed, fallback to non-stream: ${e.message}", e)
@@ -759,24 +785,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         toolCallId = currentTask.toolCall.id,
                         keyword = "",
                         toolResult = resultText
-                    )
-                }
-                is ToolTask.ListFolderNotes -> {
-                    val folder = currentTask.folder.ifBlank { targetFolder }
-                    val notes = diaryDao.getDiariesByFolder(folder)
-                    val formatted = if (notes.isEmpty()) {
-                        "记忆库「$folder」暂无笔记"
-                    } else {
-                        "记忆库「$folder」共有${notes.size}篇笔记：\n" + notes.joinToString("\n") { note ->
-                            val summary = note.text.take(50).replace("\n", " ")
-                            "[ID:${note.id}] ${note.title}（${note.date}）- $summary..."
-                        }
-                    }
-                    buildToolResultMessage(
-                        toolName = currentTask.toolCall.functionName,
-                        toolCallId = currentTask.toolCall.id,
-                        keyword = "",
-                        toolResult = formatted
                     )
                 }
                 is ToolTask.QueryChatHistory -> {
@@ -953,7 +961,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val nextTask = batch.allTasks[batch.completedResults.size]
-        if (autoConfirmTools || nextTask is ToolTask.ListFolderNotes || nextTask is ToolTask.QueryChatHistory || nextTask is ToolTask.ReadNotes) {
+        if (autoConfirmTools || nextTask is ToolTask.QueryChatHistory || nextTask is ToolTask.ReadNotes) {
             confirmPendingToolAction(dontAskAgain = false)
         } else {
             // Show UI
@@ -974,7 +982,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 构建发送给 AI 的完整消息列表：
-     * [system(上下文)] + [带名称格式的全部历史消息]
+     * [system(静态规则)] + [user(动态上下文)] + [历史消息]
      */
     private suspend fun buildContextMessages(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>): List<Map<String, Any>> {
         val messages = mutableListOf<Map<String, Any>>()
@@ -991,10 +999,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 使用用户设置的轮数，每轮包含一来一回，所以乘2再加1确保最新消息
         val history = chatDao.getMessagesOnce(chatId).takeLast(historyRounds * 2 + 1)
 
-        // system 消息：上下文资料和身份设定（传入历史消息以获取时间信息）
-        val systemContent = buildSystemMessage(chatId, currentAiConfig, enabledTools, history)
-        if (systemContent.isNotEmpty()) {
-            messages.add(mapOf("role" to "system", "content" to systemContent))
+        // system 消息：静态规则
+        val staticSystemContent = buildSystemMessage(chatId, currentAiConfig, enabledTools)
+        if (staticSystemContent.isNotEmpty()) {
+            messages.add(mapOf("role" to "system", "content" to staticSystemContent))
+        }
+
+        // user 消息：动态上下文（会随时间、检索和提醒变化）
+        val dynamicSystemContent = buildDynamicContextMessage(currentAiConfig, enabledTools, history)
+        if (dynamicSystemContent.isNotEmpty()) {
+            messages.add(mapOf("role" to userRole, "content" to dynamicSystemContent))
         }
 
         history.forEach { msg ->
@@ -1025,67 +1039,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 构建 system 消息：用户资料 + AI 资料 + 时间上下文
+     * 构建静态 system 消息：身份、背景、工具规范（不放动态数据）
      */
-    private suspend fun buildSystemMessage(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>, history: List<ChatMessage> = emptyList()): String {
+    private suspend fun buildSystemMessage(chatId: Long, currentAiConfig: AiChatConfig, enabledTools: Set<String>): String {
         val userContext = buildContextFromConfig(
             chatDao.getUserConfigOnce(chatId)?.referencedDiaryId
         )
         val aiContext = buildContextFromConfig(currentAiConfig.referencedDiaryId)
-        val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())
-        
-        // 解析结构化规则
-        val rules = try {
-            Json.decodeFromString<List<String>>(currentAiConfig.promptRules)
-        } catch (e: Exception) {
-            emptyList()
-        }
-        
-        // 检查是否存在结构化提示词字段
-        val hasStructuredPrompt = currentAiConfig.promptRole.isNotBlank() || 
-                                  currentAiConfig.promptDomain.isNotBlank() || 
-                                  rules.isNotEmpty() || 
-                                  currentAiConfig.promptStyle.isNotBlank()
         
         return buildString {
-            // ===== 静态内容放前面 =====
-            
-            // 结构化身份设定
-            if (hasStructuredPrompt) {
-                append("【身份设定】\n")
-                append("{\n")
-                append("  \"name\": \"${currentAiConfig.name}\"")
-                if (currentAiConfig.promptRole.isNotBlank()) {
-                    append(",\n  \"role\": \"${currentAiConfig.promptRole}\"")
-                }
-                if (currentAiConfig.promptDomain.isNotBlank()) {
-                    append(",\n  \"domain\": \"${currentAiConfig.promptDomain}\"")
-                }
-                if (rules.isNotEmpty()) {
-                    append(",\n  \"rules\": ${Json.encodeToString(rules)}")
-                }
-                if (currentAiConfig.promptStyle.isNotBlank()) {
-                    append(",\n  \"style\": \"${currentAiConfig.promptStyle}\"")
-                }
-                append("\n}\n\n")
-            }
-            
-            // 额外提示词
-            if (currentAiConfig.promptExtra.isNotBlank()) {
-                append("【额外指令】${currentAiConfig.promptExtra}\n\n")
-            }
-            
             append("你是${currentAiConfig.name}，回复时不要添加名字或时间前缀。\n")
             if (userContext.isNotEmpty()) append("【用户】$userContext\n")
             if (aiContext.isNotEmpty()) append("【背景】$aiContext\n")
+
+            append("【来源判别规则】\n")
+            append("- 标记为【记忆库】或【记忆库RAG检索结果】的内容，来源是本地笔记/向量检索，不是互联网。\n")
+            append("- 标记为【网络搜索】的内容，来源是互联网搜索结果，不是本地笔记。\n")
+            append("- 涉及实时或外部知识时，优先通过 web_search_baidu 获取最新网络知识，并标注来源。\n")
             
             // 工具说明
             val toolsList = mutableListOf<String>()
             if ("read_notes" in enabledTools) toolsList.add("read_notes")
             if ("write_note" in enabledTools) toolsList.add("write_note")
             if ("edit_note" in enabledTools) toolsList.add("edit_note/batch_edit_note")
-            if ("set_alarm" in enabledTools) toolsList.add("set_alarm")
-            if ("cancel_alarm" in enabledTools) toolsList.add("cancel_alarm")
+            if ("create_plan" in enabledTools) toolsList.add("create_plan")
+            if ("cancel_plan" in enabledTools) toolsList.add("cancel_plan")
             if ("web_search_baidu" in enabledTools) toolsList.add("web_search_baidu")
             
             if (toolsList.isNotEmpty()) {
@@ -1095,16 +1073,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 append("\n")
             }
-            
-            // ===== 动态内容放后面 =====
-            
-            // 注入记忆库概览（绑定文件夹的笔记列表，限5篇）
+        }.trim()
+    }
+
+    /**
+     * 构建动态 system 消息：完整笔记列表、RAG 检索、提醒列表、时间信息等
+     */
+    private suspend fun buildDynamicContextMessage(
+        currentAiConfig: AiChatConfig,
+        enabledTools: Set<String>,
+        history: List<ChatMessage>
+    ): String {
+        val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())
+        return buildString {
+            append("【动态上下文】以下信息会变化，请优先参考本段。\n")
+
+            append("【时间】$currentTime")
+            if (history.size >= 2) {
+                append("（上次对话：${history[history.size - 2].date}）")
+            }
+            append("\n")
+
+            // 注入记忆库概览（绑定文件夹的完整笔记列表）
             if (currentAiConfig.boundFolder.isNotBlank()) {
                 val folderNotes = diaryDao.getDiariesByFolder(currentAiConfig.boundFolder)
                 if (folderNotes.isNotEmpty()) {
-                    append("【记忆库】${currentAiConfig.boundFolder}（${folderNotes.size}篇）：")
-                    append(folderNotes.take(5).joinToString("、") { "[${it.id}]${it.title}" })
-                    if (folderNotes.size > 5) append("...等")
+                    append("【记忆库】${currentAiConfig.boundFolder}（${folderNotes.size}篇）：\n")
+                    append(folderNotes.joinToString("\n") { note ->
+                        "- [${note.id}] ${note.title}（${note.date.take(20)}）"
+                    })
                     append("\n")
                 }
             }
@@ -1120,14 +1117,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         maxResults = 3
                     )
                     if (ragContext.isNotBlank()) {
+                        append("【记忆库RAG检索结果】\n")
                         append(ragContext)
                         append("\n")
                     }
                 }
             }
+
+            // 网络搜索动态知识说明（当前轮可用性）
+            if ("web_search_baidu" in enabledTools) {
+                append("【网络搜索知识】本轮可通过 web_search_baidu 获取最新互联网知识；如有网络搜索结果，优先使用并标注来源。\n")
+            }
             
             // 注入AI的提醒列表
-            if ("set_alarm" in enabledTools || "cancel_alarm" in enabledTools) {
+            if ("create_plan" in enabledTools || "cancel_plan" in enabledTools) {
                 val myAlarms = alarmDao.getActiveAlarmsByAiConfigIdSync(currentAiConfig.id)
                 if (myAlarms.isNotEmpty()) {
                     append("【我的提醒】(${myAlarms.size}项)\n")
@@ -1142,12 +1145,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         append("\n")
                     }
                 }
-            }
-            
-            // 时间信息放最后
-            append("【时间】$currentTime")
-            if (history.size >= 2) {
-                append("（上次对话：${history[history.size - 2].date}）")
             }
         }.trim()
     }
@@ -1238,7 +1235,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     content = tempContent,
                                     date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                                     toolExecutions = "[]", // 中间回复不展示工具执行记录，留到最终汇总
-                                    aiId = config?.id
+                                    aiId = config?.id,
+                                    reasoningContent = response.reasoningContent
                                 )
                                 chatDao.insertMessage(aiMsg)
                             }
@@ -1268,7 +1266,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             content = displayContent,
                             date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                             toolExecutions = toolExecutionsStr,
-                            aiId = config?.id
+                            aiId = config?.id,
+                            reasoningContent = response.reasoningContent
                         )
                         chatDao.insertMessage(aiMsg)
                         _aiState.value = AiState.Success(result = displayContent)
@@ -1367,7 +1366,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } catch (e: Exception) {}
                 }
-                call.type == "function" && call.functionName == "set_alarm" && "set_alarm" in enabledTools -> {
+                call.type == "function" && call.functionName == "create_plan" && "create_plan" in enabledTools -> {
                     try {
                         val json = JSONObject(call.arguments)
                         val name = json.optString("name").trim()
@@ -1388,7 +1387,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } catch (e: Exception) {}
                 }
-                call.type == "function" && call.functionName == "cancel_alarm" && "cancel_alarm" in enabledTools -> {
+                call.type == "function" && call.functionName == "cancel_plan" && "cancel_plan" in enabledTools -> {
                     try {
                         val json = JSONObject(call.arguments)
                         val alarmId = json.optInt("alarmId", 0)
@@ -1396,9 +1395,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             tasks.add(ToolTask.CancelAlarm(call, alarmId))
                         }
                     } catch (e: Exception) {}
-                }
-                call.type == "function" && call.functionName == "list_folder_notes" && "read_notes" in enabledTools -> {
-                    tasks.add(ToolTask.ListFolderNotes(call, boundFolder))
                 }
             }
         }
@@ -1433,7 +1429,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun buildToolResultMessage(toolName: String, toolCallId: String, keyword: String, toolResult: String): Map<String, Any> {
-        val displayStr = if (keyword.isNotEmpty()) "关键词：$keyword\n$toolResult" else toolResult
+        val sourceType = when (toolName) {
+            "read_notes", "write_note", "edit_note", "batch_edit_note" -> "记忆库"
+            "web_search_baidu" -> "网络搜索"
+            "query_chat_history" -> "对话历史"
+            "create_plan", "cancel_plan" -> "计划工具"
+            else -> "工具"
+        }
+        val displayStr = buildString {
+            append("【来源类型】$sourceType\n")
+            if (keyword.isNotEmpty()) append("关键词：$keyword\n")
+            append(toolResult)
+        }
+
+        // read_notes 结果作为上文背景，以 user 消息传递
+        if (toolName == "read_notes") {
+            return mapOf(
+                "role" to userRole,
+                "content" to "【记忆库检索背景】\n$displayStr"
+            )
+        }
+
         return mapOf(
             "role" to "tool",
             "tool_call_id" to toolCallId,
@@ -1536,24 +1552,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     toolCallId = task.toolCall.id,
                     keyword = "",
                     toolResult = resultText
-                )
-            }
-            is ToolTask.ListFolderNotes -> {
-                val folder = task.folder.ifBlank { defaultFolder }
-                val notes = diaryDao.getDiariesByFolder(folder)
-                val formatted = if (notes.isEmpty()) {
-                    "记忆库「$folder」暂无笔记"
-                } else {
-                    "记忆库「$folder」共有${notes.size}篇笔记：\n" + notes.joinToString("\n") { note ->
-                        val summary = note.text.take(50).replace("\n", " ")
-                        "[ID:${note.id}] ${note.title}（${note.date}）- $summary..."
-                    }
-                }
-                buildToolResultMessage(
-                    toolName = task.toolCall.functionName,
-                    toolCallId = task.toolCall.id,
-                    keyword = "",
-                    toolResult = formatted
                 )
             }
             is ToolTask.QueryChatHistory -> {
@@ -1706,7 +1704,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val isCurrentAiMessage = msg.role == assistantRole && msg.aiId == currentAiConfig.id
             val senderName = if (isUserMessage) userConfig?.name ?: "我" else aiConfigs.find { it.id == msg.aiId }?.name ?: "AI"
             val actualRole = if (isCurrentAiMessage) assistantRole else userRole
-            val formattedContent = "<msg time=\"${msg.date}\" from=\"${senderName}\">${msg.content}</msg>"
+            val formattedContent = "${senderName}(${msg.date}): ${msg.content}"
             messages.add(mapOf("role" to actualRole, "content" to formattedContent))
         }
 
@@ -1714,7 +1712,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         messages.add(
             mapOf(
                 "role" to userRole,
-                "content" to "<task time=\"$nowText\" priority=\"high\">$taskPrompt</task>"
+                "content" to "请执行计划任务（触发时间：$nowText）：\n$taskPrompt"
             )
         )
         return messages
@@ -1776,8 +1774,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             if (config.enableWriteNote) add("write_note")
                             if (config.enableEditNote) add("edit_note")
                             if (config.enableSetAlarm) {
-                                add("set_alarm")
-                                add("cancel_alarm")
+                                add("create_plan")
+                                add("cancel_plan")
                             }
                         }
                     }
