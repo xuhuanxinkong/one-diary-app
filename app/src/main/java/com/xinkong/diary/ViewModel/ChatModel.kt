@@ -244,18 +244,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _currentTypingAi.value = config
 
                 val enabledTools = mutableSetOf<String>().apply {
-                    if (!config.enableStream) {
-                        add("query_chat_history")
-                        if (config.enableWebSearch) add("web_search_baidu")
-                        if (config.enableImageSupport) add("image_recognition")
-                        // 每个 AI 都有笔记工具权限（已隔离文件夹）
-                        if (config.enableReadNotes) add("read_notes")
-                        if (config.enableWriteNote) add("write_note")
-                        if (config.enableEditNote) add("edit_note")
-                        if (config.enableSetAlarm) {
-                                add("create_plan")
-                                add("cancel_plan")
-                        }
+                    add("query_chat_history")
+                    if (config.enableWebSearch) add("web_search_baidu")
+                    if (config.enableImageSupport) add("image_recognition")
+                    // 每个 AI 都有笔记工具权限（已隔离文件夹）
+                    if (config.enableReadNotes) add("read_notes")
+                    if (config.enableWriteNote) add("write_note")
+                    if (config.enableEditNote) add("edit_note")
+                    if (config.enableSetAlarm) {
+                        add("create_plan")
+                        add("cancel_plan")
                     }
                 }
 
@@ -297,17 +295,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         referencedDiaryIdOverride: String? = null
     ): Result<String> {
         val enabledTools = mutableSetOf<String>().apply {
-            if (!aiConfig.enableStream) {
-                add("query_chat_history")
-                if (aiConfig.enableWebSearch) add("web_search_baidu")
-                // 每个 AI 都有笔记工具权限（已隔离文件夹）
-                if (aiConfig.enableReadNotes) add("read_notes")
-                if (aiConfig.enableWriteNote) add("write_note")
-                if (aiConfig.enableEditNote) add("edit_note")
-                if (aiConfig.enableSetAlarm) {
-                    add("create_plan")
-                    add("cancel_plan")
-                }
+            add("query_chat_history")
+            if (aiConfig.enableWebSearch) add("web_search_baidu")
+            // 每个 AI 都有笔记工具权限（已隔离文件夹）
+            if (aiConfig.enableReadNotes) add("read_notes")
+            if (aiConfig.enableWriteNote) add("write_note")
+            if (aiConfig.enableEditNote) add("edit_note")
+            if (aiConfig.enableSetAlarm) {
+                add("create_plan")
+                add("cancel_plan")
             }
         }
 
@@ -961,7 +957,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val nextTask = batch.allTasks[batch.completedResults.size]
-        if (autoConfirmTools || nextTask is ToolTask.QueryChatHistory || nextTask is ToolTask.ReadNotes) {
+        val shouldAutoConfirm =
+            batch.aiConfig.enableStream ||
+                autoConfirmTools ||
+                nextTask is ToolTask.QueryChatHistory ||
+                nextTask is ToolTask.ReadNotes
+
+        if (shouldAutoConfirm) {
             confirmPendingToolAction(dontAskAgain = false)
         } else {
             // Show UI
@@ -1766,17 +1768,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _currentTypingAi.value = config
 
                     val enabledTools = mutableSetOf<String>().apply {
-                        if (!config.enableStream) {
-                            add("query_chat_history")
-                            add("web_search_baidu")
-                            // 每个 AI 都有笔记工具权限（已隔离文件夹）
-                            if (config.enableReadNotes) add("read_notes")
-                            if (config.enableWriteNote) add("write_note")
-                            if (config.enableEditNote) add("edit_note")
-                            if (config.enableSetAlarm) {
-                                add("create_plan")
-                                add("cancel_plan")
-                            }
+                        add("query_chat_history")
+                        add("web_search_baidu")
+                        // 每个 AI 都有笔记工具权限（已隔离文件夹）
+                        if (config.enableReadNotes) add("read_notes")
+                        if (config.enableWriteNote) add("write_note")
+                        if (config.enableEditNote) add("edit_note")
+                        if (config.enableSetAlarm) {
+                            add("create_plan")
+                            add("cancel_plan")
                         }
                     }
                     val messages = buildContextMessages(chatId, config, enabledTools)

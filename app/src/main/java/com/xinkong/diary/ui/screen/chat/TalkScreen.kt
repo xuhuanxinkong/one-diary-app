@@ -276,27 +276,14 @@ fun TalkScreen(
         }
     }
 
-    var initialScrollDone by remember { mutableStateOf(false) }
-
     var animatingMessageId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var previousMessageCount by rememberSaveable { mutableStateOf(0) }
+    var hasAutoScrolledToBottom by remember(chat.id) { mutableStateOf(false) }
 
-    LaunchedEffect(messages.size, aiState) {
-        if (messages.size > previousMessageCount) {
-            // 取消旧的假流式打字动画，因为现在已经有真流式了
-            if (!initialScrollDone) {
-                listState.scrollToItem(messages.size - 1)
-                initialScrollDone = true
-            } else {
-                listState.animateScrollToItem(messages.size - 1)
-            }
-        } else if (aiState is AiState.Streaming || aiState is AiState.Loading) {
-            // Scroll to the loading/streaming indicator which is at messages.size
-            if (messages.isNotEmpty()) {
-                listState.animateScrollToItem(messages.size)
-            }
+    LaunchedEffect(chat.id, messages.size) {
+        if (!hasAutoScrolledToBottom && messages.isNotEmpty()) {
+            listState.scrollToItem(messages.size - 1)
+            hasAutoScrolledToBottom = true
         }
-        previousMessageCount = messages.size
     }
 
     Scaffold(
@@ -1468,6 +1455,33 @@ fun TalkInputRow(
             .padding(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+
+
+        // 语音输入按钮（输入框左侧）
+        IconButton(
+            onClick = {
+                if (isListening) {
+                    stopVoiceRecognition()
+                } else {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                        startVoiceRecognition()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = if (isListening) "停止语音" else "语音输入",
+                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(4.dp))
         BasicTextField(
             value = inputText,
             onValueChange = onInputChange,
@@ -1503,31 +1517,7 @@ fun TalkInputRow(
         )
 
         Spacer(modifier = Modifier.width(4.dp))
-        // 语音输入按钮（输入框右侧）
-        IconButton(
-            onClick = {
-                if (isListening) {
-                    stopVoiceRecognition()
-                } else {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                        == PackageManager.PERMISSION_GRANTED) {
-                        startVoiceRecognition()
-                    } else {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
-            },
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                contentDescription = if (isListening) "停止语音" else "语音输入",
-                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
-                modifier = Modifier.size(24.dp)
-            )
-        }
 
-        Spacer(modifier = Modifier.width(4.dp))
         // 群聊时显示AI回复顺序按钮
         if (showAiReplyButton) {
             IconButton(onClick = onShowAiReply, modifier = Modifier.size(40.dp)) {
