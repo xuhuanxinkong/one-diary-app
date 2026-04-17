@@ -59,25 +59,40 @@ class VoiceInteractionManager(private val context: Context) {
             if (status == TextToSpeech.SUCCESS) {
                 val result = textToSpeech?.setLanguage(Locale.CHINESE) ?: TextToSpeech.LANG_NOT_SUPPORTED
                 ttsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
-                
-                textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) {
-                        // 如果是分块朗读，只在最后一块时触发完成；目前不支持分块的复杂回调，以最后为准
-                        if (utteranceId?.contains("chunk_") == false) {
-                            onTtsDone?.invoke()
-                        }
-                    }
-                    @Deprecated("Deprecated in Java", ReplaceWith("onError(utteranceId)"))
-                    override fun onError(utteranceId: String?) {
-                        Log.e(TAG, "TTS Error for utteranceId: $utteranceId")
-                        if (utteranceId?.contains("chunk_") == false) {
-                            onTtsDone?.invoke() // 即使朗读报错也不能卡死主流程
-                        }
-                    }
-                })
+            } else {
+                ttsReady = false
             }
         }
+        
+        textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                // 如果是分块朗读，只在最后一块时触发完成；目前不支持分块的复杂回调，以最后为准
+                if (utteranceId?.contains("chunk_") == false) {
+                    onTtsDone?.invoke()
+                }
+            }
+            @Deprecated("Deprecated in Java", ReplaceWith("onError(utteranceId)"))
+            override fun onError(utteranceId: String?) {
+                Log.e(TAG, "TTS Error for utteranceId: $utteranceId")
+                if (utteranceId?.contains("chunk_") == false) {
+                    onTtsDone?.invoke() // 即使朗读报错也不能卡死主流程
+                }
+            }
+        })
+    }
+
+    // 重新初始化TTS（恢复环境）
+    fun reInitTts() {
+        try {
+            textToSpeech?.stop()
+            textToSpeech?.shutdown()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        textToSpeech = null
+        ttsReady = false
+        initTts()
     }
 
     private fun initAsr() {
@@ -165,6 +180,8 @@ class VoiceInteractionManager(private val context: Context) {
         if (ttsReady && textToSpeech != null && text.isNotBlank()) {
             requestAudioFocus()
             val maxLen = TextToSpeech.getMaxSpeechInputLength().let { if (it > 0) it else 4000 }
+            
+            var success = false
             if (text.length > maxLen - 10) {
                 // 如果文字过长，进行分块，避免触碰引擎的字符上限而报错丢弃
                 val chunks = text.chunked(maxLen - 100)
@@ -173,10 +190,18 @@ class VoiceInteractionManager(private val context: Context) {
                     val isLast = index == chunks.lastIndex
                     val currentId = if (isLast) utteranceId else "chunk_$index"
                     val queueMode = if (isFirst) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                    textToSpeech?.speak(chunk, queueMode, null, currentId)
+                    val code = textToSpeech?.speak(chunk, queueMode, null, currentId)
+                    if (isLast && code == TextToSpeech.SUCCESS) success = true
                 }
             } else {
-                textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                val code = textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                if (code == TextToSpeech.SUCCESS) success = true
+            }
+            
+            // 如果底层发送给引擎失败，强制拉起空闲状态
+            if (!success) {
+                Log.e(TAG, "TTS speak() reported error return code.")
+                onTtsDone?.invoke()
             }
         } else {
             // 如果TTS还没准备好或者文字为空，直接回调以免卡死

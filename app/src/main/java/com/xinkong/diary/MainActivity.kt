@@ -1,5 +1,6 @@
 package com.xinkong.diary
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.entryProvider
@@ -50,6 +52,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
 }
 
 @Composable
@@ -183,8 +186,17 @@ fun DiaryApp() {
                     isGroupChat = route.isGroupChat,
                     viewModel = callViewModel,
                     onMinimizeClick = {
-                        // TODO: Implement minimize Service & return to App
+                        // VoiceCall -> VoiceCallSelectAi -> TalkScreen/GroupTalkScreen
                         navViewModel.navigateBack()
+                        navViewModel.navigateBack()
+                        val target = if (route.isGroupChat) {
+                            Route.GroupChatDetail(route.chatId)
+                        } else {
+                            Route.ChatDetail(route.chatId)
+                        }
+                        if (navViewModel.currentRoute != target) {
+                            navViewModel.navigateTo(target)
+                        }
                     },
                     onHangUp = {
                         navViewModel.navigateBack()

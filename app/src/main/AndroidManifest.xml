@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     
     <!-- 查询语音识别服务 -->
     <queries>
@@ -48,6 +50,12 @@
         <activity android:name=".receiver.AlarmRingActivity"
             android:showOnLockScreen="true"
             android:turnScreenOn="true" />
+        
+        <service
+            android:name=".ui.screen.chat.voice.FloatingCallService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
 </manifest>

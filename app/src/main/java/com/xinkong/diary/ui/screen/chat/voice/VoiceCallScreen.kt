@@ -1,5 +1,10 @@
 package com.xinkong.diary.ui.screen.chat.voice
 
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.xinkong.diary.ViewModel.ChatViewModel
@@ -42,11 +48,17 @@ fun VoiceCallScreen(
     val aiConfigs by chatViewModel.getAiConfigsForChat(chatId, isGroupChat).collectAsState(initial = emptyList())
     val selectedAi = aiConfigs.find { it.id == aiId }
 
+    val context = LocalContext.current
+
     LaunchedEffect(selectedAi) {
         if (selectedAi != null) {
             viewModel.initData(chatId, selectedAi, chatViewModel)
             kotlinx.coroutines.delay(300) // 给语音识别器一点初始化的时间
             viewModel.startCall() // 自动拨号状态
+            
+            // Any time VoiceCallScreen comes up or gets resumed, kill the floating UI
+            val stopIntent = Intent(context, FloatingCallService::class.java)
+            context.stopService(stopIntent)
         }
     }
 
@@ -61,7 +73,29 @@ fun VoiceCallScreen(
         CallTopBar(
             state = callState,
             isPaused = isPaused,
-            onMinimizeClick = onMinimizeClick,
+            onMinimizeClick = {
+                // 检查悬浮窗权限并启动服务
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + context.packageName)
+                    )
+                    context.startActivity(intent)
+                } else {
+                    val targetAiId = aiId
+                    val targetChatId = chatId
+                    val targetGroup = isGroupChat
+
+                    FloatingCallService.start(
+                        context = context,
+                        chatId = targetChatId,
+                        aiId = targetAiId,
+                        isGroup = targetGroup
+                    )
+                    // 最小化后先回到应用内对话页；悬浮窗服务继续在系统层存活。
+                    onMinimizeClick()
+                }
+            },
             modifier = Modifier.align(Alignment.TopCenter)
         )
 
@@ -95,6 +129,8 @@ fun VoiceCallScreen(
             isAutoRead = viewModel.isAutoRead.collectAsState().value,
             onHangUp = {
                 viewModel.endCall()
+                val stopIntent = Intent(context, FloatingCallService::class.java)
+                context.stopService(stopIntent)
                 onHangUp()
             },
             onAutoReadToggle = {
