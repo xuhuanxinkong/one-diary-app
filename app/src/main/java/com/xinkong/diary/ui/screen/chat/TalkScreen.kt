@@ -118,7 +118,12 @@ import com.huawei.hms.mlsdk.asr.MLAsrListener
 import com.huawei.hms.mlsdk.asr.MLAsrRecognizer
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import java.util.Locale
+
+import com.xinkong.diary.ui.screen.chat.voice.CallRecordMessageBubble
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -127,7 +132,8 @@ fun TalkScreen(
     onBack: () -> Unit,
     onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
     onSetting: () -> Unit = {},
-    isGroupChat: Boolean = false  // 群聊显示AI回复顺序按钮
+    isGroupChat: Boolean = false,  // 群聊显示AI回复顺序按钮
+    onStartVoiceCall: () -> Unit = {} // <--- 语音通话回调
 ) {
     val viewModel: ChatViewModel = viewModel()
     val diaryModel: com.xinkong.diary.ViewModel.DiaryViewModel = viewModel()
@@ -344,7 +350,8 @@ fun TalkScreen(
                         showExpandPanel = false
                     },
                     showAiReplyButton = isGroupChat,
-                    onShowAiReply = { showAiReplySheet = true }
+                    onShowAiReply = { showAiReplySheet = true },
+                    onStartVoiceCall = onStartVoiceCall
                 )
 
                 // 群聊时显示AI回复顺序选择
@@ -578,7 +585,6 @@ fun ChatMessageShow(
                 isUser = isUserMessage,
                 avatarUri = if (isUserMessage) userAvatarUri else aiAvatarUri,
                 name = if (isUserMessage) userName else aiName,
-                date = message.date,
                 photoUris = photoUris,
                 toolExecutions = tools,
                 reasoningContent = message.reasoningContent,
@@ -923,7 +929,6 @@ fun ChatBubble(
     isUser: Boolean,
     avatarUri: String = "",
     name: String = if (isUser) "我" else "AI",
-    date: String = "",
     photoUris: List<String> = emptyList(),
     toolExecutions: List<String> = emptyList(),
     reasoningContent: String? = null,
@@ -944,12 +949,11 @@ fun ChatBubble(
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val focusManager = LocalFocusManager.current
 
     if (expandedImageUri != null) {
-        androidx.compose.ui.window.Dialog(
+        Dialog(
             onDismissRequest = { expandedImageUri = null },
-            properties = androidx.compose.ui.window.DialogProperties(
+            properties = DialogProperties(
                 usePlatformDefaultWidth = false,
                 dismissOnBackPress = true,
                 dismissOnClickOutside = true
@@ -1133,46 +1137,63 @@ fun ChatBubble(
                     // 文字气泡（如果有文字内容）
                     if (content.isNotBlank()) {
                         Box {
-                            Box(
-                                modifier = Modifier
-                                    .widthIn(max = 260.dp)
-                                    .combinedClickable(
-                                        enabled = !isMultiSelectMode,
-                                        onLongClick = { showMenu = true },
-                                        onClick = { }
-                                    )
-                                    .background(Color.White, shape = RoundedCornerShape(8.dp))
-                                    .padding(12.dp)
-                            ) {
-                                Column {
-                                    if (!reasoningContent.isNullOrBlank()) {
-                                        ExpandableAnim(
-                                            title = "深度思考",
-                                            modifier = Modifier.padding(bottom = 6.dp),
-                                            isExpandedAtStart = false
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .background(Color(0xFFF5F5F5), RoundedCornerShape(6.dp))
-                                                    .padding(8.dp)
+                            if (content.startsWith("[语音通话记录]")) {
+                                val lines = content.split("\n", limit = 3)
+                                val duration = lines.getOrNull(1) ?: "未知时长"
+                                val textRecord = lines.getOrNull(2) ?: ""
+                                CallRecordMessageBubble(
+                                    durationStr = duration,
+                                    callContent = textRecord,
+                                    isUser = isUser,
+                                    modifier = Modifier.widthIn(max = 260.dp)
+                                        .combinedClickable(
+                                            enabled = !isMultiSelectMode,
+                                            onLongClick = { showMenu = true },
+                                            onClick = { }
+                                        )
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .widthIn(max = 260.dp)
+                                        .combinedClickable(
+                                            enabled = !isMultiSelectMode,
+                                            onLongClick = { showMenu = true },
+                                            onClick = { }
+                                        )
+                                        .background(Color.White, shape = RoundedCornerShape(8.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Column {
+                                        if (!reasoningContent.isNullOrBlank()) {
+                                            ExpandableAnim(
+                                                title = "深度思考",
+                                                modifier = Modifier.padding(bottom = 6.dp),
+                                                isExpandedAtStart = false
                                             ) {
-                                                ExpandableMessageContent(
-                                                    content = reasoningContent,
-                                                    textColor = Color.DarkGray,
-                                                    isAnimating = false, // 已完成思考过程不播放动画
-                                                    isSelectable = allowSelection
-                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(Color(0xFFF5F5F5), RoundedCornerShape(6.dp))
+                                                        .padding(8.dp)
+                                                ) {
+                                                    ExpandableMessageContent(
+                                                        content = reasoningContent,
+                                                        textColor = Color.DarkGray,
+                                                        isAnimating = false, // 已完成思考过程不播放动画
+                                                        isSelectable = allowSelection
+                                                    )
+                                                }
                                             }
                                         }
+                                        ExpandableMessageContent(
+                                            content = content,
+                                            textColor = Color.Black,
+                                            isAnimating = isAnimating,
+                                            isSelectable = allowSelection,
+                                            onAnimationEnd = onAnimationEnd
+                                        )
                                     }
-                                    ExpandableMessageContent(
-                                        content = content,
-                                        textColor = Color.Black,
-                                        isAnimating = isAnimating,
-                                        isSelectable = allowSelection,
-                                        onAnimationEnd = onAnimationEnd
-                                    )
                                 }
                             }
                             ChatMessageMenu(
@@ -1236,7 +1257,8 @@ fun TalkBottomBar(
     showExpandPanel: Boolean,
     onPickImage: () -> Unit = {},
     showAiReplyButton: Boolean = false,
-    onShowAiReply: () -> Unit = {}
+    onShowAiReply: () -> Unit = {},
+    onStartVoiceCall:() ->Unit ={}
 ) {
     Column {
         Divider(color = Color.LightGray, thickness = 0.5.dp)
@@ -1256,7 +1278,7 @@ fun TalkBottomBar(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .size(24.dp)
+                        .size(8.dp)
                         .background(Color.Black.copy(alpha = 0.6f), CircleShape)
                 ) {
                     Icon(imageVector = Icons.Default.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(16.dp))
@@ -1273,7 +1295,7 @@ fun TalkBottomBar(
             onShowAiReply = onShowAiReply
         )
         if (showExpandPanel) {
-            TalkExpandablePanel(onPickImage)
+            TalkExpandablePanel(onPickImage, onStartVoiceCall)
         }
     }
 }
@@ -1559,14 +1581,14 @@ fun TalkInputRow(
 }
 
 @Composable
-fun TalkExpandablePanel(onPickImage: () -> Unit) {
+fun TalkExpandablePanel(onPickImage: () -> Unit, onStartVoiceCall: () -> Unit = {}) {
     val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFFF7F7F7))
             .padding(horizontal = 16.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceAround
+        horizontalArrangement = Arrangement.Start
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
             .padding(5.dp)
@@ -1583,6 +1605,8 @@ fun TalkExpandablePanel(onPickImage: () -> Unit) {
             Text("相册", fontSize = 12.sp, color = Color.DarkGray)
         }
         
+        Spacer(modifier = Modifier.width(16.dp))
+        
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
             .padding(5.dp)
             .clickable { Toast.makeText(context, "分享功能开发中", Toast.LENGTH_SHORT).show() }) {
@@ -1598,8 +1622,23 @@ fun TalkExpandablePanel(onPickImage: () -> Unit) {
             Text("分享", fontSize = 12.sp, color = Color.DarkGray)
         }
 
-        // 可以继续添加更多功能按钮
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.width(16.dp))
+
+        // 新增的语音通话入口
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
+            .padding(5.dp)
+            .clickable { onStartVoiceCall() }) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color.White, shape = RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = Icons.Default.Phone, contentDescription = "语音通话", tint = Color.Gray, modifier = Modifier.size(32.dp))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("语音通话", fontSize = 12.sp, color = Color.DarkGray)
+        }
     }
 }
 

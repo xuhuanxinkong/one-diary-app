@@ -76,5 +76,13 @@ sealed class Route {
     @Serializable
     data class AlarmEdit(val id: Int, val isAiReminder: Boolean = false, val selectedAiId: Long? = null) : Route()
 
+    // 语音通话页面
+    @Serializable
+    data class VoiceCall(val chatId: Long, val aiId: Long, val isGroupChat: Boolean = false) : Route()
+
+    // 语音通话选择 AI 界面
+    @Serializable
+    data class VoiceCallSelectAi(val chatId: Long, val isGroupChat: Boolean = false) : Route()
+
     // 其他页面
 }

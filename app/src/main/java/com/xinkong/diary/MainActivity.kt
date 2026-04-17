@@ -28,6 +28,8 @@ import com.xinkong.diary.ViewModel.NavigationViewModel
 import com.xinkong.diary.ViewModel.Route
 import com.xinkong.diary.ui.screen.chat.DetailScreen
 import com.xinkong.diary.ui.screen.chat.GroupSettingScreen
+import com.xinkong.diary.ui.screen.chat.voice.VoiceCallScreen
+import com.xinkong.diary.ui.screen.chat.voice.VoiceCallSelectAiScreen
 import com.xinkong.diary.ui.screen.chat.SettingScreen
 import com.xinkong.diary.ui.screen.chat.TalkScreen
 import com.xinkong.diary.repository.AiChatConfig
@@ -97,7 +99,10 @@ fun DiaryApp() {
                         onSetting = {
                             navViewModel.navigateTo(Route.ChatSetting(it.id))
                         },
-                        isGroupChat = false
+                        isGroupChat = false,
+                        onStartVoiceCall = {
+                            navViewModel.navigateTo(Route.VoiceCallSelectAi(it.id, isGroupChat = false))
+                        }
                     )
                 }
             }
@@ -118,7 +123,10 @@ fun DiaryApp() {
                         onSetting = {
                             navViewModel.navigateTo(Route.GroupChatSetting(it.id))
                         },
-                        isGroupChat = true
+                        isGroupChat = true,
+                        onStartVoiceCall = {
+                            navViewModel.navigateTo(Route.VoiceCallSelectAi(it.id, isGroupChat = true))
+                        }
                     )
                 }
             }
@@ -156,6 +164,32 @@ fun DiaryApp() {
                         }
                     )
                 }
+            }
+            entry<Route.VoiceCallSelectAi> { route ->
+                VoiceCallSelectAiScreen(
+                    chatId = route.chatId,
+                    isGroupChat = route.isGroupChat,
+                    onBack = { navViewModel.navigateBack() },
+                    onAiSelected = { aiId ->
+                        navViewModel.navigateTo(Route.VoiceCall(route.chatId, aiId, route.isGroupChat))
+                    }
+                )
+            }
+            entry<Route.VoiceCall> { route ->
+                val callViewModel: com.xinkong.diary.ui.screen.chat.voice.CallViewModel = viewModel()
+                VoiceCallScreen(
+                    chatId = route.chatId,
+                    aiId = route.aiId,
+                    isGroupChat = route.isGroupChat,
+                    viewModel = callViewModel,
+                    onMinimizeClick = {
+                        // TODO: Implement minimize Service & return to App
+                        navViewModel.navigateBack()
+                    },
+                    onHangUp = {
+                        navViewModel.navigateBack()
+                    }
+                )
             }
             entry<Route.GroupChatSetting> { route ->
                 val chat by chatViewModel.findChat(route.chatId)

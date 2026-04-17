@@ -221,10 +221,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * 发送消息并调用 AI
      * 自动从 DB 读取该对话的 AI 配置、历史消息和上下文
      */
-    fun sendMessage(chatId: Long, content: String, selectedAIs: List<AiChatConfig>, imageBase64: String? = null, imageUriString: String? = null) {
+    fun sendMessage(chatId: Long, content: String, selectedAIs: List<AiChatConfig>, imageBase64: String? = null, imageUriString: String? = null, autoConfirmToolsOverride: Boolean = false) {
         if (selectedAIs.isEmpty()) return
         viewModelScope.launch {
-            autoConfirmTools = false
+            autoConfirmTools = autoConfirmToolsOverride
             saveReplySelection(chatId, selectedAIs)
             
             // 1. 保存用户消息
@@ -535,6 +535,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    /**
+     * 针对语音通话场景抽象：获取某个聊天（单聊或群聊）下所有可用的 AiConfigs
+     */
+    fun getAiConfigsForChat(chatId: Long, isGroupChat: Boolean): Flow<List<AiChatConfig>> {
+        return if (isGroupChat) getGroupChatSourceAiConfigs(chatId) else findAiConfig(chatId)
+    }
+
     /**
      * 获取群聊中引用的源AI配置列表（一次性获取）
      */
@@ -1405,12 +1412,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun buildAssistantToolCallMessage(content: String, toolCalls: List<AiToolCall>): Map<String, Any> {
         val callsList = toolCalls.map { call ->
+            // Fix invalid parameter error from LLM returning empty arguments
+            val safeArguments = if (call.arguments.isBlank()) "{}" else call.arguments
             mapOf(
                 "id" to call.id,
                 "type" to call.type,
                 "function" to mapOf(
                     "name" to call.functionName,
-                    "arguments" to call.arguments
+                    "arguments" to safeArguments
                 )
             )
         }
