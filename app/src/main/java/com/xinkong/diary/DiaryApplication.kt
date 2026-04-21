@@ -2,6 +2,7 @@ package com.xinkong.diary
 
 import android.app.Application
 import com.xinkong.diary.rag.RAG
+import com.xinkong.diary.rag.index.IndexWorker
 import com.xinkong.diary.repository.ObjectBox
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,9 @@ class DiaryApplication : Application() {
         applicationScope.launch {
             try {
                 RAG.initialize(this@DiaryApplication)
+                // 启动后增量补建索引，覆盖历史笔记/消息未入向量库的情况。
+                IndexWorker.scheduleIndexDiaries(this@DiaryApplication)
+                IndexWorker.scheduleIndexMessages(this@DiaryApplication)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

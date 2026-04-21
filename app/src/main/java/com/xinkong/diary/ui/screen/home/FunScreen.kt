@@ -5,6 +5,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -305,6 +307,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
     val scope = remember { CoroutineScope(Dispatchers.Main) }
     val context = LocalContext.current
     val viewModel: ChatViewModel = viewModel()
+    
     Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
         // Base URL Input with Preset Dropdown
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -313,7 +316,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
                 onValueChange = { aiBaseUrl = it },
                 label = { Text("Base URL") },
                 modifier = Modifier.fillMaxWidth(),
-                maxLines = 1,
+                singleLine = true,
                 trailingIcon = {
                     Box {
                         IconButton(onClick = { showUrlDropdown = true }) {
@@ -354,7 +357,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
                 onValueChange = { aiModel = it },
                 label = { Text("Model") },
                 modifier = Modifier.fillMaxWidth(),
-                maxLines = 1,
+                singleLine = true,
                 trailingIcon = {
                     IconButton(onClick = {
                         scope.launch {
@@ -394,7 +397,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
             onValueChange = { aiApiKey = it },
             label = { Text("API Key") },
             modifier = Modifier.fillMaxWidth(),
-            maxLines = 1
+            singleLine = true
         )
 
         Spacer(modifier = Modifier.height(16.dp))

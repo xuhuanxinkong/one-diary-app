@@ -1,12 +1,16 @@
 package com.xinkong.diary.rag.search
 
 import android.content.Context
+import android.util.Log
 import com.xinkong.diary.rag.embedding.EmbeddingManager
 import com.xinkong.diary.rag.index.IndexManager
 import com.xinkong.diary.rag.vector.ObjectBoxVectorStore
 import com.xinkong.diary.repository.AppDatabase
+import com.xinkong.diary.repository.ChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * RAG 检索服务
@@ -15,6 +19,7 @@ import kotlinx.coroutines.withContext
 class RAGSearchService private constructor(
     private val context: Context
 ) {
+    private val tag = "RAGSearchService"
     private val embeddingManager = EmbeddingManager.getInstance(context)
     private val vectorStore = ObjectBoxVectorStore()
     private val db = AppDatabase.getDatabase(context)
@@ -46,12 +51,15 @@ class RAGSearchService private constructor(
         options: SearchOptions = SearchOptions()
     ): List<RAGSearchResult> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
+
+        Log.d(tag, "开始语义检索: query=${query.take(80)} options=$options")
         
         // 生成查询向量
-        val queryEmbedding = embeddingManager.embed(query)
+        val queryEmbedding = embeddingManager.embedQuery(query)
         
         // 向量搜索
         val vectorResults = vectorStore.search(queryEmbedding, options.topK * 2)
+        Log.d(tag, "向量检索命中: count=${vectorResults.size}")
         
         // 获取对应的 EmbeddingRecord（支持文件夹过滤）
         val vectorIds = vectorResults.map { it.vectorId }
@@ -60,6 +68,7 @@ class RAGSearchService private constructor(
         } else {
             embeddingDao.getByVectorIds(vectorIds)
         }
+        Log.d(tag, "记录映射完成: recordCount=${records.size}")
         val recordMap = records.associateBy { it.vectorId }
         
         // 构建结果
@@ -70,6 +79,8 @@ class RAGSearchService private constructor(
             
             // 过滤最小分数
             if (vectorResult.score < options.minScore) continue
+
+            Log.d(tag, "候选向量: vectorId=${vectorResult.vectorId} score=${vectorResult.score} source=${record.sourceType} sourceId=${record.sourceId} folder=${record.folder}")
             
             when (record.sourceType) {
                 IndexManager.SOURCE_TYPE_DIARY -> {
@@ -89,7 +100,17 @@ class RAGSearchService private constructor(
                 }
                 IndexManager.SOURCE_TYPE_CHAT_MESSAGE -> {
                     if (!options.searchMessages) continue
-                    // TODO: 添加 getMessageById 方法
+                    val message = chatDao.getMessageById(record.sourceId)
+                    if (message != null) {
+                        if (options.chatIds != null && message.chatId !in options.chatIds) continue
+                        results.add(
+                            RAGSearchResult.ChatMessageResult(
+                                message = message,
+                                textChunk = record.textChunk,
+                                score = vectorResult.score
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -196,15 +217,17 @@ class RAGSearchService private constructor(
             for ((index, result) in results.withIndex()) {
                 when (result) {
                     is RAGSearchResult.DiaryResult -> {
-                        append("${index + 1}.")
+                        append("\n${index + 1}.【来源类型】记忆库 ")
                         if (result.diary.title.isNotBlank()) {
                             append("${result.diary.title}：")
                         }
                         append(result.textChunk.take(200))
-                        append(" ")
+                        append("\n")
                     }
                     is RAGSearchResult.ChatMessageResult -> {
-                        append("${index + 1}.[对话]${result.textChunk.take(150)} ")
+                        append("\n${index + 1}.【来源类型】对话历史 ")
+                        append(buildChatContextSnippet(result.message, options.messageContextWindow))
+                        append("\n")
                     }
                 }
             }
@@ -213,5 +236,29 @@ class RAGSearchService private constructor(
         if (fullText.length > maxTotalLength) {
             fullText.take(maxTotalLength) + "..."
         } else fullText
+    }
+
+    private suspend fun buildChatContextSnippet(message: ChatMessage, messageContextWindow: Int): String {
+        val history = chatDao.getMessagesOnce(message.chatId)
+        if (history.isEmpty()) {
+            return message.content.take(150)
+        }
+
+        val index = history.indexOfFirst { it.id == message.id }
+        if (index < 0) {
+            return message.content.take(150)
+        }
+
+        val startIndex = max(0, index - messageContextWindow)
+        val endIndex = min(history.lastIndex, index + messageContextWindow)
+        return history.subList(startIndex, endIndex + 1).joinToString("\n") { item ->
+            val roleLabel = when (item.role) {
+                "user" -> "用户"
+                "assistant" -> "助手"
+                else -> item.role
+            }
+            val marker = if (item.id == message.id) "->" else "  "
+            "$marker (${item.date}) $roleLabel: ${item.content.take(200)}"
+        }
     }
 }

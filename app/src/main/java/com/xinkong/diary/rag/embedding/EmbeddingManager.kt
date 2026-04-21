@@ -1,6 +1,7 @@
 package com.xinkong.diary.rag.embedding
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -13,6 +14,7 @@ import kotlinx.coroutines.withContext
 class EmbeddingManager private constructor(
     private val context: Context
 ) {
+    private val tag = "EmbeddingManager"
     private var model: OnnxEmbeddingModel? = null
     private val mutex = Mutex()
     private var isInitialized = false
@@ -37,8 +39,10 @@ class EmbeddingManager private constructor(
     suspend fun initialize() = withContext(Dispatchers.IO) {
         mutex.withLock {
             if (!isInitialized) {
+                Log.i(tag, "开始初始化 embedding 模型")
                 model = OnnxEmbeddingModel.fromAssets(context)
                 isInitialized = true
+                Log.i(tag, "embedding 模型初始化完成")
             }
         }
     }
@@ -56,7 +60,19 @@ class EmbeddingManager private constructor(
         if (!isInitialized) {
             initialize()
         }
+        Log.d(tag, "生成文档向量: len=${text.length}")
         model!!.embed(text)
+    }
+
+    /**
+     * 生成查询向量
+     */
+    suspend fun embedQuery(text: String): FloatArray = withContext(Dispatchers.IO) {
+        if (!isInitialized) {
+            initialize()
+        }
+        Log.d(tag, "生成查询向量: len=${text.length}")
+        model!!.embedQuery(text)
     }
     
     /**
@@ -85,11 +101,15 @@ class EmbeddingManager private constructor(
     fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
         require(a.size == b.size) { "向量维度必须相同" }
         var dotProduct = 0f
+        var normA = 0f
+        var normB = 0f
         for (i in a.indices) {
             dotProduct += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
         }
-        // 因为向量已经 L2 归一化，所以 dot product 就是余弦相似度
-        return dotProduct
+        val denominator = kotlin.math.sqrt(normA) * kotlin.math.sqrt(normB)
+        return if (denominator > 0f) dotProduct / denominator else 0f
     }
     
     /**

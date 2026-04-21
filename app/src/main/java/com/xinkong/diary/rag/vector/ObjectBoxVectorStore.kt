@@ -1,5 +1,6 @@
 package com.xinkong.diary.rag.vector
 
+import android.util.Log
 import com.xinkong.diary.repository.ObjectBox
 import com.xinkong.diary.repository.VectorEntity
 import com.xinkong.diary.repository.VectorEntity_
@@ -12,11 +13,13 @@ import kotlinx.coroutines.withContext
  */
 class ObjectBoxVectorStore : VectorStore {
     
+    private val tag = "ObjectBoxVectorStore"
     private val box get() = ObjectBox.vectorBox()
     
     override suspend fun insert(embedding: FloatArray): Long = withContext(Dispatchers.IO) {
         val entity = VectorEntity(embedding = embedding)
         box.put(entity)
+        Log.d(tag, "insert vector: id=${entity.id} dim=${embedding.size}")
         entity.id
     }
     
@@ -38,14 +41,19 @@ class ObjectBoxVectorStore : VectorStore {
     
     override suspend fun search(query: FloatArray, topK: Int): List<VectorSearchResult> = withContext(Dispatchers.IO) {
         // 使用 ObjectBox 的向量最近邻查询
+        Log.d(tag, "search vector: dim=${query.size} topK=$topK")
         val results = box.query(
             VectorEntity_.embedding.nearestNeighbors(query, topK)
         ).build().findWithScores()
+        Log.d(tag, "search result count=${results.size}")
         
         results.map { scoredResult ->
+            val distance = scoredResult.score.toFloat()
+            // ObjectBox 返回的是距离（越小越近），这里转成越大越相似的分数。
+            val similarity = 1f / (1f + distance)
             VectorSearchResult(
                 vectorId = scoredResult.get().id,
-                score = scoredResult.score.toFloat()
+                score = similarity
             )
         }
     }

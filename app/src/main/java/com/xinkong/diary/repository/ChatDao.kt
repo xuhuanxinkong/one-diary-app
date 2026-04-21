@@ -50,7 +50,7 @@ interface ChatDao {
 
     //消息相关 ChatMessage
     @Insert
-    suspend fun insertMessage(message: ChatMessage)
+    suspend fun insertMessage(message: ChatMessage): Long
 
     @Insert
     suspend fun insertMessages(messages: List<ChatMessage>)
@@ -63,6 +63,12 @@ interface ChatDao {
 
     @Query("SELECT * FROM chat_messages WHERE chatId = :chatId ORDER BY id ASC")
     suspend fun getMessagesOnce(chatId: Long): List<ChatMessage>
+
+    @Query("SELECT * FROM chat_messages WHERE id = :messageId LIMIT 1")
+    suspend fun getMessageById(messageId: Long): ChatMessage?
+
+    @Query("SELECT * FROM chat_messages ORDER BY id ASC")
+    suspend fun getAllMessages(): List<ChatMessage>
 
 
     //配置相关 AiChatConfig

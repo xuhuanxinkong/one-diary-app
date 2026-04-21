@@ -33,5 +33,6 @@ data class SearchOptions(
     val searchMessages: Boolean = true,
     val diaryIds: List<Long>? = null,    // 限定搜索的日记ID
     val chatIds: List<Long>? = null,     // 限定搜索的对话ID
-    val folders: List<String>? = null    // 限定搜索的文件夹（为空表示不限制）
+    val folders: List<String>? = null,    // 限定搜索的文件夹（为空表示不限制）
+    val messageContextWindow: Int = 2     // 对话结果展示上下文前后消息数
 )

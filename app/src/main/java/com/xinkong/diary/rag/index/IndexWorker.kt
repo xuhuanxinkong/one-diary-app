@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.xinkong.diary.repository.AppDatabase
 import com.xinkong.diary.repository.Diary
+import com.xinkong.diary.repository.ChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -46,6 +47,16 @@ class IndexWorker(
                 .build()
             WorkManager.getInstance(context).enqueue(request)
         }
+
+        /**
+         * 启动消息索引
+         */
+        fun scheduleIndexMessages(context: Context) {
+            val request = OneTimeWorkRequestBuilder<IndexWorker>()
+                .setInputData(workDataOf(KEY_ACTION to ACTION_INDEX_MESSAGES))
+                .build()
+            WorkManager.getInstance(context).enqueue(request)
+        }
     }
     
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -58,12 +69,13 @@ class IndexWorker(
                     // 清空并重建所有索引
                     indexManager.clearAll()
                     indexAllDiaries(indexManager, db)
+                    indexAllMessages(indexManager, db)
                 }
                 ACTION_INDEX_DIARIES -> {
                     indexAllDiaries(indexManager, db)
                 }
                 ACTION_INDEX_MESSAGES -> {
-                    // TODO: 实现消息索引
+                    indexAllMessages(indexManager, db)
                 }
             }
             
@@ -88,6 +100,22 @@ class IndexWorker(
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
+            }
+        }
+    }
+
+    private suspend fun indexAllMessages(indexManager: IndexManager, db: AppDatabase) {
+        val chatDao = db.chatDao()
+        val indexedIds = db.embeddingDao().getIndexedSourceIds(IndexManager.SOURCE_TYPE_CHAT_MESSAGE).toSet()
+        val allMessages: List<ChatMessage> = chatDao.getAllMessages()
+
+        for (message in allMessages) {
+            if (message.id in indexedIds) continue
+            try {
+                val chatFolder = chatDao.getChatByIdSuspend(message.chatId)?.tagFolder.orEmpty()
+                indexManager.indexChatMessage(message, chatFolder)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }

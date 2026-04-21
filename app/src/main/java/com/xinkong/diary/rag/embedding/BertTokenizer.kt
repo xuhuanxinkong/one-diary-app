@@ -1,6 +1,7 @@
 package com.xinkong.diary.rag.embedding
 
 import android.content.Context
+import android.util.Log
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -13,6 +14,7 @@ class BertTokenizer private constructor(
     private val idToToken: Map<Int, String>
 ) {
     companion object {
+        private const val TAG = "BertTokenizer"
         private const val UNK_TOKEN = "[UNK]"
         private const val CLS_TOKEN = "[CLS]"
         private const val SEP_TOKEN = "[SEP]"
@@ -39,6 +41,7 @@ class BertTokenizer private constructor(
                 }
             }
             
+            Log.i(TAG, "词表加载完成: path=$vocabPath size=${vocab.size}")
             return BertTokenizer(vocab, idToToken)
         }
     }
@@ -57,6 +60,11 @@ class BertTokenizer private constructor(
      */
     fun encode(text: String, maxLength: Int = 512): TokenizedResult {
         val tokens = tokenize(text)
+        val unknownCount = tokens.count { it == UNK_TOKEN }
+        Log.d(
+            TAG,
+            "encode: textLen=${text.length} tokenCount=${tokens.size} unknownCount=$unknownCount preview=${text.take(48).replace("\n", " ")}"
+        )
         
         // 截断到 maxLength - 2（留给 [CLS] 和 [SEP]）
         val truncatedTokens = if (tokens.size > maxLength - 2) {
@@ -102,6 +110,7 @@ class BertTokenizer private constructor(
         for (token in basicTokens) {
             tokens.addAll(wordPieceTokenize(token))
         }
+        Log.d(TAG, "tokenize: basic=${basicTokens.size} final=${tokens.size} preview=${tokens.take(12).joinToString(" ")}")
         
         return tokens
     }

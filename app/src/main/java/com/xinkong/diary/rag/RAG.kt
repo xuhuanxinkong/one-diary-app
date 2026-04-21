@@ -45,8 +45,8 @@ object RAG {
     /**
      * 为聊天消息创建索引
      */
-    suspend fun indexMessage(context: Context, message: ChatMessage) {
-        IndexManager.getInstance(context).indexChatMessage(message)
+    suspend fun indexMessage(context: Context, message: ChatMessage, chatFolder: String = "") {
+        IndexManager.getInstance(context).indexChatMessage(message, chatFolder)
     }
     
     /**

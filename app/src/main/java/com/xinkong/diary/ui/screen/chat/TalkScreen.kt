@@ -588,7 +588,7 @@ fun ChatMessageShow(
                 name = if (isUserMessage) userName else aiName,
                 photoUris = photoUris,
                 toolExecutions = tools,
-                reasoningContent = message.reasoningContent,
+                reasoningContent = if (currentAiConfig?.enableDeepThink == true) message.reasoningContent else null,
                 onAvatarClick = {
                     if (!isMultiSelectMode) onAvatarClick(if (isUserMessage) "user" else "assistant", message.aiId)
                 },
@@ -1111,6 +1111,28 @@ fun ChatBubble(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(horizontalAlignment = Alignment.Start) {
+                    val ragEntries = toolExecutions.mapNotNull { item ->
+                        when {
+                            item.startsWith("【记忆库RAG检索结果】") -> {
+                                val body = item.removePrefix("【记忆库RAG检索结果】").trim()
+                                "【RAG检索·笔记】\n$body"
+                            }
+                            item.startsWith("【对话检索结果】") || item.contains("【来源类型】对话历史") -> {
+                                val body = item
+                                    .removePrefix("【对话检索结果】")
+                                    .replace("【来源类型】对话历史\n", "")
+                                    .trim()
+                                "【RAG检索·对话】\n$body"
+                            }
+                            else -> null
+                        }
+                    }
+                    val plainToolEntries = toolExecutions.filter {
+                        !it.startsWith("【记忆库RAG检索结果】") &&
+                            !it.startsWith("【对话检索结果】") &&
+                            !it.contains("【来源类型】对话历史")
+                    }
+
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
                             text = name,
@@ -1135,6 +1157,26 @@ fun ChatBubble(
                             )
                         }
                     }
+
+                    if (ragEntries.isNotEmpty()) {
+                        ExpandableAnim(
+                            title = "RAG检索参考（${ragEntries.size}）",
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                            isExpandedAtStart = false
+                        ) {
+                            Column(modifier = Modifier.padding(start = 8.dp)) {
+                                ragEntries.forEach { item ->
+                                    Text(
+                                        text = item,
+                                        fontSize = 11.sp,
+                                        color = Color.Gray,
+                                        modifier = Modifier.padding(vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // 文字气泡（如果有文字内容）
                     if (content.isNotBlank()) {
                         Box {
@@ -1209,13 +1251,13 @@ fun ChatBubble(
                         }
                     }
 
-                    if (toolExecutions.isNotEmpty()) {
+                    if (plainToolEntries.isNotEmpty()) {
                         ExpandableAnim(
-                            title = "执行了 ${toolExecutions.size} 个工具",
+                            title = "执行了 ${plainToolEntries.size} 个工具",
                             modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                         ) {
                             Column(modifier = Modifier.padding(start = 8.dp)) {
-                                toolExecutions.forEach { tool ->
+                                plainToolEntries.forEach { tool ->
                                     Text(
                                         text = "• $tool",
                                         fontSize = 11.sp,

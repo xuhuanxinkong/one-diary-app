@@ -229,6 +229,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val msgsToInsert = messages.map { it.copy(id = 0, chatId = newChatId) }
             if (msgsToInsert.isNotEmpty()) {
                 chatDao.insertMessages(msgsToInsert)
+                indexChatMessages(newChatId, chatDao.getMessagesOnce(newChatId))
             }
             
             groupMembers.forEach { member ->
@@ -256,6 +257,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             autoConfirmTools = autoConfirmToolsOverride
             applyReplySelection(chatId, selectedAIs)
+            val chat = chatDao.getChatByIdSuspend(chatId) ?: return@launch
             
             // 1. 保存用户消息
             val photoUris = if (imageUriString != null) Json.encodeToString(listOf(imageUriString)) else "[]"
@@ -266,7 +268,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 date = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(Date()),
                 photoUris = photoUris
             )
-            chatDao.insertMessage(userMsg)
+            saveAndIndexMessage(userMsg)
 
             // 2. 轮流调用 AI
             for (config in selectedAIs) {
@@ -284,6 +286,58 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     if (config.enableSetAlarm) {
                         add("create_plan")
                         add("cancel_plan")
+                    }
+                }
+                
+                var ragNotesExec: String? = null
+                var ragChatExec: String? = null
+                val history = chatDao.getMessagesOnce(chatId)
+                if (config.enableReadNotes && history.isNotEmpty()) {
+                    val lastUserMessage = history.lastOrNull { it.role == userRole }?.content ?: ""
+                    if (lastUserMessage.isNotBlank()) {
+                         val contextStr = com.xinkong.diary.rag.RAG.prepareContext(
+                             getApplication(),
+                             lastUserMessage,
+                             boundFolder = config.boundFolder.ifBlank { null },
+                             maxResults = 3
+                         )
+                         if (contextStr.isNotBlank()) {
+                             ragNotesExec = "【记忆库RAG检索结果】\n$contextStr"
+                         }
+
+                         val keywordTokens = lastUserMessage
+                             .split(Regex("[\\s,，。！？!?；;、]+"))
+                             .map { it.trim() }
+                             .filter { it.length >= 2 }
+                             .take(6)
+                         val historyForSearch = history.dropLast(1)
+                         val matchedIndexes = historyForSearch
+                             .mapIndexedNotNull { index, msg ->
+                                 val isMatch = msg.content.isNotBlank() &&
+                                     (keywordTokens.any { token -> msg.content.contains(token, ignoreCase = true) } ||
+                                         msg.content.contains(lastUserMessage.take(12), ignoreCase = true))
+                                 if (isMatch) index else null
+                             }
+                         val contextIndexes = linkedSetOf<Int>()
+                         matchedIndexes.forEach { index ->
+                             val start = kotlin.math.max(0, index - 2)
+                             val end = kotlin.math.min(historyForSearch.lastIndex, index + 2)
+                             for (contextIndex in start..end) {
+                                 contextIndexes.add(contextIndex)
+                             }
+                         }
+                         val matchedHistory = contextIndexes.sorted().map { historyForSearch[it] }
+                         if (matchedHistory.isNotEmpty()) {
+                             ragChatExec = buildString {
+                                 append("【对话检索结果】\n")
+                                 append("【来源类型】对话历史\n")
+                                 append(
+                                     matchedHistory.joinToString("\n\n") { msg ->
+                                         "(${msg.date}) ${msg.role}: ${msg.content}"
+                                     }
+                                 )
+                             }
+                         }
                     }
                 }
 
@@ -307,8 +361,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 val result = requestAiResponse(config, messages, enabledTools)
                 
+                val initialExecutedTools = mutableListOf<String>()
+                if (ragNotesExec != null) {
+                    initialExecutedTools.add(ragNotesExec)
+                }
+                if (ragChatExec != null) {
+                    initialExecutedTools.add(ragChatExec)
+                }
+                
                 // 处理并保证入库完成，再走下一个循环
-                handleAiResponse(chatId, result, messages, enabledTools, config = config)
+                handleAiResponse(chatId, result, messages, enabledTools, config = config, executedTools = initialExecutedTools)
                 _currentTypingAi.value = null
             }
             _aiState.value = AiState.Idle
@@ -373,7 +435,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     toolExecutions = Json.encodeToString(executedTools),
                     aiId = aiConfig.id
                 )
-                chatDao.insertMessage(aiMsg)
+                saveAndIndexMessage(aiMsg)
                 return Result.success(displayContent)
             }
 
@@ -1286,7 +1348,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     aiId = config?.id,
                                     reasoningContent = response.reasoningContent
                                 )
-                                chatDao.insertMessage(aiMsg)
+                                saveAndIndexMessage(aiMsg)
                             }
     
                             val aiConfig = chatDao.getAiConfigOnce(chatId).firstOrNull() ?: AiChatConfig(chatId = chatId)
@@ -1317,7 +1379,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             aiId = config?.id,
                             reasoningContent = response.reasoningContent
                         )
-                        chatDao.insertMessage(aiMsg)
+                        saveAndIndexMessage(aiMsg)
                         _aiState.value = AiState.Success(result = displayContent)
                     }
                 }
@@ -1332,7 +1394,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     toolExecutions = toolExecutionsStr,
                     aiId = config?.id
                 )
-                chatDao.insertMessage(errMsg)
+                saveAndIndexMessage(errMsg)
                 _aiState.value = AiState.Error(message = error.message ?: "AI回复失败")
             }
         )
@@ -1814,6 +1876,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 replyOrder = if (index != -1) index + 1 else 0
             )
             chatDao.updateAiConfig(updatedConfig)
+        }
+    }
+
+    private suspend fun saveAndIndexMessage(message: ChatMessage) {
+        val insertedId = chatDao.insertMessage(message)
+        val persistedMessage = message.copy(id = insertedId)
+        try {
+            val chatFolder = chatDao.getChatByIdSuspend(persistedMessage.chatId)?.tagFolder.orEmpty()
+            com.xinkong.diary.rag.RAG.indexMessage(getApplication(), persistedMessage, chatFolder)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private suspend fun indexChatMessages(chatId: Long, messages: List<ChatMessage>) {
+        try {
+            val chatFolder = chatDao.getChatByIdSuspend(chatId)?.tagFolder.orEmpty()
+            for (message in messages) {
+                com.xinkong.diary.rag.RAG.indexMessage(getApplication(), message, chatFolder)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
