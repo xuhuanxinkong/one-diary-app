@@ -188,13 +188,21 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                         val newFolder = targetFolder.ifBlank { diary.tagFolder }
                         val newDiary = Diary(
                             title = diary.title,
+                            text = diary.text,
                             content = diary.content,
                             date = diary.date,
                             tag = newTag,
                             tagFolder = newFolder,
                             type = diary.type
                         )
-                        diaryDao.insert(newDiary)
+                        val newId = diaryDao.insert(newDiary)
+
+                        try {
+                            val insertedDiary = diaryDao.getDiaryById(newId) ?: newDiary.copy(id = newId)
+                            com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
 
                         ensureTagExists(
                             type = diary.type,
@@ -221,12 +229,19 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
 
                     val newDiary = Diary(
                         title = "导入的笔记",
+                        text = formattedJson,
                         content = formattedJson,
                         date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                         tag = newTag,
                         tagFolder = newFolder
                     )
-                    diaryDao.insert(newDiary)
+                    val newId = diaryDao.insert(newDiary)
+                    try {
+                        val insertedDiary = diaryDao.getDiaryById(newId) ?: newDiary.copy(id = newId)
+                        com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                     tagDao.insertDiaryTagIgnore(buildDiaryTag(newTag, newFolder))
                     callback(Result.success(1))
                 }

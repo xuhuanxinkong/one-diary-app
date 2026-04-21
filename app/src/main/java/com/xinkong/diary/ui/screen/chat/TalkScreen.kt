@@ -1115,23 +1115,25 @@ fun ChatBubble(
                         when {
                             item.startsWith("【记忆库RAG检索结果】") -> {
                                 val body = item.removePrefix("【记忆库RAG检索结果】").trim()
-                                "【RAG检索·笔记】\n$body"
+                                if (body.isNotBlank()) "【RAG检索·笔记】\n$body" else null
                             }
                             item.startsWith("【对话检索结果】") || item.contains("【来源类型】对话历史") -> {
                                 val body = item
                                     .removePrefix("【对话检索结果】")
                                     .replace("【来源类型】对话历史\n", "")
                                     .trim()
-                                "【RAG检索·对话】\n$body"
+                                if (body.isNotBlank()) "【RAG检索·对话】\n$body" else null
                             }
                             else -> null
                         }
                     }
                     val plainToolEntries = toolExecutions.filter {
+                        it.isNotBlank() &&
                         !it.startsWith("【记忆库RAG检索结果】") &&
                             !it.startsWith("【对话检索结果】") &&
                             !it.contains("【来源类型】对话历史")
                     }
+                    val displayContent = content.trimEnd()
 
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
@@ -1178,10 +1180,10 @@ fun ChatBubble(
                     }
 
                     // 文字气泡（如果有文字内容）
-                    if (content.isNotBlank()) {
+                    if (displayContent.isNotBlank()) {
                         Box {
-                            if (content.startsWith("[语音通话记录]")) {
-                                val lines = content.split("\n", limit = 3)
+                            if (displayContent.startsWith("[语音通话记录]")) {
+                                val lines = displayContent.split("\n", limit = 3)
                                 val duration = lines.getOrNull(1) ?: "未知时长"
                                 val textRecord = lines.getOrNull(2) ?: ""
                                 CallRecordMessageBubble(
@@ -1230,7 +1232,7 @@ fun ChatBubble(
                                             }
                                         }
                                         ExpandableMessageContent(
-                                            content = content,
+                                            content = displayContent,
                                             textColor = Color.Black,
                                             isAnimating = isAnimating,
                                             isSelectable = allowSelection,
@@ -1244,7 +1246,7 @@ fun ChatBubble(
                                 onDismissRequest = { showMenu = false },
                                 onDelete = onDelete,
                                 onQuote = onQuote,
-                                onCopy = { clipboardManager.setText(AnnotatedString(content)) },
+                                onCopy = { clipboardManager.setText(AnnotatedString(displayContent)) },
                                 onMultiSelect = onMultiSelect,
                                 onReadAloud = onReadAloud
                             )

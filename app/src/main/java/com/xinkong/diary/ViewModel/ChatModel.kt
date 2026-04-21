@@ -272,7 +272,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             // 2. 轮流调用 AI
             for (config in selectedAIs) {
-                _aiState.value = AiState.Loading
                 _currentTypingAi.value = config
 
                 val enabledTools = mutableSetOf<String>().apply {
@@ -358,6 +357,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         messages[userMsgIndex] = current
                     }
                 }
+
+                _aiState.value = AiState.Loading
 
                 val result = requestAiResponse(config, messages, enabledTools)
                 
@@ -1909,7 +1910,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             // 轮流回复：等待上一个 AI 回复完成后再请求下一个
             for (config in selectedAIs) {
-                    _aiState.value = AiState.Loading
                     _currentTypingAi.value = config
 
                     val enabledTools = mutableSetOf<String>().apply {
@@ -1925,6 +1925,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     val messages = buildContextMessages(chatId, config, enabledTools)
+                        _aiState.value = AiState.Loading
                     val result = requestAiResponse(config, messages, enabledTools)
                     // TODO: 若需要等待工具调用完全结束，此处可能要调整为观察状态
                     handleAiResponse(chatId, result, messages, enabledTools, config = config)
