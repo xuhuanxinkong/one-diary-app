@@ -33,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderColors
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -155,7 +156,11 @@ fun SettingScreen(
                             },
                             valueRange = 1f..30f,
                             steps = 28,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = androidx.compose.material3.SliderDefaults.colors(
+                                thumbColor = MaterialTheme.diaryColors.primary,
+                                activeTrackColor = MaterialTheme.diaryColors.primary
+                            )
                         )
                         Text(
                             "AI将记忆最近${historyRounds}轮对话内容（建议6-15轮）",

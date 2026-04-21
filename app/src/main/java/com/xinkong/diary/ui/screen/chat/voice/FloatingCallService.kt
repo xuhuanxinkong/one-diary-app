@@ -46,6 +46,9 @@ class FloatingCallService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var breathView: View? = null
 
+    private lateinit var screenCaptureManager: ScreenCaptureManager
+    private var isScreenCaptureMode = false
+
     companion object {
         private const val CHANNEL_ID = "voice_call_channel"
         private const val NOTIFICATION_ID = 101
@@ -86,15 +89,91 @@ class FloatingCallService : Service() {
     override fun onCreate() {
         super.onCreate()
         isServiceRunning = true
+        screenCaptureManager = ScreenCaptureManager(this)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
         showFloatingWindow()
         observeCallManagerState()
+        // Keep listening active when entering floating mode; users should not need an extra tap.
+        CallManager.startCall()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "com.xinkong.diary.ACTION_START_SCREEN_CAPTURE") {
+            val resultCode = intent.getIntExtra("RESULT_CODE", android.app.Activity.RESULT_CANCELED)
+            val data = intent.getParcelableExtra("DATA") as? Intent
+            if (resultCode == android.app.Activity.RESULT_OK && data != null) {
+                screenCaptureManager.initProjection(resultCode, data)
+                isScreenCaptureMode = true
+                CallManager.setVoiceImageProvider { onReady ->
+                    captureScreenshotPayload(onReady)
+                }
+                android.widget.Toast.makeText(this, "屏幕读取已联通，发文字时将自动附上截图", android.widget.Toast.LENGTH_LONG).show()
+            } else {
+                isScreenCaptureMode = false
+            }
+        }
         return START_NOT_STICKY
     }
+
+    private fun captureScreenshotPayload(onReady: (String?, String?) -> Unit) {
+        val dm = resources.displayMetrics
+        val width = dm.widthPixels
+        val height = dm.heightPixels
+        val density = dm.densityDpi
+
+        screenCaptureManager.captureSingleFrame(width, height, density) { bitmap ->
+            serviceScope.launch(Dispatchers.IO) {
+                val base64: String?
+                val imageUriString: String?
+                if (bitmap != null) {
+                    val maxSide = 2048
+                    val processedBitmap = if (bitmap.width > maxSide || bitmap.height > maxSide) {
+                        val ratio = minOf(maxSide.toFloat() / bitmap.width, maxSide.toFloat() / bitmap.height)
+                        val targetW = (bitmap.width * ratio).toInt().coerceAtLeast(1)
+                        val targetH = (bitmap.height * ratio).toInt().coerceAtLeast(1)
+                        android.graphics.Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
+                    } else {
+                        bitmap
+                    }
+
+                    val imagesDir = java.io.File(filesDir, "chat_images")
+                    if (!imagesDir.exists()) imagesDir.mkdirs()
+                    val imageFile = java.io.File(imagesDir, "img_${System.currentTimeMillis()}.jpg")
+
+                    java.io.FileOutputStream(imageFile).use { output ->
+                        processedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, output)
+                    }
+
+                    val bytes = java.io.ByteArrayOutputStream().use { baos ->
+                        processedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, baos)
+                        baos.toByteArray()
+                    }
+
+                    base64 = if (bytes.isNotEmpty()) {
+                        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    } else null
+                    imageUriString = android.net.Uri.fromFile(imageFile).toString()
+                    android.util.Log.d(
+                        "FloatingCallService",
+                        "screenshot prepared: ${processedBitmap.width}x${processedBitmap.height}, bytes=${bytes.size}, base64Len=${base64?.length ?: 0}"
+                    )
+
+                    if (processedBitmap !== bitmap) {
+                        processedBitmap.recycle()
+                    }
+                } else {
+                    base64 = null
+                    imageUriString = null
+                }
+
+                launch(Dispatchers.Main) {
+                    onReady(base64, imageUriString)
+                }
+            }
+        }
+    }
+
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -182,10 +261,11 @@ class FloatingCallService : Service() {
         breathView = View(this).apply {
             val breathBg = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#804CAF50"))
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(2), Color.TRANSPARENT)
             }
             background = breathBg
-            layoutParams = FrameLayout.LayoutParams(dp(60), dp(60), Gravity.CENTER)
+            layoutParams = FrameLayout.LayoutParams(dp(54), dp(54), Gravity.CENTER)
             scaleX = 0f
             scaleY = 0f
         }
@@ -272,9 +352,9 @@ class FloatingCallService : Service() {
             }
         }
         
-        val voiceBtn = createOptBtn("🎤", "语音")
-        val textBtn = createOptBtn("⌨️", "打字")
-        val screenBtn = createOptBtn("📷", "截图")
+        val voiceBtn = createOptBtn("●", "语音")
+        val textBtn = createOptBtn("○", "打字")
+        val screenBtn = createOptBtn("○", "截图")
         val returnBtn = createOptBtn("🏠", "返回")
 
         optionsLayout.addView(voiceBtn)
@@ -413,6 +493,8 @@ class FloatingCallService : Service() {
         
         textBtn.setOnClickListener {
             inputLayout.isVisible = !inputLayout.isVisible
+            val txtIcon = textBtn.getChildAt(0) as TextView
+            txtIcon.text = if (inputLayout.isVisible) "●" else "○"
             if (inputLayout.isVisible) {
                 layoutParams?.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
@@ -426,16 +508,26 @@ class FloatingCallService : Service() {
         }
         
         screenBtn.setOnClickListener {
-            android.widget.Toast.makeText(this, "正在返回并准备截图...", android.widget.Toast.LENGTH_SHORT).show()
-            // 发送带截图动作的Intent，交由MainActivity处理真实截图
-            val intent = Intent(this@FloatingCallService, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                action = "RESUME_VOICE_CALL_AND_SCREENSHOT"
-                putExtra("chatId", currentChatId)
-                putExtra("aiId", currentAiId)
-                putExtra("isGroup", currentIsGroup)
+            if (!isScreenCaptureMode) {
+                android.widget.Toast.makeText(this, "请在跳转的界面允许截屏权限...", android.widget.Toast.LENGTH_SHORT).show()
+                val scnIcon = screenBtn.getChildAt(0) as TextView
+                scnIcon.text = "●"
+                val intent = Intent(this@FloatingCallService, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    action = "com.xinkong.diary.RESUME_VOICE_CALL_AND_SCREENSHOT"
+                    putExtra("chatId", currentChatId)
+                    putExtra("aiId", currentAiId)
+                    putExtra("isGroup", currentIsGroup)
+                }
+                startActivity(intent)
+            } else {
+                isScreenCaptureMode = false
+                val scnIcon = screenBtn.getChildAt(0) as TextView
+                scnIcon.text = "○"
+                CallManager.setVoiceImageProvider(null)
+                screenCaptureManager.stopProjection()
+                android.widget.Toast.makeText(this, "已关闭截屏发送功能", android.widget.Toast.LENGTH_SHORT).show()
             }
-            startActivity(intent)
         }
 
         returnBtn.setOnClickListener {
@@ -452,21 +544,32 @@ class FloatingCallService : Service() {
         sendBtn.setOnClickListener {
             val txt = editText.text.toString().trim()
             if (txt.isNotEmpty()) {
-                CallManager.sendManualText(txt)
-                editText.setText("")
                 inputLayout.isVisible = false
-                
                 layoutParams?.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                         WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 windowManager.updateViewLayout(floatView, layoutParams)
+                
+                if (isScreenCaptureMode) {
+                    android.widget.Toast.makeText(this@FloatingCallService, "正在抓取屏幕...", android.widget.Toast.LENGTH_SHORT).show()
+                    captureScreenshotPayload { base64, imageUriString ->
+                        if (base64 == null) {
+                            android.widget.Toast.makeText(this@FloatingCallService, "截图获取失败，本次仅发送文字", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        CallManager.sendManualText(txt, base64, imageUriString)
+                    }
+                } else {
+                    CallManager.sendManualText(txt, null, null)
+                }
+                
+                editText.setText("")
             }
         }
         
         serviceScope.launch {
             CallManager.isPaused.collectLatest { paused ->
                 val iconTxt = voiceBtn.getChildAt(0) as TextView
-                iconTxt.text = if (paused) "⏸️" else "🎤"
+                iconTxt.text = if (paused) "○" else "●"
                 if (paused) {
                     breathView?.scaleX = 0f
                     breathView?.scaleY = 0f
@@ -503,12 +606,12 @@ class FloatingCallService : Service() {
         serviceScope.launch {
             CallManager.rmsValue.collectLatest { rms ->
                 if (!CallManager.isPaused.value && CallManager.callState.value == CallState.Listening) {
-                    val scale = 0.5f + (max(0f, rms) / 20f)
-                    val targetScale = scale.coerceIn(0.5f, 1.2f)
+                    val scale = 0.8f + (max(0f, rms) / 40f)
+                    val targetScale = scale.coerceIn(1.0f, 1.15f)
                     breathView?.animate()?.scaleX(targetScale)?.scaleY(targetScale)?.setDuration(100)?.start()
                 } else if (CallManager.callState.value == CallState.Speaking) {
-                    val scale = 0.8f + (max(0f, rms) / 10f)
-                    val targetScale = scale.coerceIn(0.7f, 1.3f)
+                    val scale = 0.8f + (max(0f, rms) / 20f)
+                    val targetScale = scale.coerceIn(0.9f, 1.1f)
                     breathView?.animate()?.scaleX(targetScale)?.scaleY(targetScale)?.setDuration(100)?.start()
                 } else {
                     breathView?.scaleX = 0f
@@ -528,9 +631,28 @@ class FloatingCallService : Service() {
         // Observer hook implemented in flow collect blocks inside showFloatingWindow.
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        try {
+            screenCaptureManager.stopProjection()
+        } catch (_: Exception) {}
+        stopSelf()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         isServiceRunning = false
+        CallManager.setVoiceImageProvider(null)
+        try {
+            screenCaptureManager.stopProjection()
+        } catch (_: Exception) {}
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            stopForeground(true)
+        }
+        
         serviceScope.cancel()
         if (floatView != null) {
             windowManager.removeView(floatView)

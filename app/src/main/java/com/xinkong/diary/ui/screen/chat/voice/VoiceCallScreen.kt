@@ -1,5 +1,6 @@
 package com.xinkong.diary.ui.screen.chat.voice
 
+import androidx.activity.compose.BackHandler
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
@@ -63,6 +64,10 @@ fun VoiceCallScreen(
     }
 
     val isPaused by viewModel.isPaused.collectAsState()
+
+    BackHandler {
+        onMinimizeClick()
+    }
 
     // 主体背景：深色沉浸式
     Box(

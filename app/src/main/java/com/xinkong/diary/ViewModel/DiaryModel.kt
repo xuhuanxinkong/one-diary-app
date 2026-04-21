@@ -58,11 +58,11 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                 tagFolder = tagFolder,
                 type = type
             )
-            diaryDao.insert(diary)
+            val newId = diaryDao.insert(diary)
             
             // 异步创建 RAG 索引
             try {
-                val insertedDiary = diaryDao.getDiaryById(diary.id) ?: diary
+                val insertedDiary = diaryDao.getDiaryById(newId) ?: diary.copy(id = newId)
                 com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
             } catch (e: Exception) {
                 // 索引失败不影响主流程
@@ -86,6 +86,24 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+
+    // 复制日记
+    fun copyDiary(diary: Diary, newTag: String, newTagFolder: String, onComplete: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            val cloned = diary.copy(id = 0, tag = newTag, tagFolder = newTagFolder)
+            val newId = diaryDao.insert(cloned)
+            
+            // 异步创建 RAG 索引
+            try {
+                val insertedDiary = diaryDao.getDiaryById(newId) ?: cloned.copy(id = newId)
+                com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            
+            onComplete?.invoke()
         }
     }
     // 更新

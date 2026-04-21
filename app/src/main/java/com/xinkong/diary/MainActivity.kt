@@ -1,10 +1,17 @@
 package com.xinkong.diary
 
 import android.content.Intent
+import android.content.Context
+import android.media.projection.MediaProjectionManager
+import android.app.Activity
+import android.os.Build
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -19,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.entryProvider
@@ -43,26 +51,104 @@ import com.xinkong.diary.ui.theme.DiarydTheme
 
 //666
 class MainActivity : ComponentActivity() {
+    private lateinit var screenCaptureLauncher: ActivityResultLauncher<Intent>
+    private var pendingScreenshotRequest = false
+    private var isRequestingScreenCapture = false
+    private val currentIntentState = mutableStateOf<Intent?>(null)
+
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        screenCaptureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            isRequestingScreenCapture = false
+            if (result.resultCode == Activity.RESULT_OK) {
+                val data = result.data
+                if (data != null) {
+                    val serviceIntent = Intent(this, com.xinkong.diary.ui.screen.chat.voice.FloatingCallService::class.java).apply {
+                        action = "com.xinkong.diary.ACTION_START_SCREEN_CAPTURE"
+                        putExtra("RESULT_CODE", result.resultCode)
+                        putExtra("DATA", data)
+                    }
+                    startForegroundService(serviceIntent)
+                }
+            } else {
+                pendingScreenshotRequest = false
+            }
+        }
+        
         enableEdgeToEdge()
         setContent {
             DiarydTheme {
-                DiaryApp()
+                DiaryApp(currentIntentState.value)
             }
+        }
+        
+        intent?.let { handleIntent(it) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (pendingScreenshotRequest) {
+            requestScreenCapturePermission()
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
+        val action = intent.action
+        if (action == "RESUME_VOICE_CALL_AND_SCREENSHOT" || action == "com.xinkong.diary.RESUME_VOICE_CALL_AND_SCREENSHOT") {
+            pendingScreenshotRequest = true
+            currentIntentState.value = intent
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                requestScreenCapturePermission()
+            }
+            // Clear the action so the framework doesn't keep resending exactly the same intent on recreate
+            intent.action = null
+        } else if (action == "RESUME_VOICE_CALL") {
+            currentIntentState.value = intent
+            intent.action = null
+        }
+    }
+
+    private fun requestScreenCapturePermission() {
+        if (isRequestingScreenCapture) return
+        pendingScreenshotRequest = false
+        isRequestingScreenCapture = true
+        val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        window.decorView.post {
+            screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+        }
+    }
 }
 
 @Composable
-fun DiaryApp() {
+fun DiaryApp(incomingIntent: Intent? = null) {
     val navViewModel: NavigationViewModel = viewModel()
     val diaryViewModel: DiaryViewModel = viewModel()
     val chatViewModel: ChatViewModel = viewModel()
     val alarmViewModel: AlarmViewModel = viewModel()
     val backStack = navViewModel.backStack
 
+    LaunchedEffect(incomingIntent) {
+        incomingIntent?.let { intent ->
+            // Resume voice call screen if data is present
+            val chatId = intent.getLongExtra("chatId", -1L)
+            val aiId = intent.getLongExtra("aiId", -1L)
+            val isGroup = intent.getBooleanExtra("isGroup", false)
+            
+            if (chatId != -1L) {
+                val targetRoute = Route.VoiceCall(chatId, aiId, isGroup)
+                if (navViewModel.currentRoute != targetRoute) {
+                    navViewModel.navigateTo(targetRoute)
+                }
+            }
+        }
+    }
 
     NavDisplay(
         backStack = backStack,
@@ -210,6 +296,11 @@ fun DiaryApp() {
                     GroupSettingScreen(
                         chat = it,
                         onBack = { navViewModel.navigateBack() },
+                        onDeleteGroupChat = {
+                            chatViewModel.deleteChat(it)
+                            navViewModel.navigateBack()
+                            navViewModel.navigateBack()
+                        },
                         onTitleChange = { newTitle ->
                             chatViewModel.updateChat(it.copy(title = newTitle))
                         },

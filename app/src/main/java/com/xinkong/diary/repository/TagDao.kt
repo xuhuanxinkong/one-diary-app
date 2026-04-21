@@ -19,6 +19,9 @@ interface TagDao {
     @Query("SELECT * FROM tag_folders")
     fun getAllTagFolders(): Flow<List<TagFolder>>
 
+    @Query("SELECT * FROM tag_folders")
+    suspend fun getAllTagFoldersOnce(): List<TagFolder>
+
     @Query("SELECT * FROM tag_folders WHERE type = :type")
     fun getTagFoldersByType(type: String): Flow<List<TagFolder>>
 

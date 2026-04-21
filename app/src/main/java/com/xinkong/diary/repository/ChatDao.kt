@@ -31,6 +31,9 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE id = :chatId LIMIT 1")
     suspend fun getChatByIdSuspend(chatId: Long): Chat?
 
+    @Query("SELECT * FROM chats WHERE tagFolder = :folder ORDER BY id DESC")
+    suspend fun getChatsByFolder(folder: String): List<Chat>
+
     @Query("SELECT * FROM chats WHERE tag =:tag")
     fun getChatByTag(tag: String): Flow<List<Chat>>
 
@@ -79,6 +82,9 @@ interface ChatDao {
     @Query("SELECT * FROM ai_chat_configs")
     fun getAllAiConfigs(): Flow<List<AiChatConfig>>
 
+    @Query("SELECT * FROM ai_chat_configs")
+    suspend fun getAllAiConfigsOnce(): List<AiChatConfig>
+
     @Query("SELECT * FROM ai_chat_configs WHERE id = :aiId LIMIT 1")
     suspend fun getAiConfigById(aiId: Long): AiChatConfig?
 
@@ -108,10 +114,10 @@ interface ChatDao {
     @Delete
     suspend fun deleteGroupChatMember(member: GroupChatMember)
     
-    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY replyOrder ASC")
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY id ASC")
     fun getGroupChatMembers(groupChatId: Long): Flow<List<GroupChatMember>>
     
-    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY replyOrder ASC")
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY id ASC")
     suspend fun getGroupChatMembersOnce(groupChatId: Long): List<GroupChatMember>
     
     @Query("DELETE FROM group_chat_members WHERE groupChatId = :groupChatId AND sourceAiId = :sourceAiId")

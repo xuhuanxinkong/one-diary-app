@@ -161,12 +161,13 @@ fun TalkScreen(
     // 群聊时使用成员关系中的配置，单聊时使用直接配置
     val aiConfigs = if (isGroupChat) {
         // 将成员的 isEnabled 和 replyOrder 与源AI配置合并
-        groupMembers.filter { it.isEnabled }.mapNotNull { member ->
+        // NOTE: 不按 replyOrder 重排显示，保留源列表顺序（避免用户认为列表未改变）
+        groupMembers.mapNotNull { member ->
             sourceAiConfigs.find { it.id == member.sourceAiId }?.copy(
                 replyOrder = member.replyOrder,
                 isEnabled = member.isEnabled
             )
-        }.sortedBy { it.replyOrder }
+        }
     } else {
         aiConfigsFromChat
     }
@@ -1725,11 +1726,12 @@ fun AiReplyBottomSheetContent(
     val selectedAIs = remember { mutableStateListOf<AiChatConfig>() }
 
     LaunchedEffect(aiConfigs) {
-        if (selectedAIs.isEmpty()) {
-            val enabled = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
-            selectedAIs.addAll(enabled)
-        }
+        selectedAIs.clear()
+        val enabled = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
+        selectedAIs.addAll(enabled)
     }
+
+    // 选择顺序即为回复顺序：点击添加到末尾，点击已选则移除
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(16.dp)
@@ -1742,7 +1744,7 @@ fun AiReplyBottomSheetContent(
             items(aiConfigs) { config ->
                 val index = selectedAIs.indexOf(config)
                 val isSelected = index != -1
-                
+
                 Row(
                     modifier = Modifier.fillMaxWidth().clickable {
                         if (isSelected) {
@@ -1761,10 +1763,10 @@ fun AiReplyBottomSheetContent(
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(text = config.name, modifier = Modifier.weight(1f))
-                    
+
                     Box(
                         modifier = Modifier
-                            .size(24.dp)
+                            .size(28.dp)
                             .border(1.dp, if (isSelected) Color(0xFF07C160) else Color.Gray, CircleShape)
                             .background(if (isSelected) Color(0xFF07C160) else Color.Transparent, CircleShape),
                         contentAlignment = Alignment.Center
@@ -1773,10 +1775,12 @@ fun AiReplyBottomSheetContent(
                             Text((index + 1).toString(), color = Color.White, fontSize = 12.sp)
                         }
                     }
+
+                    // 只显示序号（按用户选择顺序）
                 }
             }
         }
-        
+
         // 底部按钮
         Row(
             modifier = Modifier.fillMaxWidth(),

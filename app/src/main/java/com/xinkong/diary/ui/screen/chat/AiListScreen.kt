@@ -255,7 +255,7 @@ fun AiListScreen(
         val availableAis = remember(singleAiChats, aiList) {
             singleAiChats.mapNotNull { chat ->
                 aiList.firstOrNull { it.chatId == chat.id }
-            }.distinctBy { it.name } // 按名称去重，避免同名AI
+            }
         }
         
         CreateGroupChatDialog(
@@ -445,7 +445,7 @@ fun AiChatCard(
                 // AI名称
                 Text(
                     text = if (isGroupChat) {
-                        "${aiConfig?.name ?: "群聊"} (${aiCount}人)"
+                        aiConfig?.name ?: "群聊"
                     } else {
                         aiConfig?.name ?: "AI助手"
                     },
@@ -460,7 +460,7 @@ fun AiChatCard(
                 // 日期 | 消息数
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "$formattedDate | ${chat.unreadCount}",
+                        text = "$formattedDate | 未读消息：${chat.unreadCount}",
                         fontSize = 13.sp,
                         color = Color.Gray
                     )
@@ -685,6 +685,7 @@ fun CreateAiDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
-        }
+        },
+        containerColor = Color.White
     )
 }

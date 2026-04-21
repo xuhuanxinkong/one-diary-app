@@ -1,5 +1,6 @@
 package com.xinkong.diary.ui.screen.home
 
+import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -94,7 +95,8 @@ data class TagUI(
 data class TagListDisplayConfig(
     val showManageAction: Boolean = true,
     val showAddAction: Boolean = true,
-    val enableSelection: Boolean = true
+    val enableSelection: Boolean = true,
+    val filterByCurrentFolder: Boolean = true
 )
 
 private fun TagDisplayItem.toTagUi(): TagUI {
@@ -160,9 +162,15 @@ fun TagList(
     val diaryModel: DiaryViewModel = viewModel()
     val currentFolder by diaryModel.currentFolder.collectAsStateWithLifecycle()
 
-    val groupedTags = remember(groupedResult, currentFolder) {
-        groupedResult.groupedTags.filterKeys { it == currentFolder }.mapValues { (_, items) ->
-            items.map { it.toTagUi() }
+    val groupedTags = remember(groupedResult, currentFolder, displayConfig.filterByCurrentFolder) {
+        if (displayConfig.filterByCurrentFolder) {
+            groupedResult.groupedTags.filterKeys { it == currentFolder }.mapValues { (_, items) ->
+                items.map { it.toTagUi() }
+            }
+        } else {
+            groupedResult.groupedTags.mapValues { (_, items) ->
+                items.map { it.toTagUi() }
+            }
         }
     }
 
@@ -175,15 +183,15 @@ fun TagList(
             if (selectedDiaries.isNotEmpty()) {
                 diaryModel.exportToJson(selectedDiaries, uri, context) { result ->
                     result.onSuccess {
-                        android.widget.Toast.makeText(context, "导出成功", android.widget.Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "导出成功", Toast.LENGTH_SHORT).show()
                         isSelectionMode = false
                         selectedTags = emptySet()
                     }.onFailure { e ->
-                        android.widget.Toast.makeText(context, "导出失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
             } else {
-                android.widget.Toast.makeText(context, "没有可导出的日记", android.widget.Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "没有可导出的日记", Toast.LENGTH_SHORT).show()
             }
         }
     }

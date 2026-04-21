@@ -178,23 +178,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteChat(chat: Chat) {
         viewModelScope.launch {
             try {
-                // 获取该Chat下所有AI配置，删除它们绑定的文件夹
+                // 获取该Chat下所有AI配置（要在删除前获取，否则级联删除后为空）
                 val aiConfigs = chatDao.getAiConfigOnce(chat.id)
+
+                // 删除Chat（级联删除会自动删除关联的AI配置和消息）
+                chatDao.deleteChat(chat)
+
+                // 检查解绑文件夹
+                val allRemainingAis = chatDao.getAllAiConfigsOnce()
                 for (config in aiConfigs) {
                     if (config.boundFolder.isNotBlank()) {
-                        // 查找并删除AI绑定的文件夹
-                        val folders = tagDao.getAllTagFolders().first()
-                        val folderToDelete = folders.find { 
-                            it.name == config.boundFolder && it.isAiBound 
+                        val stillBound = allRemainingAis.any { 
+                            it.boundFolder == config.boundFolder 
                         }
-                        if (folderToDelete != null) {
-                            // 同步解绑而不是删除文件夹
-                            tagDao.insertTagFolder(folderToDelete.copy(isAiBound = false))
+                        if (!stillBound) {
+                            val folders = tagDao.getAllTagFoldersOnce()
+                            val folderToDelete = folders.find { 
+                                it.name == config.boundFolder && it.isAiBound 
+                            }
+                            if (folderToDelete != null) {
+                                // 同步解绑而不是删除文件夹
+                                tagDao.insertTagFolder(folderToDelete.copy(isAiBound = false))
+                            }
                         }
                     }
                 }
-                // 删除Chat（级联删除会自动删除关联的AI配置和消息）
-                chatDao.deleteChat(chat)
             } catch (e: Exception) {
                 e.printStackTrace()
                 // 即使文件夹删除失败，也尝试删除Chat
@@ -205,6 +213,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateChat(chat: Chat) {
         viewModelScope.launch { chatDao.updateChat(chat) }
+    }
+
+    fun copyChat(chat: Chat, newTag: String) {
+        viewModelScope.launch {
+            val newChatId = chatDao.insertChat(chat.copy(id = 0, tag = newTag))
+            val aiConfigs = chatDao.getAiConfigOnce(chat.id)
+            val userConfig = chatDao.getUserConfigOnce(chat.id)
+            val messages = chatDao.getMessagesOnce(chat.id)
+            val groupMembers = chatDao.getGroupChatMembersOnce(chat.id)
+            
+            aiConfigs.forEach { chatDao.insertAiConfig(it.copy(id = 0, chatId = newChatId)) }
+            userConfig?.let { chatDao.insertUserConfig(it.copy(id = 0, chatId = newChatId)) }
+            
+            val msgsToInsert = messages.map { it.copy(id = 0, chatId = newChatId) }
+            if (msgsToInsert.isNotEmpty()) {
+                chatDao.insertMessages(msgsToInsert)
+            }
+            
+            groupMembers.forEach { member ->
+                chatDao.insertGroupChatMember(member.copy(id = 0, groupChatId = newChatId))
+            }
+        }
     }
 
     fun findChat(chatId: Long): Flow<Chat> = chatDao.findChatById(chatId)
@@ -225,7 +255,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (selectedAIs.isEmpty()) return
         viewModelScope.launch {
             autoConfirmTools = autoConfirmToolsOverride
-            saveReplySelection(chatId, selectedAIs)
+            applyReplySelection(chatId, selectedAIs)
             
             // 1. 保存用户消息
             val photoUris = if (imageUriString != null) Json.encodeToString(listOf(imageUriString)) else "[]"
@@ -261,7 +291,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val messages = buildContextMessages(chatId, config, enabledTools).toMutableList()
                 
                 // 若携带图片，替换最近一条用户消息为多模态 content（text + image_url）
-                if (imageBase64 != null && config.enableImageSupport && messages.isNotEmpty()) {
+                if (imageBase64 != null && messages.isNotEmpty()) {
                     val userMsgIndex = messages.indexOfLast { it["role"] == userRole }
                     if (userMsgIndex >= 0) {
                         val current = messages[userMsgIndex].toMutableMap()
@@ -375,7 +405,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteAiConfig(config: AiChatConfig) {
-        viewModelScope.launch { chatDao.deleteAiConfig(config) }
+        // Fallback to the safe variant to ensure folder unbinding is handled
+        deleteAiConfigWithFolder(config)
     }
     
     /**
@@ -395,12 +426,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
             if (config.boundFolder.isBlank()) return@launch
 
-            val stillBound = chatDao.getAllAiConfigs().first().any {
+            val stillBound = chatDao.getAllAiConfigsOnce().any {
                 it.boundFolder == config.boundFolder
             }
             if (stillBound) return@launch
 
-            val folders = tagDao.getAllTagFolders().first()
+            val folders = tagDao.getAllTagFoldersOnce()
             folders
                 .filter { it.name == config.boundFolder && it.isAiBound }
                 .forEach { folder ->
@@ -529,7 +560,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun getGroupChatSourceAiConfigs(groupChatId: Long): Flow<List<AiChatConfig>> {
         return chatDao.getGroupChatMembers(groupChatId).map { members ->
-            members.filter { it.isEnabled }.mapNotNull { member ->
+            members.mapNotNull { member ->
                 chatDao.getAiConfigById(member.sourceAiId)
             }
         }
@@ -539,7 +570,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * 针对语音通话场景抽象：获取某个聊天（单聊或群聊）下所有可用的 AiConfigs
      */
     fun getAiConfigsForChat(chatId: Long, isGroupChat: Boolean): Flow<List<AiChatConfig>> {
-        return if (isGroupChat) getGroupChatSourceAiConfigs(chatId) else findAiConfig(chatId)
+        return if (isGroupChat) {
+            getGroupChatMembers(chatId).map { members ->
+                members.filter { it.isEnabled }.mapNotNull { member ->
+                    chatDao.getAiConfigById(member.sourceAiId)
+                }
+            }
+        } else {
+            findAiConfig(chatId)
+        }
     }
 
     /**
@@ -547,7 +586,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     suspend fun getGroupChatSourceAiConfigsOnce(groupChatId: Long): List<AiChatConfig> {
         val members = chatDao.getGroupChatMembersOnce(groupChatId)
-        return members.filter { it.isEnabled }.mapNotNull { member ->
+        return members.mapNotNull { member ->
             chatDao.getAiConfigById(member.sourceAiId)
         }
     }
@@ -1453,14 +1492,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             append(toolResult)
         }
 
-        // read_notes 结果作为上文背景，以 user 消息传递
-        if (toolName == "read_notes") {
-            return mapOf(
-                "role" to userRole,
-                "content" to "【记忆库检索背景】\n$displayStr"
-            )
-        }
-
         return mapOf(
             "role" to "tool",
             "tool_call_id" to toolCallId,
@@ -1751,17 +1782,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     // 保存多 AI 回复的模式与启用顺序
     fun saveReplySelection(chatId: Long, selectedAIs: List<AiChatConfig>) {
-        viewModelScope.launch {
-            // 这里我们更新所有在这个 chatId 下的 AiChatConfig 的 isEnabled 和 replyOrder
-            val allConfigs = chatDao.getAiConfigOnce(chatId)
-            allConfigs.forEach { config ->
-                val index = selectedAIs.indexOfFirst { it.id == config.id }
-                val updatedConfig = config.copy(
-                    isEnabled = index != -1,
-                    replyOrder = if (index != -1) index + 1 else 0
+        viewModelScope.launch { applyReplySelection(chatId, selectedAIs) }
+    }
+
+    private suspend fun applyReplySelection(chatId: Long, selectedAIs: List<AiChatConfig>) {
+        val chat = chatDao.getChatByIdSuspend(chatId)
+
+        if (chat?.isGroupChat == true) {
+            val orderMap = selectedAIs.mapIndexed { index, config ->
+                config.id to index
+            }.toMap()
+            val members = chatDao.getGroupChatMembersOnce(chatId)
+            members.forEach { member ->
+                val selectedOrder = orderMap[member.sourceAiId]
+                chatDao.updateGroupChatMember(
+                    member.copy(
+                        isEnabled = selectedOrder != null,
+                        replyOrder = selectedOrder ?: member.replyOrder
+                    )
                 )
-                chatDao.updateAiConfig(updatedConfig)
             }
+            return
+        }
+
+        // 单聊：更新当前 chatId 下的 AiChatConfig
+        val allConfigs = chatDao.getAiConfigOnce(chatId)
+        allConfigs.forEach { config ->
+            val index = selectedAIs.indexOfFirst { it.id == config.id }
+            val updatedConfig = config.copy(
+                isEnabled = index != -1,
+                replyOrder = if (index != -1) index + 1 else 0
+            )
+            chatDao.updateAiConfig(updatedConfig)
         }
     }
 
@@ -1769,7 +1821,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun directReply(chatId: Long, selectedAIs: List<AiChatConfig>) {
         if (selectedAIs.isEmpty()) return
         viewModelScope.launch {
-            saveReplySelection(chatId, selectedAIs)
+            applyReplySelection(chatId, selectedAIs)
 
             // 轮流回复：等待上一个 AI 回复完成后再请求下一个
             for (config in selectedAIs) {

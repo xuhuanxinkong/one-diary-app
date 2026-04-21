@@ -1,5 +1,6 @@
 package com.xinkong.diary.ui.screen.tag
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +10,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +30,7 @@ import com.xinkong.diary.repository.TagFolder
 import com.xinkong.diary.ui.screen.home.TagAdd
 import com.xinkong.diary.ui.screen.home.TagUI
 import com.xinkong.diary.ui.screen.tag.UNCLASSIFIED_TAG_NAME
+import androidx.compose.runtime.collectAsState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,7 +42,9 @@ fun TagManageScreen(
     onEditFolder: (String) -> Unit,
     onAddTag: (String) -> Unit,
     onEditTag: (TagUI) -> Unit,
-    onSwitchFolder: (String) -> Unit
+    onSwitchFolder: (String) -> Unit,
+    onMoveFolderUp: ((String) -> Unit)? = null,
+    onMoveFolderDown: ((String) -> Unit)? = null
 ) {
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var newFolderName by remember { mutableStateOf("") }
@@ -51,7 +57,10 @@ fun TagManageScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFFF5F5F5)
+                )
             )
         }
     ) { padding ->
@@ -59,6 +68,7 @@ fun TagManageScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
+                .background(Color(0xFFF5F5F5))
         ) {
             groupedTags.forEach { (folderName, tags) ->
                 item(key = folderName) {
@@ -75,16 +85,34 @@ fun TagManageScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onSwitchFolder(folderName) }
-                                    .padding(16.dp),
+                                    .padding(10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.FolderOpen, contentDescription = null, tint = Color.Gray)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text(folderName, fontSize = 18.sp, modifier = Modifier.weight(1f))
+                                Text(folderName, fontSize = 16.sp, modifier = Modifier.weight(1f))
                                 
                                 // 编辑按钮（只有非默认文件夹才显示）
                                 if (folderName != "我的笔记") {
-                                    IconButton(onClick = { onEditFolder(folderName) }) {
+                                    if (onMoveFolderUp != null) {
+                                        IconButton(onClick = { onMoveFolderUp(folderName) }, modifier = Modifier.size(32.dp)) {
+                                            Icon(
+                                                imageVector = androidx.compose.material.icons.Icons.Default.KeyboardArrowUp,
+                                                contentDescription = "上移",
+                                                tint = Color.Gray
+                                            )
+                                        }
+                                    }
+                                    if (onMoveFolderDown != null) {
+                                        IconButton(onClick = { onMoveFolderDown(folderName) }, modifier = Modifier.size(32.dp)) {
+                                            Icon(
+                                                imageVector = androidx.compose.material.icons.Icons.Default.KeyboardArrowDown,
+                                                contentDescription = "下移",
+                                                tint = Color.Gray
+                                            )
+                                        }
+                                    }
+                                    IconButton(onClick = { onEditFolder(folderName) }, modifier = Modifier.size(32.dp)) {
                                         Icon(
                                             imageVector = Icons.Default.Edit,
                                             contentDescription = "编辑文件夹",
@@ -93,8 +121,8 @@ fun TagManageScreen(
                                     }
                                 }
                                 
-                                TextButton(onClick = { onAddTag(folderName) }) {
-                                    Text("新增")
+                                TextButton(onClick = { onSwitchFolder(folderName) }) {
+                                    Text("切换")
                                 }
                             }
                             Divider(color = Color.LightGray, thickness = 1.dp)
@@ -105,15 +133,28 @@ fun TagManageScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable { onEditTag(tag) }
-                                        .padding(vertical = 12.dp, horizontal = 32.dp),
+                                        .padding(vertical =8.dp, horizontal = 32.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, tint = tag.color)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text(tag.name, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                                    Text(tag.name, fontSize = 14.sp, modifier = Modifier.weight(1f))
 //                                    Icon(Icons.Default.Adjust, contentDescription = "Edit", tint = Color.Gray)
                                 }
                                 Divider(color = Color.LightGray, thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
+                            }
+                            
+                            // 新增标签卡片（放在文件夹最下面）
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onAddTag(folderName) }
+                                    .padding(vertical = 12.dp, horizontal = 32.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("新增标签", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
@@ -127,7 +168,8 @@ fun TagManageScreen(
                         .fillMaxWidth()
                         .padding(8.dp)
                         .clickable { showAddFolderDialog = true },
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    colors = CardDefaults.cardColors(Color.White)
                 ) {
                     Row(
                         modifier = Modifier
@@ -256,6 +298,12 @@ fun TagManageRoute(
         onSwitchFolder = { folderName ->
             diaryViewModel.updateCurrentFolder(folderName)
             onBack()
+        },
+        onMoveFolderUp = { folderName ->
+            tagModel.reorderFolder(folderName, folderType, moveUp = true)
+        },
+        onMoveFolderDown = { folderName ->
+            tagModel.reorderFolder(folderName, folderType, moveUp = false)
         }
     )
 
@@ -424,6 +472,16 @@ fun TagManageRoute(
     if (editingFolder != null) {
         var newFolderName by remember(editingFolder) { mutableStateOf(editingFolder!!) }
         var updateInProgress by remember { mutableStateOf(false) }
+        var folderError by remember(editingFolder) { mutableStateOf<String?>(null) }
+
+        fun validateFolderName(name: String): String? {
+            return when {
+                name.isBlank() -> "文件夹名不能为空"
+                name.trim() == editingFolder?.trim() -> null
+                tagModel.tagFolders.value.any { it.name == name.trim() && it.type == folderType } -> "文件夹名已存在，请输入其他名称"
+                else -> null
+            }
+        }
         
         AlertDialog(
             onDismissRequest = { if (!updateInProgress) editingFolder = null },
@@ -432,18 +490,27 @@ fun TagManageRoute(
             text = {
                 OutlinedTextField(
                     value = newFolderName,
-                    onValueChange = { newFolderName = it },
+                    onValueChange = {
+                        newFolderName = it
+                        folderError = validateFolderName(it)
+                    },
                     label = { Text("文件夹名称") },
-                    enabled = !updateInProgress
+                    enabled = !updateInProgress,
+                    isError = folderError != null,
+                    supportingText = {
+                        if (folderError != null) {
+                            Text(folderError!!, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 )
             },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
-                        val oldFolderName = editingFolder ?: return@TextButton
+                        val oldFolderName = editingFolder ?: return@Button
                         val trimmedNewFolderName = newFolderName.trim()
-                        
-                        if (trimmedNewFolderName.isNotBlank() && trimmedNewFolderName != oldFolderName) {
+                        val error = validateFolderName(trimmedNewFolderName)
+                        if (error == null && trimmedNewFolderName != oldFolderName) {
                             updateInProgress = true
                             // 使用新的原子性方法重命名文件夹
                             tagModel.renameFolderAtomic(
@@ -469,16 +536,18 @@ fun TagManageRoute(
                             
                             editingFolder = null
                             updateInProgress = false
+                        } else if (error != null) {
+                            folderError = error
                         }
                     },
-                    enabled = !updateInProgress
+                    enabled = !updateInProgress && folderError == null && newFolderName.trim().isNotBlank() && newFolderName.trim() != (editingFolder ?: "")
                 ) {
                     Text("保存")
                 }
             },
             dismissButton = {
                 // 检查是否是AI绑定的文件夹
-                val folderEntity = tagModel.tagFolders.value.firstOrNull {
+                val folderEntity = tagModel.tagFolders.collectAsState().value.firstOrNull {
                     it.name == editingFolder && it.type == folderType
                 }
                 val isAiBoundFolder = folderEntity?.isAiBound == true

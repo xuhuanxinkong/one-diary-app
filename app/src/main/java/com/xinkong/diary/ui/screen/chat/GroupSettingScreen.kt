@@ -74,6 +74,7 @@ import com.xinkong.diary.ui.theme.diaryColors
 fun GroupSettingScreen(
     chat: Chat,
     onBack: () -> Unit,
+    onDeleteGroupChat: () -> Unit,
     onTitleChange: (String) -> Unit,
     onBackgroundChange: (String) -> Unit,
     onGroupAvatarChange: (String) -> Unit,
@@ -104,6 +105,7 @@ fun GroupSettingScreen(
     
     var showAddAiDialog by remember { mutableStateOf(false) }
     var showRemoveConfirmDialog by remember { mutableStateOf<GroupChatMember?>(null) }
+    var showDeleteGroupDialog by remember { mutableStateOf(false) }
 
     val backgroundPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -118,7 +120,12 @@ fun GroupSettingScreen(
     }
 
     Scaffold(
-        topBar = { GroupSettingTopBar(onBack = onBack) }
+        topBar = {
+            GroupSettingTopBar(
+                onBack = onBack,
+                onDelete = { showDeleteGroupDialog = true }
+            )
+        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -208,7 +215,11 @@ fun GroupSettingScreen(
                             onValueChangeFinished = { onHistoryRoundsChange(historyRounds) },
                             valueRange = 1f..30f,
                             steps = 28,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = androidx.compose.material3.SliderDefaults.colors(
+                                thumbColor = MaterialTheme.diaryColors.primary,
+                                activeTrackColor = MaterialTheme.diaryColors.primary
+                            )
                         )
                         Text(
                             "AI将记忆最近${historyRounds}轮对话内容（建议6-15轮）",
@@ -296,30 +307,67 @@ fun GroupSettingScreen(
             }
         )
     }
+
+    if (showDeleteGroupDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteGroupDialog = false },
+            title = { Text("确认删除") },
+            text = { Text("确定要删除该群聊吗？") },
+            containerColor = Color.White,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteGroupDialog = false
+                        onDeleteGroupChat()
+                    }
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteGroupDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 @Composable
-fun GroupSettingTopBar(onBack: () -> Unit) {
+fun GroupSettingTopBar(onBack: () -> Unit, onDelete: () -> Unit) {
     Column {
-        Row(
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
             modifier = Modifier
                 .background(Color.White)
                 .fillMaxWidth()
                 .padding(0.dp, 36.dp, 0.dp, 4.dp)
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.align(Alignment.CenterStart)
+            ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "返回"
                 )
             }
+
             Text(
                 text = "群聊设置",
                 fontSize = 18.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.Center)
             )
+
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "删除群聊"
+                )
+            }
         }
         Divider(color = Color.LightGray, thickness = 0.5.dp)
     }

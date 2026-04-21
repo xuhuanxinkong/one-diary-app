@@ -32,6 +32,7 @@ class VoiceInteractionManager(private val context: Context) {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var isListening = false
 
     // ASR Callbacks
     var onPartialResult: ((String) -> Unit)? = null
@@ -155,25 +156,63 @@ class VoiceInteractionManager(private val context: Context) {
                 putExtra(MLAsrConstants.LANGUAGE, "zh-CN")
                 putExtra(MLAsrConstants.FEATURE, MLAsrConstants.FEATURE_ALLINONE)
             }
-            mlAsrRecognizer?.startRecognizing(intent)
+            runCatching {
+                if (isListening) {
+                    recreateHuaweiRecognizer()
+                }
+                mlAsrRecognizer?.startRecognizing(intent)
+                isListening = true
+            }.onFailure {
+                Log.e(TAG, "Huawei ASR start failed", it)
+                recreateHuaweiRecognizer()
+                mlAsrRecognizer?.startRecognizing(intent)
+                isListening = true
+            }
         } else {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
-            androidSpeechRecognizer?.startListening(intent)
+            runCatching {
+                if (isListening) {
+                    androidSpeechRecognizer?.cancel()
+                }
+                androidSpeechRecognizer?.startListening(intent)
+                isListening = true
+            }.onFailure {
+                Log.e(TAG, "System ASR start failed", it)
+                recreateSystemRecognizer()
+                androidSpeechRecognizer?.startListening(intent)
+                isListening = true
+            }
         }
     }
 
     fun stopListening() {
+        isListening = false
         if (isHuaweiDevice) {
-            mlAsrRecognizer?.destroy() // ML Kit needs to be recreated if destroyed or stopped manually? Wait, we can just let it finish. But to interrupt, we might need a reset. Actually, ML Kit doesn't have a reliable `stopListening()` without destroying/recreating, or it does finish itself... Wait, destroy drops the listener. I'll just destroy & re-create for Huawei if interrupted.
-            mlAsrRecognizer = null
-            initAsr()
+            runCatching {
+                // Some HMS versions do not expose stop/cancel API; recreate for a clean next round.
+                recreateHuaweiRecognizer()
+            }
         } else {
-            androidSpeechRecognizer?.stopListening()
+            runCatching {
+                androidSpeechRecognizer?.cancel()
+            }
         }
+    }
+
+    private fun recreateHuaweiRecognizer() {
+        runCatching { mlAsrRecognizer?.destroy() }
+        mlAsrRecognizer = null
+        initAsr()
+    }
+
+    private fun recreateSystemRecognizer() {
+        runCatching { androidSpeechRecognizer?.destroy() }
+        androidSpeechRecognizer = null
+        initAsr()
     }
 
     fun speak(text: String, utteranceId: String = "TTS_CALL") {
@@ -245,6 +284,7 @@ class VoiceInteractionManager(private val context: Context) {
     }
 
     fun destroy() {
+        isListening = false
         stopSpeaking()
         textToSpeech?.shutdown()
         mlAsrRecognizer?.destroy()

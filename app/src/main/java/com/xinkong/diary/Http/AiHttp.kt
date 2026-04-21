@@ -683,12 +683,17 @@ class AiHttp {
             val functionObj = callObj.optJSONObject("function") ?: continue
             val name = functionObj.optString("name")
             if (name.isEmpty()) continue
+            val rawArguments = functionObj.optString("arguments", "{}")
+            val safeArguments = if (rawArguments.isBlank()) "{}" else rawArguments
+            val toolCallId = callObj.optString("id").ifBlank {
+                "call_${i}_${name}_${safeArguments.hashCode().toUInt().toString(16)}"
+            }
             toolCalls.add(
                 AiToolCall(
-                    id = callObj.optString("id"),
+                    id = toolCallId,
                     type = callObj.optString("type", "function"),
                     functionName = name,
-                    arguments = functionObj.optString("arguments", "{}")
+                    arguments = safeArguments
                 )
             )
         }

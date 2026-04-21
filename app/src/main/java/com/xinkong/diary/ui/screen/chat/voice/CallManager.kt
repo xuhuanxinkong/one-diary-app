@@ -51,6 +51,12 @@ object CallManager {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var thinkingJob: Job? = null
     private var aiStateJob: Job? = null
+    private var voiceImageProvider: (((String?, String?) -> Unit) -> Unit)? = null
+    private var hasVoiceSubmitPending = false
+
+    fun setVoiceImageProvider(provider: (((String?, String?) -> Unit) -> Unit)?) {
+        voiceImageProvider = provider
+    }
 
     fun initData(app: Application, chatId: Long, aiConfig: AiChatConfig, chatViewModel: ChatViewModel, isGroup: Boolean = false) {
         if (this.application == null) {
@@ -61,6 +67,8 @@ object CallManager {
         this._currentAiConfig.value = aiConfig
         this.chatViewModel = chatViewModel
         this.isGroup = isGroup
+        // New session should be active by default; otherwise users need one extra tap to unpause.
+        this._isPaused.value = false
 
         if (voiceManager == null) {
             voiceManager = VoiceInteractionManager(app)
@@ -78,7 +86,7 @@ object CallManager {
         voiceManager?.onFinalResult = { text ->
             if (_callState.value == CallState.Listening && !_isPaused.value) {
                 _userText.value = text
-                startThinking()
+                sendVoiceWithOptionalImage()
             }
         }
 
@@ -87,21 +95,57 @@ object CallManager {
         }
 
         voiceManager?.onSpeechEnd = {
-            if (_callState.value == CallState.Listening && !_isPaused.value && _userText.value.isNotEmpty()) {
-                startThinking()
+            // Fallback only: avoid duplicate submit when final result already handled.
+            if (!hasVoiceSubmitPending && _callState.value == CallState.Listening && !_isPaused.value && _userText.value.isNotEmpty()) {
+                sendVoiceWithOptionalImage()
             }
         }
 
         voiceManager?.onError = { error ->
-            Log.e(TAG, "ASR Error: \$error")
+            Log.e(TAG, "ASR Error: $error")
+            val normalized = error.lowercase()
+            
+            // "error: 6" / "error: 7" are Android short-silence / no match timeouts.
+            val isShortSilence = normalized.contains("error: 6") || normalized.contains("error: 7") ||
+                normalized.contains("error: 8") || normalized.contains("no match")
+                
+            // "1120x" are Huawei ML Kit network/drop timeouts (like 11205 for long no-speech, 11202 for network drops).
+            val isHardDrop = normalized.contains("1120") || normalized.contains("socket") || 
+                normalized.contains("close") || normalized.contains("busy") || 
+                normalized.contains("timeout") || normalized.contains("error: 1") || normalized.contains("error: 2")
+
             _callState.value = CallState.Idle
-            _aiText.value = "识别出错，请重试..."
-            scope.launch {
-                delay(2000)
+            hasVoiceSubmitPending = false
+            
+            if (isHardDrop) {
+                _isPaused.value = true
+                voiceManager?.stopListening()
+                
+                application?.let {
+                    android.widget.Toast.makeText(it, "长时间未说话或网络断开，麦克风已自动关闭", android.widget.Toast.LENGTH_SHORT).show()
+                }
+                
                 _aiText.value = ""
                 _userText.value = ""
-                if (!_isPaused.value) {
-                    startListening()
+            } else if (isShortSilence) {
+                // Short silence, silently restart
+                scope.launch {
+                    delay(1200)
+                    _aiText.value = ""
+                    _userText.value = ""
+                    if (!_isPaused.value) {
+                        startListening()
+                    }
+                }
+            } else {
+                _isPaused.value = true
+                voiceManager?.stopListening()
+                _aiText.value = "抱歉，识别出错了..."
+                
+                scope.launch {
+                    delay(2000)
+                    _aiText.value = ""
+                    _userText.value = ""
                 }
             }
         }
@@ -149,6 +193,7 @@ object CallManager {
             }
         } else {
             _isPaused.value = true
+            hasVoiceSubmitPending = false
             voiceManager?.stopListening()
             voiceManager?.stopSpeaking()
             thinkingJob?.cancel()
@@ -165,13 +210,30 @@ object CallManager {
         voiceManager?.startListening()
     }
 
-    fun sendManualText(text: String) {
+    fun sendManualText(text: String, imageBase64: String? = null, imageUriString: String? = null) {
         if (_isPaused.value) return
         _userText.value = text
-        startThinking()
+        startThinking(imageBase64, imageUriString)
     }
 
-    private fun startThinking() {
+    private fun sendVoiceWithOptionalImage() {
+        if (hasVoiceSubmitPending || _userText.value.isBlank()) return
+        hasVoiceSubmitPending = true
+        val provider = voiceImageProvider
+        if (provider == null) {
+            startThinking()
+            return
+        }
+        provider { imageBase64, imageUriString ->
+            if (_callState.value == CallState.Listening && !_isPaused.value && _userText.value.isNotBlank()) {
+                startThinking(imageBase64, imageUriString)
+            } else {
+                hasVoiceSubmitPending = false
+            }
+        }
+    }
+
+    private fun startThinking(imageBase64: String? = null, imageUriString: String? = null) {
         if (_isPaused.value) return
         _callState.value = CallState.Thinking
         voiceManager?.stopListening()
@@ -183,6 +245,7 @@ object CallManager {
         val aiList = aiConfig?.let { listOf(it) } ?: emptyList()
 
         if (aiList.isEmpty() || userSpoken.isBlank()) {
+            hasVoiceSubmitPending = false
             startListening()
             return
         }
@@ -190,7 +253,14 @@ object CallManager {
         _aiText.value = "AI 思考中..."
 
         thinkingJob = scope.launch {
-            chatViewModel?.sendMessage(chatId, userSpoken, aiList, autoConfirmToolsOverride = true)
+            chatViewModel?.sendMessage(
+                chatId,
+                userSpoken,
+                aiList,
+                imageBase64 = imageBase64,
+                imageUriString = imageUriString,
+                autoConfirmToolsOverride = true
+            )
         }
 
         var lastPartial = ""
@@ -234,11 +304,12 @@ object CallManager {
                                 if (lastMsg != null && lastMsg.role == "assistant") {
                                     var text = lastMsg.content
                                     val aiName = aiConfig?.name ?: ""
-                                    val prefixRegex = Regex("^(?:(?:(?i)\${Regex.escape(aiName)})|(?i)ai)[:：]\\\\s*")
+                                    val escapedAiName = Regex.escape(aiName)
+                                    val prefixRegex = Regex("""^(?:($escapedAiName)|ai)[:：]\s*""", RegexOption.IGNORE_CASE)
                                     while (prefixRegex.containsMatchIn(text)) {
                                         text = text.replaceFirst(prefixRegex, "")
                                     }
-                                    val timePrefixRegex = Regex("^\\\\[时间:\\\\s*\\\\d{4}-\\\\d{2}-\\\\d{2}\\\\s+\\\\d{2}:\\\\d{2}\\\\]\\\\s*")
+                                    val timePrefixRegex = Regex("""^\[时间:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*""")
                                     while (timePrefixRegex.containsMatchIn(text)) {
                                         text = text.replaceFirst(timePrefixRegex, "").trimStart()
                                     }
@@ -269,6 +340,7 @@ object CallManager {
                                 }
                             }
 
+                            hasVoiceSubmitPending = false
                             lastPartial = ""
                             hasStarted = false
                             aiStateJob?.cancel()
@@ -279,6 +351,7 @@ object CallManager {
 
                         _aiText.value = state.message
                         delay(3000)
+                        hasVoiceSubmitPending = false
                         if (!_isPaused.value) {
                             startListening()
                         }
@@ -307,6 +380,7 @@ object CallManager {
     }
 
     fun endCall() {
+        hasVoiceSubmitPending = false
         _callState.value = CallState.Idle
         _userText.value = ""
         _aiText.value = ""

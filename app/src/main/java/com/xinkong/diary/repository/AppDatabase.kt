@@ -6,13 +6,23 @@ import androidx.room.RoomDatabase
 import android.content.Context
 
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.xinkong.diary.data.AlarmEntity
+
+val MIGRATION_40_41 = object : Migration(40, 41) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE tag_folders ADD COLUMN orderIndex INTEGER NOT NULL DEFAULT 0")
+    }
+}
 
 @Database(
     entities = [Diary::class, Chat::class,
-        ChatMessage::class, AiChatConfig::class, UserChatConfig::class, GroupChatMember::class,
-        DiaryTag::class, ChatTag::class, TagFolder::class, AlarmEntity::class, EmbeddingRecord::class],
-    version = 40,
+        ChatMessage::class, AiChatConfig::class,
+        UserChatConfig::class, GroupChatMember::class,
+        DiaryTag::class, ChatTag::class, TagFolder::class,
+        AlarmEntity::class, EmbeddingRecord::class],
+    version = 42,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -30,6 +40,7 @@ abstract class AppDatabase: RoomDatabase(){
                     AppDatabase::class.java,
                     "diary_database"
                 )
+                .addMigrations(MIGRATION_40_41)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE=instance

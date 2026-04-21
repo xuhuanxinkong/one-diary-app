@@ -15,6 +15,7 @@ import com.xinkong.diary.ui.screen.tag.normalizeTagIdentity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -66,6 +67,8 @@ object UnclassifiedColors {
 class TagModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getDatabase(application)
     private val tagDao = db.tagDao()
+    private val diaryDao = db.diaryDao()
+    private val chatDao = db.chatDao()
 
     private val _diaryTags = MutableStateFlow(listOf<DiaryTag>())
     val diaryTags: StateFlow<List<DiaryTag>> = _diaryTags.asStateFlow()
@@ -78,6 +81,15 @@ class TagModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
+            // 确保初始文件夹存在
+            val ensureDefaultFolders = suspend {
+                val currentFolders = tagDao.getAllTagFolders().first()
+                if (currentFolders.none { it.name == "我的笔记" && it.type == "Diary" }) {
+                    tagDao.insertTagFolder(TagFolder(name = "我的笔记", type = "Diary"))
+                }
+            }
+            ensureDefaultFolders()
+
             launch {
                 tagDao.getAllDiaryTags().collect { tags ->
                     _diaryTags.update { tags }
@@ -113,7 +125,37 @@ class TagModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addTagFolder(folder: TagFolder) {
-        viewModelScope.launch { tagDao.insertTagFolder(folder) }
+        viewModelScope.launch {
+            // 设置新的订单索引
+            val maxOrder = _tagFolders.value.filter { it.type == folder.type }.maxOfOrNull { it.orderIndex } ?: 0
+            tagDao.insertTagFolder(folder.copy(orderIndex = maxOrder + 1))
+        }
+    }
+
+    fun reorderFolder(folderName: String, folderType: String, moveUp: Boolean) {
+        viewModelScope.launch {
+            val folders = _tagFolders.value.filter { it.type == folderType && it.name != DEFAULT_TAG_FOLDER }
+                .sortedWith(compareBy({ it.orderIndex }, { it.name }))
+                .toMutableList()
+
+            val index = folders.indexOfFirst { it.name == folderName }
+            if (index < 0) return@launch
+
+            if (moveUp && index > 0) {
+                val current = folders.removeAt(index)
+                folders.add(index - 1, current)
+            } else if (!moveUp && index < folders.size - 1) {
+                val current = folders.removeAt(index)
+                folders.add(index + 1, current)
+            } else {
+                return@launch
+            }
+
+            // 更新所有顺序以保持连续
+            folders.forEachIndexed { i, f ->
+                tagDao.insertTagFolder(f.copy(orderIndex = i + 1))
+            }
+        }
     }
 
     fun deleteTagFolder(folder: TagFolder) {
@@ -152,20 +194,35 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                 val newFolderExists = _tagFolders.value.any {
                     it.name == trimmedNewFolderName && it.type == folderType
                 }
+
+                // 文件夹名唯一：若目标已存在，直接拒绝本次重命名
+                if (newFolderExists) return@launch
                 
                 // 4. 如果新文件夹不存在，创建它
-                if (!newFolderExists) {
-                    tagDao.insertTagFolder(
-                        TagFolder(
-                            name = trimmedNewFolderName,
-                            type = folderType,
-                            isHidden = oldFolderEntity.isHidden,
-                            isAiBound = oldFolderEntity.isAiBound
-                        )
+                tagDao.insertTagFolder(
+                    TagFolder(
+                        name = trimmedNewFolderName,
+                        type = folderType,
+                        isHidden = oldFolderEntity.isHidden,
+                        isAiBound = oldFolderEntity.isAiBound,
+                        orderIndex = oldFolderEntity.orderIndex // 保留刚才的位置
                     )
+                )
+
+                // 5. 先迁移内容实体，确保不会因为旧数据引用导致旧文件夹“删不掉”
+                if (folderType == "Diary") {
+                    val diariesToMove = diaryDao.getDiariesByFolder(oldFolderName)
+                    if (diariesToMove.isNotEmpty()) {
+                        updateDiariesFn(diariesToMove.map { it.copy(tagFolder = trimmedNewFolderName) })
+                    }
+                } else {
+                    val chatsToMove = chatDao.getChatsByFolder(oldFolderName)
+                    if (chatsToMove.isNotEmpty()) {
+                        updateChatsFn(chatsToMove.map { it.copy(tagFolder = trimmedNewFolderName) })
+                    }
                 }
                 
-                // 5. 迁移标签和数据（重要：这是批量同步操作）
+                // 6. 迁移标签
                 if (folderType == "Diary") {
                     val tagsToMigrate = tagDao.getDiaryTagsByFolder(oldFolderName)
                     tagsToMigrate.forEach { oldTag ->
@@ -188,7 +245,7 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 
-                // 6. 删除旧文件夹（注意：必须在标签迁移之后）
+                // 7. 删除旧文件夹（注意：必须在迁移之后）
                 tagDao.deleteTagFolder(oldFolderEntity)
                 
             } catch (e: Exception) {
@@ -212,25 +269,66 @@ class TagModel(application: Application) : AndroidViewModel(application) {
     ) {
         viewModelScope.launch {
             try {
+                val targetFolder = DEFAULT_TAG_FOLDER
+                if (folderName == targetFolder) return@launch
+
                 // 1. 获取文件夹信息
                 val folderEntity = _tagFolders.value.firstOrNull {
                     it.name == folderName && it.type == folderType
                 } ?: return@launch
+
+                // 2. 确保默认文件夹存在
+                val targetExists = _tagFolders.value.any {
+                    it.name == targetFolder && it.type == folderType
+                }
+                if (!targetExists) {
+                    tagDao.insertTagFolder(
+                        TagFolder(
+                            name = targetFolder,
+                            type = folderType,
+                            isHidden = false,
+                            isAiBound = false
+                        )
+                    )
+                }
                 
-                // 2. 迁移标签和数据到默认文件夹
+                // 3. 先迁移内容实体到默认文件夹
+                if (folderType == "Diary") {
+                    val diariesToMove = diaryDao.getDiariesByFolder(folderName)
+                    if (diariesToMove.isNotEmpty()) {
+                        updateDiariesFn(diariesToMove.map { it.copy(tagFolder = targetFolder) })
+                    }
+                } else {
+                    val chatsToMove = chatDao.getChatsByFolder(folderName)
+                    if (chatsToMove.isNotEmpty()) {
+                        updateChatsFn(chatsToMove.map { it.copy(tagFolder = targetFolder) })
+                    }
+                }
+
+                // 4. 迁移标签到默认文件夹
                 if (folderType == "Diary") {
                     val tagsToMigrate = tagDao.getDiaryTagsByFolder(folderName)
-                    tagsToMigrate.forEach { tag ->
-                        tagDao.deleteDiaryTag(tag)
+                    tagsToMigrate.forEach { oldTag ->
+                        val targetExistsTag = tagDao.getDiaryTagsByFolder(targetFolder)
+                            .any { it.name == oldTag.name }
+                        if (!targetExistsTag) {
+                            tagDao.insertDiaryTag(oldTag.copy(folder = targetFolder))
+                        }
+                        tagDao.deleteDiaryTag(oldTag)
                     }
                 } else {
                     val tagsToMigrate = tagDao.getChatTagsByFolder(folderName)
-                    tagsToMigrate.forEach { tag ->
-                        tagDao.deleteChatTag(tag)
+                    tagsToMigrate.forEach { oldTag ->
+                        val targetExistsTag = tagDao.getChatTagsByFolder(targetFolder)
+                            .any { it.name == oldTag.name }
+                        if (!targetExistsTag) {
+                            tagDao.insertChatTag(oldTag.copy(folder = targetFolder))
+                        }
+                        tagDao.deleteChatTag(oldTag)
                     }
                 }
                 
-                // 3. 删除文件夹
+                // 5. 删除文件夹
                 tagDao.deleteTagFolder(folderEntity)
                 
             } catch (e: Exception) {
@@ -308,7 +406,8 @@ class TagModel(application: Application) : AndroidViewModel(application) {
                 DEFAULT_TAG_FOLDER
             ).toSet()
 
-        val orderedFolders = sortFolders(folderCandidates)
+        val orderMap = currentFolders.filter { it.type == folderType }.associate { it.name to it.orderIndex }
+        val orderedFolders = sortFolders(folderCandidates, orderMap)
 
         val customTagsList = currentTags.mapNotNull { tag ->
             when (tag) {
@@ -413,13 +512,18 @@ class TagModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun sortFolders(folders: Set<String>): List<String> {
+    private fun sortFolders(folders: Set<String>, orderMap: Map<String, Int>): List<String> {
         return folders.sortedWith { f1, f2 ->
             when {
                 f1 == f2 -> 0
                 f1 == DEFAULT_TAG_FOLDER -> -1
                 f2 == DEFAULT_TAG_FOLDER -> 1
-                else -> f1.compareTo(f2)
+                else -> {
+                    val idx1 = orderMap[f1] ?: Int.MAX_VALUE
+                    val idx2 = orderMap[f2] ?: Int.MAX_VALUE
+                    if (idx1 != idx2) idx1.compareTo(idx2)
+                    else f1.compareTo(f2)
+                }
             }
         }
     }

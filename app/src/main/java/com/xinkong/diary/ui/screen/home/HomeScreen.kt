@@ -116,6 +116,7 @@ fun HomeScreen(){
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
     var showMoveBar by remember { mutableStateOf(false) }
+    var showCopyBar by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     val diaryViewModel: DiaryViewModel = viewModel()
@@ -193,6 +194,7 @@ fun HomeScreen(){
                                         )
                                     )
                                 }
+                                android.widget.Toast.makeText(context, "移动成功", android.widget.Toast.LENGTH_SHORT).show()
                                 showMoveBar = false
                                 isSelectionMode = false
                                 selectedIds = emptySet()
@@ -205,6 +207,7 @@ fun HomeScreen(){
                                         )
                                     )
                                 }
+                                android.widget.Toast.makeText(context, "移动成功", android.widget.Toast.LENGTH_SHORT).show()
                                 showMoveBar = false
                                 isSelectionMode = false
                                 selectedIds = emptySet()
@@ -212,9 +215,36 @@ fun HomeScreen(){
                             onDismiss = { showMoveBar = false }
                         )
                     }
+                    if (showCopyBar) {
+                        MoveToCategoryDialog(
+                            isDiary = selectedTab == Tab.HOME,
+                            title = "选择复制到：",
+                            diaryList = contentList,
+                            chatList = chatList,
+                            onDiaryTagSelected = { tag: Pair<String, String> ->
+                                contentList.filter { it.id in selectedIds }.forEach {
+                                    diaryViewModel.copyDiary(it, tag.second, tag.first)
+                                }
+                                android.widget.Toast.makeText(context, "复制成功", android.widget.Toast.LENGTH_SHORT).show()
+                                showCopyBar = false
+                                isSelectionMode = false
+                                selectedIds = emptySet()
+                            },
+                            onChatTagSelected = { tag: String ->
+                                chatList.filter { it.id in selectedIds }.forEach {
+                                    chatViewModel.copyChat(it, tag)
+                                }
+                                android.widget.Toast.makeText(context, "复制成功", android.widget.Toast.LENGTH_SHORT).show()
+                                showCopyBar = false
+                                isSelectionMode = false
+                                selectedIds = emptySet()
+                            },
+                            onDismiss = { showCopyBar = false }
+                        )
+                    }
                     SelectionModeBottomBar(
                         isDiary = selectedTab == Tab.HOME,
-                        onMerge = { /* TODO */ },
+                        onCopy = { showCopyBar = !showCopyBar },
                         onSplit = { /* TODO */ },
                         onMove = { showMoveBar = !showMoveBar },
                         onDelete = { showDeleteDialog = true }
@@ -512,7 +542,7 @@ fun HeaderColumn(
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { isRolled = !isRolled },
+                    .clickable (indication = null, interactionSource = remember { MutableInteractionSource() }){ isRolled = !isRolled},
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(

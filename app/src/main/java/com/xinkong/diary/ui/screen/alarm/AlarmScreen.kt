@@ -1,20 +1,18 @@
 package com.xinkong.diary.ui.screen.alarm
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -28,7 +26,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -39,12 +36,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
-import coil.compose.AsyncImage
 import com.xinkong.diary.R
 import com.xinkong.diary.data.AlarmEntity
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.ui.animation.pressScaleEffect
-import com.xinkong.diary.ui.theme.diaryColors
 import com.xinkong.diary.ViewModel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.util.Calendar
@@ -57,10 +52,11 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.layout.ModifierLocalBeyondBoundsLayout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import com.xinkong.diary.ui.theme.diaryColors
 
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun AlarmScreen(
     onAddAlarm: (Boolean, Long?) -> Unit,  // Boolean 表示是否是AI提醒, Long? 是AI的ID
@@ -290,7 +286,7 @@ private fun CategoryItem(
     onClick: () -> Unit
 ) {
     val animatedBgColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        targetValue = if (isSelected) Color(0xFFCFD8DC) else Color.Transparent,
         animationSpec = tween(300),
         label = "categoryBgColor"
     )
@@ -326,7 +322,7 @@ private fun AiCategoryItem(
     onClick: () -> Unit
 ) {
     val animatedBgColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        targetValue = if (isSelected) Color(0xFF90CAF9) else Color.Transparent,
         animationSpec = tween(300),
         label = "aiBgColor"
     )

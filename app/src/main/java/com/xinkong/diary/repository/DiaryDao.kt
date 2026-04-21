@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
 interface DiaryDao {
     //日记相关
     @Insert
-    suspend fun insert(diary: Diary)
+    suspend fun insert(diary: Diary): Long
 
     @Update
     suspend fun update(diary:Diary)
