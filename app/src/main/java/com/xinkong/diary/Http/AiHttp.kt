@@ -33,7 +33,7 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "read_notes")
-            put("description", "按关键词读取本地记忆库笔记摘要（来源为本地记忆库，不是互联网）")
+            put("description", "按关键词从本地读取笔记")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -154,6 +154,76 @@ class AiHttp {
                     })
                 })
                 put("required", JSONArray().put("id").put("operations"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val setTagToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "set_tag")
+            put("description", "设置指定笔记的标签")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("id", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "笔记ID")
+                    })
+                    put("tag", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "要设置的新标签")
+                    })
+                })
+                put("required", JSONArray().put("id").put("tag"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val getNotesListToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "get_notes_list")
+            put("description", "获取笔记列表。在允许读取笔记情况就可使用。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "可选关键词，不传表示全部")
+                    })
+                    put("limit", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "返回条数，1 到 100")
+                        put("minimum", 1)
+                        put("maximum", 100)
+                    })
+                })
+                put("required", JSONArray())
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val pauseAndDecideToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "pause_and_decide")
+            put(
+                "description",
+                "当你无法一次性确定所有步骤，或后续操作必须依赖于前一个工具返回的特定结果（如需要判断截图内容、逻辑分叉或等待用户确认）时，请调用此工具。调用此工具后，你将暂停当前的批量输出，在获取最新的运行环境数据后，再发起下一轮决策。"
+            )
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("reason", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "可选，说明暂停原因")
+                    })
+                })
+                put("required", JSONArray())
                 put("additionalProperties", false)
             })
         })
@@ -610,6 +680,7 @@ class AiHttp {
             val toolsArray = JSONArray()
             if (enabledTools.contains("read_notes")) {
                 toolsArray.put(readNotesToolSchema)
+                toolsArray.put(getNotesListToolSchema)
             }
             if (enabledTools.contains("write_note")) {
                 toolsArray.put(writeNoteToolSchema)
@@ -617,6 +688,7 @@ class AiHttp {
             if (enabledTools.contains("edit_note")) {
                 toolsArray.put(editNoteToolSchema)
                 toolsArray.put(batchEditNoteToolSchema)
+                toolsArray.put(setTagToolSchema)
             }
             if (enabledTools.contains("query_chat_history")) {
                 toolsArray.put(queryChatHistoryToolSchema)
@@ -629,6 +701,9 @@ class AiHttp {
             }
             if (enabledTools.contains("cancel_plan")) {
                 toolsArray.put(cancelPlanToolSchema)
+            }
+            if (enabledTools.contains("pause_and_decide")) {
+                toolsArray.put(pauseAndDecideToolSchema)
             }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)

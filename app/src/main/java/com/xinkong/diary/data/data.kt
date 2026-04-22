@@ -91,6 +91,32 @@ sealed interface ToolTask {
         }
     }
 
+    data class SetTag(
+        override val toolCall: AiToolCall,
+        val id: Long,
+        val tag: String
+    ) : ToolTask {
+        override val title: String = "设置笔记标签 ID:$id -> $tag"
+        override val description: String = "AI 请求设置笔记标签 (ID: $id, 新标签: $tag)"
+    }
+
+    data class GetNotesList(
+        override val toolCall: AiToolCall,
+        val keyword: String,
+        val limit: Int
+    ) : ToolTask {
+        override val title: String = "获取笔记列表"
+        override val description: String = "AI 请求获取笔记列表（关键词：$keyword，最多 $limit 条）。"
+    }
+
+    data class PauseAndDecide(
+        override val toolCall: AiToolCall,
+        val reason: String?
+    ) : ToolTask {
+        override val title: String = "暂停并决策"
+        override val description: String = "AI 请求暂停当前批量输出并读取最新运行环境数据后继续决策。"
+    }
+
     data class QueryChatHistory(
         override val toolCall: AiToolCall,
         val keyword: String,

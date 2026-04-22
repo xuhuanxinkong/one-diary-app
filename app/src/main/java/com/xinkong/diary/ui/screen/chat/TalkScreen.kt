@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -102,7 +104,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -1549,25 +1550,20 @@ fun TalkInputRow(
         }
 
         Spacer(modifier = Modifier.width(4.dp))
+        val inputScrollState = rememberScrollState()
         BasicTextField(
             value = inputText,
             onValueChange = onInputChange,
             textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-            keyboardActions = KeyboardActions(
-                onSend = {
-                    onInputChange("$inputText\n")
-                },
-                onDone = {
-                    onInputChange("$inputText\n")
-                }
-            ),
             singleLine = false,
-            maxLines = 6,
+            maxLines = Int.MAX_VALUE,
             modifier = Modifier
                 .weight(1f)
+                .heightIn(min = 44.dp, max = 140.dp)
                 .background(Color.White, shape = RoundedCornerShape(6.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp)
+                .verticalScroll(inputScrollState)
                 .focusRequester(focusRequester),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {

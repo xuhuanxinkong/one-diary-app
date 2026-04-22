@@ -275,6 +275,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _currentTypingAi.value = config
 
                 val enabledTools = mutableSetOf<String>().apply {
+                    add("pause_and_decide")
                     add("query_chat_history")
                     if (config.enableWebSearch) add("web_search_baidu")
                     if (config.enableImageSupport) add("image_recognition")
@@ -388,6 +389,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         referencedDiaryIdOverride: String? = null
     ): Result<String> {
         val enabledTools = mutableSetOf<String>().apply {
+            add("pause_and_decide")
             add("query_chat_history")
             if (aiConfig.enableWebSearch) add("web_search_baidu")
             // 每个 AI 都有笔记工具权限（已隔离文件夹）
@@ -817,12 +819,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         tag = currentTask.tag,
                         tagFolder = targetFolder
                     )
-                    diaryDao.insert(newDiary)
+                    val newId = diaryDao.insert(newDiary)
                     buildToolResultMessage(
                         toolName = currentTask.toolCall.functionName,
                         toolCallId = currentTask.toolCall.id,
                         keyword = "",
-                        toolResult = "笔记新增成功: ${currentTask.noteTitle}"
+                        toolResult = "笔记新增成功: ${currentTask.noteTitle}\ncreated_note_id: $newId"
                     )
                 }
                 is ToolTask.EditNote -> {
@@ -889,6 +891,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         toolName = currentTask.toolCall.functionName,
                         toolCallId = currentTask.toolCall.id,
                         keyword = "",
+                        toolResult = resultText
+                    )
+                }
+                is ToolTask.SetTag -> {
+                    val existing = diaryDao.getDiaryById(currentTask.id)
+                    val resultText = if (existing != null) {
+                        diaryDao.update(existing.copy(tag = currentTask.tag))
+                        "标签设置成功: ID=${currentTask.id}, tag=${currentTask.tag}"
+                    } else {
+                        "设置失败：找不到 ID=${currentTask.id} 的笔记"
+                    }
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = currentTask.tag,
+                        toolResult = resultText
+                    )
+                }
+                is ToolTask.GetNotesList -> {
+                    val notes = diaryDao.getDiariesByFolder(targetFolder)
+                        .filter {
+                            currentTask.keyword.isBlank() ||
+                                it.title.contains(currentTask.keyword, ignoreCase = true) ||
+                                it.text.contains(currentTask.keyword, ignoreCase = true) ||
+                                it.tag.contains(currentTask.keyword, ignoreCase = true)
+                        }
+                        .take(currentTask.limit)
+                    val resultText = formatSimpleNotesView(currentTask.keyword, targetFolder, notes)
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = currentTask.keyword,
                         toolResult = resultText
                     )
                 }
@@ -1016,6 +1050,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         toolResult = resultText
                     )
                 }
+                is ToolTask.PauseAndDecide -> {
+                    val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+                    val recentMessages = chatDao.getMessagesOnce(batch.chatId).takeLast(6)
+                    val noteCount = diaryDao.getDiariesByFolder(targetFolder).size
+                    val alarmCount = alarmDao.getActiveAlarmsByAiConfigIdSync(batch.aiConfig.id).size
+                    val resultText = buildString {
+                        append("已暂停当前批量输出，并刷新运行环境快照。\n")
+                        append("time=$now\n")
+                        append("bound_folder=$targetFolder\n")
+                        append("notes_count=$noteCount\n")
+                        append("active_alarms=$alarmCount\n")
+                        append("recent_messages=\n")
+                        append(
+                            recentMessages.joinToString("\n") {
+                                "- (${it.date}) ${it.role}: ${it.content.take(80)}"
+                            }
+                        )
+                        if (!currentTask.reason.isNullOrBlank()) {
+                            append("\npause_reason=${currentTask.reason}")
+                        }
+                    }
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = "",
+                        toolResult = resultText
+                    )
+                }
             }
             currentBatch = batch.copy(
                 completedResults = batch.completedResults + resultMessage,
@@ -1070,7 +1132,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             batch.aiConfig.enableStream ||
                 autoConfirmTools ||
                 nextTask is ToolTask.QueryChatHistory ||
-                nextTask is ToolTask.ReadNotes
+                nextTask is ToolTask.ReadNotes ||
+                nextTask is ToolTask.GetNotesList ||
+                nextTask is ToolTask.PauseAndDecide
 
         if (shouldAutoConfirm) {
             confirmPendingToolAction(dontAskAgain = false)
@@ -1171,11 +1235,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // 工具说明
             val toolsList = mutableListOf<String>()
             if ("read_notes" in enabledTools) toolsList.add("read_notes")
+            if ("read_notes" in enabledTools) toolsList.add("get_notes_list")
             if ("write_note" in enabledTools) toolsList.add("write_note")
-            if ("edit_note" in enabledTools) toolsList.add("edit_note/batch_edit_note")
+            if ("edit_note" in enabledTools) toolsList.add("edit_note/batch_edit_note/set_tag")
             if ("create_plan" in enabledTools) toolsList.add("create_plan")
             if ("cancel_plan" in enabledTools) toolsList.add("cancel_plan")
             if ("web_search_baidu" in enabledTools) toolsList.add("web_search_baidu")
+            if ("pause_and_decide" in enabledTools) toolsList.add("pause_and_decide")
             
             if (toolsList.isNotEmpty()) {
                 append("【工具】可用：${toolsList.joinToString("/")}，通过 tool_calls 调用。")
@@ -1183,6 +1249,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     append("限定文件夹：${currentAiConfig.boundFolder}")
                 }
                 append("\n")
+                append("【工具调用格式要求】\n")
+                append("- 需要调用工具时，必须使用标准 tool_calls 字段，不要把工具名或参数写在普通文本 content 里。\n")
+                append("- 一次可发起多个 tool_calls；每个调用的 arguments 必须是合法 JSON 字符串。\n")
+                append("- 在收到 tool 结果前，不要编造工具执行结果；拿到 tool 结果后再继续回答。\n")
+                append("- 如需暂停并等待最新环境，再调用 pause_and_decide；同一轮工具链中最多调用 1 次。\n")
+                append("- 同一轮里若已获得 read_notes/get_notes_list 的结果，不要用相同参数重复调用；先基于已有结果做判断。\n")
             }
         }.trim()
     }
@@ -1199,22 +1271,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return buildString {
             append("【动态上下文】以下信息会变化，请优先参考本段。\n")
 
-            append("【时间】$currentTime")
+            append("【当前时间】$currentTime")
             if (history.size >= 2) {
                 append("（上次对话：${history[history.size - 2].date}）")
             }
             append("\n")
 
-            // 注入记忆库概览（绑定文件夹的完整笔记列表）
             if (currentAiConfig.boundFolder.isNotBlank()) {
-                val folderNotes = diaryDao.getDiariesByFolder(currentAiConfig.boundFolder)
-                if (folderNotes.isNotEmpty()) {
-                    append("【记忆库】${currentAiConfig.boundFolder}（${folderNotes.size}篇）：\n")
-                    append(folderNotes.joinToString("\n") { note ->
-                        "- [${note.id}] ${note.title}（${note.date.take(20)}）"
-                    })
-                    append("\n")
-                }
+                append("【记忆库】需要查看笔记列表时，请调用 get_notes_list 工具（限定文件夹：${currentAiConfig.boundFolder}）。\n")
             }
             
             // RAG 检索相关笔记（限制在 AI 绑定的文件夹内）
@@ -1415,6 +1479,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } catch (e: Exception) {}
                 }
+                call.type == "function" && call.functionName == "get_notes_list" && "read_notes" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val keyword = json.optString("keyword").trim()
+                        val limit = json.optInt("limit", 30).coerceIn(1, 100)
+                        tasks.add(ToolTask.GetNotesList(call, keyword, limit))
+                    } catch (e: Exception) {
+                        tasks.add(ToolTask.GetNotesList(call, "", 30))
+                    }
+                }
                 call.type == "function" && call.functionName == "write_note" && "write_note" in enabledTools -> {
                     try {
                         val json = JSONObject(call.arguments)
@@ -1455,6 +1529,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         if (operations.isNotEmpty()) {
                             tasks.add(ToolTask.BatchEditNote(call, id, operations))
+                        }
+                    } catch (e: Exception) {}
+                }
+                call.type == "function" && call.functionName == "set_tag" && "edit_note" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val id = json.getLong("id")
+                        val tag = json.optString("tag").trim()
+                        if (tag.isNotEmpty()) {
+                            tasks.add(ToolTask.SetTag(call, id, tag))
                         }
                     } catch (e: Exception) {}
                 }
@@ -1507,6 +1591,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     } catch (e: Exception) {}
                 }
+                call.type == "function" && call.functionName == "pause_and_decide" && "pause_and_decide" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val reason = json.optString("reason").trim().ifBlank { null }
+                        tasks.add(ToolTask.PauseAndDecide(call, reason))
+                    } catch (e: Exception) {
+                        tasks.add(ToolTask.PauseAndDecide(call, null))
+                    }
+                }
             }
         }
         return tasks
@@ -1541,12 +1634,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun formatSimpleNotesView(keyword: String, folder: String, diaries: List<com.xinkong.diary.repository.Diary>): String {
+        if (diaries.isEmpty()) {
+            return "简单笔记界面：当前无匹配结果（folder=$folder, keyword=${keyword.ifBlank { "全部" }}）。"
+        }
+        return buildString {
+            append("简单笔记界面（folder=$folder, keyword=${keyword.ifBlank { "全部" }}）\n")
+            append(diaries.joinToString("\n") {
+                "- [${it.id}] ${it.title} | 标签:${it.tag} | 时间:${it.date.take(16)}"
+            })
+        }
+    }
+
     private fun buildToolResultMessage(toolName: String, toolCallId: String, keyword: String, toolResult: String): Map<String, Any> {
         val sourceType = when (toolName) {
-            "read_notes", "write_note", "edit_note", "batch_edit_note" -> "记忆库"
+            "read_notes", "get_notes_list", "write_note", "edit_note", "batch_edit_note", "set_tag" -> "记忆库"
             "web_search_baidu" -> "网络搜索"
             "query_chat_history" -> "对话历史"
             "create_plan", "cancel_plan" -> "计划工具"
+            "pause_and_decide" -> "决策控制"
             else -> "工具"
         }
         val displayStr = buildString {
@@ -1584,12 +1690,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     tag = task.tag,
                     tagFolder = defaultFolder
                 )
-                diaryDao.insert(newDiary)
+                val newId = diaryDao.insert(newDiary)
                 buildToolResultMessage(
                     toolName = task.toolCall.functionName,
                     toolCallId = task.toolCall.id,
                     keyword = "",
-                    toolResult = "笔记新增成功: ${task.noteTitle}"
+                    toolResult = "笔记新增成功: ${task.noteTitle}\ncreated_note_id: $newId"
+                )
+            }
+            is ToolTask.GetNotesList -> {
+                val notes = diaryDao.getDiariesByFolder(defaultFolder)
+                    .filter {
+                        task.keyword.isBlank() ||
+                            it.title.contains(task.keyword, ignoreCase = true) ||
+                            it.text.contains(task.keyword, ignoreCase = true) ||
+                            it.tag.contains(task.keyword, ignoreCase = true)
+                    }
+                    .take(task.limit)
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = task.keyword,
+                    toolResult = formatSimpleNotesView(task.keyword, defaultFolder, notes)
                 )
             }
             is ToolTask.EditNote -> {
@@ -1656,6 +1778,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     toolName = task.toolCall.functionName,
                     toolCallId = task.toolCall.id,
                     keyword = "",
+                    toolResult = resultText
+                )
+            }
+            is ToolTask.SetTag -> {
+                val existing = diaryDao.getDiaryById(task.id)
+                val resultText = if (existing != null) {
+                    diaryDao.update(existing.copy(tag = task.tag))
+                    "标签设置成功: ID=${task.id}, tag=${task.tag}"
+                } else {
+                    "设置失败：找不到 ID=${task.id} 的笔记"
+                }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = task.tag,
                     toolResult = resultText
                 )
             }
@@ -1781,6 +1918,34 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     toolResult = resultText
                 )
             }
+            is ToolTask.PauseAndDecide -> {
+                val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+                val recentMessages = chatDao.getMessagesOnce(chatId).takeLast(6)
+                val noteCount = diaryDao.getDiariesByFolder(defaultFolder).size
+                val alarmCount = alarmDao.getActiveAlarmsByAiConfigIdSync(aiConfigId).size
+                val resultText = buildString {
+                    append("已暂停当前批量输出，并刷新运行环境快照。\n")
+                    append("time=$now\n")
+                    append("bound_folder=$defaultFolder\n")
+                    append("notes_count=$noteCount\n")
+                    append("active_alarms=$alarmCount\n")
+                    append("recent_messages=\n")
+                    append(
+                        recentMessages.joinToString("\n") {
+                            "- (${it.date}) ${it.role}: ${it.content.take(80)}"
+                        }
+                    )
+                    if (!task.reason.isNullOrBlank()) {
+                        append("\npause_reason=${task.reason}")
+                    }
+                }
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = "",
+                    toolResult = resultText
+                )
+            }
         }
     }
 
@@ -1838,7 +2003,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (userContext.isNotEmpty()) append("【用户】$userContext\n")
             if (aiContext.isNotEmpty()) append("【背景】$aiContext\n")
             if ("read_notes" in enabledTools || "edit_note" in enabledTools) {
-                append("【工具】可用：read_notes/write_note/edit_note/batch_edit_note，通过 tool_calls 调用。\n")
+                append("【工具】可用：read_notes/get_notes_list/write_note/edit_note/batch_edit_note/set_tag/pause_and_decide，通过 tool_calls 调用。\n")
+                append("【工具调用格式要求】\n")
+                append("- 必须走标准 tool_calls，不要在普通文本里伪造工具调用。\n")
+                append("- arguments 必须是合法 JSON 字符串。\n")
+                append("- 未收到 tool 结果前不要下结论。\n")
+                append("- pause_and_decide 同一轮工具链最多调用 1 次。\n")
+                append("- 已拿到 read_notes/get_notes_list 结果后，不要同参重复调用。\n")
             }
         }.trim()
     }
@@ -1913,6 +2084,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _currentTypingAi.value = config
 
                     val enabledTools = mutableSetOf<String>().apply {
+                        add("pause_and_decide")
                         add("query_chat_history")
                         add("web_search_baidu")
                         // 每个 AI 都有笔记工具权限（已隔离文件夹）
