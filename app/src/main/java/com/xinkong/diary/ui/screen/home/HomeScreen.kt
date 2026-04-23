@@ -93,6 +93,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.MarkUnreadChatAlt
 import androidx.compose.material.icons.filled.NoteAlt
@@ -405,6 +406,7 @@ fun ContentShow(
         Column(modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.diaryColors.background2)
+            .navigationBarsPadding()
             .padding(top = 36.dp) // 补齐之前因为去除 WindowInsets 而丢失的顶部状态栏距离
             .padding(innerPadding) // 保留 FAB 所需要的底部安全边距
         ) {

@@ -81,7 +81,8 @@ object RAG {
         context: Context,
         query: String,
         boundFolder: String? = null,
-        maxResults: Int = 5
+        maxResults: Int = 5,
+        maxTotalLength: Int = 1000
     ): String {
         if (!initialized) {
             // 未初始化时返回空，不阻塞对话
@@ -92,7 +93,8 @@ object RAG {
             RAGSearchService.getInstance(context).prepareContext(
                 query = query,
                 boundFolder = boundFolder,
-                maxResults = maxResults
+                maxResults = maxResults,
+                maxTotalLength = maxTotalLength
             )
         } catch (e: Exception) {
             e.printStackTrace()

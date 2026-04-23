@@ -280,64 +280,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     if (config.enableWebSearch) add("web_search_baidu")
                     if (config.enableImageSupport) add("image_recognition")
                     // 每个 AI 都有笔记工具权限（已隔离文件夹）
-                    if (config.enableReadNotes) add("read_notes")
+                    if (config.enableReadNotes) {
+                        add("read_notes")
+                        if (config.enableRagSearch) add("rag_search")
+                    }
                     if (config.enableWriteNote) add("write_note")
                     if (config.enableEditNote) add("edit_note")
                     if (config.enableSetAlarm) {
                         add("create_plan")
                         add("cancel_plan")
-                    }
-                }
-                
-                var ragNotesExec: String? = null
-                var ragChatExec: String? = null
-                val history = chatDao.getMessagesOnce(chatId)
-                if (config.enableReadNotes && history.isNotEmpty()) {
-                    val lastUserMessage = history.lastOrNull { it.role == userRole }?.content ?: ""
-                    if (lastUserMessage.isNotBlank()) {
-                         val contextStr = com.xinkong.diary.rag.RAG.prepareContext(
-                             getApplication(),
-                             lastUserMessage,
-                             boundFolder = config.boundFolder.ifBlank { null },
-                             maxResults = 3
-                         )
-                         if (contextStr.isNotBlank()) {
-                             ragNotesExec = "【记忆库RAG检索结果】\n$contextStr"
-                         }
-
-                         val keywordTokens = lastUserMessage
-                             .split(Regex("[\\s,，。！？!?；;、]+"))
-                             .map { it.trim() }
-                             .filter { it.length >= 2 }
-                             .take(6)
-                         val historyForSearch = history.dropLast(1)
-                         val matchedIndexes = historyForSearch
-                             .mapIndexedNotNull { index, msg ->
-                                 val isMatch = msg.content.isNotBlank() &&
-                                     (keywordTokens.any { token -> msg.content.contains(token, ignoreCase = true) } ||
-                                         msg.content.contains(lastUserMessage.take(12), ignoreCase = true))
-                                 if (isMatch) index else null
-                             }
-                         val contextIndexes = linkedSetOf<Int>()
-                         matchedIndexes.forEach { index ->
-                             val start = kotlin.math.max(0, index - 2)
-                             val end = kotlin.math.min(historyForSearch.lastIndex, index + 2)
-                             for (contextIndex in start..end) {
-                                 contextIndexes.add(contextIndex)
-                             }
-                         }
-                         val matchedHistory = contextIndexes.sorted().map { historyForSearch[it] }
-                         if (matchedHistory.isNotEmpty()) {
-                             ragChatExec = buildString {
-                                 append("【对话检索结果】\n")
-                                 append("【来源类型】对话历史\n")
-                                 append(
-                                     matchedHistory.joinToString("\n\n") { msg ->
-                                         "(${msg.date}) ${msg.role}: ${msg.content}"
-                                     }
-                                 )
-                             }
-                         }
                     }
                 }
 
@@ -362,14 +313,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _aiState.value = AiState.Loading
 
                 val result = requestAiResponse(config, messages, enabledTools)
-                
                 val initialExecutedTools = mutableListOf<String>()
-                if (ragNotesExec != null) {
-                    initialExecutedTools.add(ragNotesExec)
-                }
-                if (ragChatExec != null) {
-                    initialExecutedTools.add(ragChatExec)
-                }
                 
                 // 处理并保证入库完成，再走下一个循环
                 handleAiResponse(chatId, result, messages, enabledTools, config = config, executedTools = initialExecutedTools)
@@ -393,7 +337,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             add("query_chat_history")
             if (aiConfig.enableWebSearch) add("web_search_baidu")
             // 每个 AI 都有笔记工具权限（已隔离文件夹）
-            if (aiConfig.enableReadNotes) add("read_notes")
+            if (aiConfig.enableReadNotes) {
+                add("read_notes")
+                if (aiConfig.enableRagSearch) add("rag_search")
+            }
             if (aiConfig.enableWriteNote) add("write_note")
             if (aiConfig.enableEditNote) add("edit_note")
             if (aiConfig.enableSetAlarm) {
@@ -445,7 +392,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             messages.add(buildAssistantToolCallMessage(response.content, tasks.map { it.toolCall }))
             for (task in tasks) {
                 val toolResult = executeBackgroundToolTask(task, chatId, aiConfig.id, chat.tagFolder)
-                executedTools.add(task.title)
+                executedTools.add(buildRagExecutionEntry(toolResult) ?: task.title)
                 messages.add(toolResult)
             }
         }
@@ -926,6 +873,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         toolResult = resultText
                     )
                 }
+                is ToolTask.RagSearch -> {
+                    val ragText = runRagSearchAndFormat(currentTask.keyword, targetFolder, currentTask.limit)
+                    buildToolResultMessage(
+                        toolName = currentTask.toolCall.functionName,
+                        toolCallId = currentTask.toolCall.id,
+                        keyword = currentTask.keyword,
+                        toolResult = ragText
+                    )
+                }
                 is ToolTask.QueryChatHistory -> {
                     val messages = chatDao.getMessagesOnce(batch.chatId)
                     val format = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
@@ -1079,9 +1035,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+            val executionEntry = buildRagExecutionEntry(resultMessage) ?: currentTask.title
             currentBatch = batch.copy(
                 completedResults = batch.completedResults + resultMessage,
-                executedTools = batch.executedTools + currentTask.title
+                executedTools = batch.executedTools + executionEntry
             )
             processNextToolInBatch()
         }
@@ -1113,6 +1070,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             currentBatch = null
             _aiState.value = AiState.Loading
             viewModelScope.launch {
+                Log.d(TAG, "processNextToolInBatch: all tools done, request AI again. aiId=${batch.aiConfig.id}, tools=${finalExecutedTools.size}")
                 val result = requestAiResponse(batch.aiConfig, finalMessages, batch.enabledTools)
 
                 handleAiResponse(
@@ -1134,6 +1092,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 nextTask is ToolTask.QueryChatHistory ||
                 nextTask is ToolTask.ReadNotes ||
                 nextTask is ToolTask.GetNotesList ||
+                nextTask is ToolTask.RagSearch ||
                 nextTask is ToolTask.PauseAndDecide
 
         if (shouldAutoConfirm) {
@@ -1228,7 +1187,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (aiContext.isNotEmpty()) append("【背景】$aiContext\n")
 
             append("【来源判别规则】\n")
-            append("- 标记为【记忆库】或【记忆库RAG检索结果】的内容，来源是本地笔记/向量检索，不是互联网。\n")
+            append("- 标记为【记忆库】或【RAG检索结果】的内容，来源是本地笔记/向量检索，不是互联网。\n")
             append("- 标记为【网络搜索】的内容，来源是互联网搜索结果，不是本地笔记。\n")
             append("- 涉及实时或外部知识时，优先通过 web_search_baidu 获取最新网络知识，并标注来源。\n")
             
@@ -1236,6 +1195,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val toolsList = mutableListOf<String>()
             if ("read_notes" in enabledTools) toolsList.add("read_notes")
             if ("read_notes" in enabledTools) toolsList.add("get_notes_list")
+            if ("rag_search" in enabledTools) toolsList.add("rag_search")
             if ("write_note" in enabledTools) toolsList.add("write_note")
             if ("edit_note" in enabledTools) toolsList.add("edit_note/batch_edit_note/set_tag")
             if ("create_plan" in enabledTools) toolsList.add("create_plan")
@@ -1281,22 +1241,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 append("【记忆库】需要查看笔记列表时，请调用 get_notes_list 工具（限定文件夹：${currentAiConfig.boundFolder}）。\n")
             }
             
-            // RAG 检索相关笔记（限制在 AI 绑定的文件夹内）
-            if (currentAiConfig.enableReadNotes && history.isNotEmpty()) {
-                val lastUserMessage = history.lastOrNull { it.role == userRole }?.content ?: ""
-                if (lastUserMessage.isNotBlank()) {
-                    val ragContext = com.xinkong.diary.rag.RAG.prepareContext(
-                        getApplication(),
-                        lastUserMessage,
-                        boundFolder = currentAiConfig.boundFolder.ifBlank { null },
-                        maxResults = 3
-                    )
-                    if (ragContext.isNotBlank()) {
-                        append("【记忆库RAG检索结果】\n")
-                        append(ragContext)
-                        append("\n")
-                    }
-                }
+            if ("rag_search" in enabledTools) {
+                append("【RAG检索】需要语义参考时请调用 rag_search，避免直接凭空推断。\n")
             }
 
             // 网络搜索动态知识说明（当前轮可用性）
@@ -1416,10 +1362,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 saveAndIndexMessage(aiMsg)
                             }
     
-                            val aiConfig = chatDao.getAiConfigOnce(chatId).firstOrNull() ?: AiChatConfig(chatId = chatId)
+                            val aiConfigForBatch = config ?: (chatDao.getAiConfigOnce(chatId).firstOrNull() ?: AiChatConfig(chatId = chatId))
                             currentBatch = ToolBatchContext(
                                 chatId = chatId,
-                                aiConfig = aiConfig,
+                                aiConfig = aiConfigForBatch,
                                 enabledTools = enabledTools,
                                 baseMessages = messages,
                                 assistantMessage = assistantToolCallMessage,
@@ -1488,6 +1434,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     } catch (e: Exception) {
                         tasks.add(ToolTask.GetNotesList(call, "", 30))
                     }
+                }
+                call.type == "function" && call.functionName == "rag_search" && "rag_search" in enabledTools -> {
+                    try {
+                        val json = JSONObject(call.arguments)
+                        val keyword = json.optString("keyword").trim()
+                        if (keyword.isNotEmpty()) {
+                            val limit = json.optInt("limit", 3).coerceIn(1, 5)
+                            tasks.add(ToolTask.RagSearch(call, keyword, limit))
+                        }
+                    } catch (e: Exception) {}
                 }
                 call.type == "function" && call.functionName == "write_note" && "write_note" in enabledTools -> {
                     try {
@@ -1646,9 +1602,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun runRagSearchAndFormat(keyword: String, folder: String, limit: Int): String {
+        val ragContext = com.xinkong.diary.rag.RAG.prepareContext(
+            getApplication(),
+            query = keyword,
+            boundFolder = folder.ifBlank { null },
+            maxResults = limit,
+            maxTotalLength = 700
+        )
+        if (ragContext.isBlank()) {
+            return "未找到匹配的RAG参考。"
+        }
+        return ragContext
+            .removePrefix("【相关参考】")
+            .trim()
+            .ifBlank { "未找到匹配的RAG参考。" }
+    }
+
+    private fun buildRagExecutionEntry(toolResultMessage: Map<String, Any>): String? {
+        val name = toolResultMessage["name"] as? String ?: return null
+        if (name != "rag_search") return null
+        val raw = (toolResultMessage["content"] as? String).orEmpty()
+        val cleaned = raw
+            .lines()
+            .filterNot { it.startsWith("【来源类型】") || it.startsWith("关键词：") }
+            .joinToString("\n")
+            .trim()
+            .ifBlank { "未找到匹配的RAG参考。" }
+        return "【RAG检索结果】\n$cleaned"
+    }
+
     private fun buildToolResultMessage(toolName: String, toolCallId: String, keyword: String, toolResult: String): Map<String, Any> {
         val sourceType = when (toolName) {
             "read_notes", "get_notes_list", "write_note", "edit_note", "batch_edit_note", "set_tag" -> "记忆库"
+            "rag_search" -> "记忆库RAG"
             "web_search_baidu" -> "网络搜索"
             "query_chat_history" -> "对话历史"
             "create_plan", "cancel_plan" -> "计划工具"
@@ -1712,6 +1699,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     toolCallId = task.toolCall.id,
                     keyword = task.keyword,
                     toolResult = formatSimpleNotesView(task.keyword, defaultFolder, notes)
+                )
+            }
+            is ToolTask.RagSearch -> {
+                val ragText = runRagSearchAndFormat(task.keyword, defaultFolder, task.limit)
+                buildToolResultMessage(
+                    toolName = task.toolCall.functionName,
+                    toolCallId = task.toolCall.id,
+                    keyword = task.keyword,
+                    toolResult = ragText
                 )
             }
             is ToolTask.EditNote -> {
@@ -2003,7 +1999,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (userContext.isNotEmpty()) append("【用户】$userContext\n")
             if (aiContext.isNotEmpty()) append("【背景】$aiContext\n")
             if ("read_notes" in enabledTools || "edit_note" in enabledTools) {
-                append("【工具】可用：read_notes/get_notes_list/write_note/edit_note/batch_edit_note/set_tag/pause_and_decide，通过 tool_calls 调用。\n")
+                val alarmTools = mutableListOf("read_notes", "get_notes_list")
+                if ("rag_search" in enabledTools) alarmTools.add("rag_search")
+                alarmTools.addAll(listOf("write_note", "edit_note", "batch_edit_note", "set_tag", "pause_and_decide"))
+                append("【工具】可用：${alarmTools.joinToString("/")}，通过 tool_calls 调用。\n")
                 append("【工具调用格式要求】\n")
                 append("- 必须走标准 tool_calls，不要在普通文本里伪造工具调用。\n")
                 append("- arguments 必须是合法 JSON 字符串。\n")
@@ -2088,7 +2087,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         add("query_chat_history")
                         add("web_search_baidu")
                         // 每个 AI 都有笔记工具权限（已隔离文件夹）
-                        if (config.enableReadNotes) add("read_notes")
+                        if (config.enableReadNotes) {
+                            add("read_notes")
+                            if (config.enableRagSearch) add("rag_search")
+                        }
                         if (config.enableWriteNote) add("write_note")
                         if (config.enableEditNote) add("edit_note")
                         if (config.enableSetAlarm) {
@@ -2106,7 +2108,5 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _aiState.value = AiState.Idle
         }
     }
-
-    // （已移除 buildMessagesForDirectReply 和 buildMessages）
 }
 

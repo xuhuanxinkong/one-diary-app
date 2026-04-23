@@ -116,6 +116,7 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
         .collectAsStateWithLifecycle(emptyList())
 
     var enableReadNotes by remember(config.enableReadNotes) { mutableStateOf(config.enableReadNotes) }
+    var enableRagSearch by remember(config.enableRagSearch) { mutableStateOf(config.enableRagSearch) }
     var enableWriteNote by remember(config.enableWriteNote) { mutableStateOf(config.enableWriteNote) }
     var enableEditNote by remember(config.enableEditNote) { mutableStateOf(config.enableEditNote) }
     var enableSetAlarm by remember(config.enableSetAlarm) { mutableStateOf(config.enableSetAlarm) }
@@ -160,10 +161,11 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
     ) { innerPadding ->
         Column(
             modifier = Modifier
+                .background(Color(0xFFF5F5F5))
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .background(Color(0xFFF5F5F5)),
+                ,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(32.dp))
@@ -268,6 +270,35 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                                     config.copy(enableReadNotes = checked)
                                 )
                             },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "启动RAG检索",
+                            fontSize = 14.sp,
+                            color = Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = enableRagSearch,
+                            onCheckedChange = { checked ->
+                                enableRagSearch = checked
+                                chatViewModel.updateAiConfig(
+                                    config.copy(enableRagSearch = checked)
+                                )
+                            },
+                            enabled = enableReadNotes,
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
                                 checkedTrackColor = MaterialTheme.diaryColors.primary
@@ -726,10 +757,10 @@ fun UserConfig(chat: Chat, onBack: () -> Unit) {
     ) { innerPadding ->
         Column(
             modifier = Modifier
+                .background(Color(0xFFF5F5F5))
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .background(Color(0xFFF5F5F5)),
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(32.dp))

@@ -69,6 +69,7 @@ data class AiChatConfig(
     val avatarUri: String = "",
     val referencedDiaryId:String = "[]",
     val enableReadNotes: Boolean = true,
+    val enableRagSearch: Boolean = true,
     val enableWriteNote: Boolean = true,
     val enableEditNote: Boolean = true,
     val enableStream: Boolean = false,

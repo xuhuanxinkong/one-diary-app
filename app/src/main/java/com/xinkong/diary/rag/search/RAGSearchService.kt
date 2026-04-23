@@ -6,11 +6,8 @@ import com.xinkong.diary.rag.embedding.EmbeddingManager
 import com.xinkong.diary.rag.index.IndexManager
 import com.xinkong.diary.rag.vector.ObjectBoxVectorStore
 import com.xinkong.diary.repository.AppDatabase
-import com.xinkong.diary.repository.ChatMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  * RAG 检索服务
@@ -132,7 +129,7 @@ class RAGSearchService private constructor(
     
     /**
      * 混合搜索（向量 + 关键字）
-     * 先搜笔记，再搜对话
+     * 当前仅用于笔记检索。
      */
     suspend fun hybridSearch(
         query: String,
@@ -168,16 +165,6 @@ class RAGSearchService private constructor(
             }
         }
         
-        // 2. 再搜索对话（如果笔记结果不足）
-        if (options.searchMessages && allResults.size < options.topK) {
-            val messageOptions = options.copy(
-                searchDiaries = false,
-                topK = options.topK - allResults.size
-            )
-            val messageResults = search(query, messageOptions)
-            allResults.addAll(messageResults)
-        }
-        
         // 排序并返回
         allResults
             .sortedByDescending { it.score }
@@ -203,7 +190,7 @@ class RAGSearchService private constructor(
             topK = maxResults,
             minScore = 0.5f,
             searchDiaries = true,
-            searchMessages = true,  // 也搜索对话历史
+            searchMessages = false,
             folders = folders
         )
         
@@ -217,18 +204,15 @@ class RAGSearchService private constructor(
             for ((index, result) in results.withIndex()) {
                 when (result) {
                     is RAGSearchResult.DiaryResult -> {
-                        append("\n${index + 1}.【来源类型】记忆库 ")
-                        if (result.diary.title.isNotBlank()) {
-                            append("${result.diary.title}：")
-                        }
-                        append(result.textChunk.take(200))
+                        val preview = result.textChunk
+                            .replace("\n", " ")
+                            .replace("\r", " ")
+                            .trim()
+                            .take(90)
+                        append("\n${index + 1}./${result.diary.tag}/${result.diary.title}/内容预览：$preview")
                         append("\n")
                     }
-                    is RAGSearchResult.ChatMessageResult -> {
-                        append("\n${index + 1}.【来源类型】对话历史 ")
-                        append(buildChatContextSnippet(result.message, options.messageContextWindow))
-                        append("\n")
-                    }
+                    is RAGSearchResult.ChatMessageResult -> {}
                 }
             }
         }
@@ -238,27 +222,4 @@ class RAGSearchService private constructor(
         } else fullText
     }
 
-    private suspend fun buildChatContextSnippet(message: ChatMessage, messageContextWindow: Int): String {
-        val history = chatDao.getMessagesOnce(message.chatId)
-        if (history.isEmpty()) {
-            return message.content.take(150)
-        }
-
-        val index = history.indexOfFirst { it.id == message.id }
-        if (index < 0) {
-            return message.content.take(150)
-        }
-
-        val startIndex = max(0, index - messageContextWindow)
-        val endIndex = min(history.lastIndex, index + messageContextWindow)
-        return history.subList(startIndex, endIndex + 1).joinToString("\n") { item ->
-            val roleLabel = when (item.role) {
-                "user" -> "用户"
-                "assistant" -> "助手"
-                else -> item.role
-            }
-            val marker = if (item.id == message.id) "->" else "  "
-            "$marker (${item.date}) $roleLabel: ${item.content.take(200)}"
-        }
-    }
 }

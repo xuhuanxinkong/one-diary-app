@@ -109,6 +109,15 @@ sealed interface ToolTask {
         override val description: String = "AI 请求获取笔记列表（关键词：$keyword，最多 $limit 条）。"
     }
 
+    data class RagSearch(
+        override val toolCall: AiToolCall,
+        val keyword: String,
+        val limit: Int
+    ) : ToolTask {
+        override val title: String = "RAG检索：$keyword"
+        override val description: String = "AI 请求执行 RAG 检索（关键词：$keyword，最多 $limit 条）。"
+    }
+
     data class PauseAndDecide(
         override val toolCall: AiToolCall,
         val reason: String?

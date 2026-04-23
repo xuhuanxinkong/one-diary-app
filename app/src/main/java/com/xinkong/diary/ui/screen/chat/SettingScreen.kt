@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
@@ -90,10 +91,11 @@ fun SettingScreen(
     ) { innerPadding ->
         Column(
             modifier = Modifier
+                .background(Color(0xFFF5F5F5))
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .background(Color(0xFFF5F5F5)),
+                ,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -214,6 +216,14 @@ fun SettingScreen(
             }
             
             Spacer(modifier = Modifier.height(32.dp))
+            
+            // 底部导航栏填充（白色背景，防止显示应用主背景色）
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .background(Color.White)
+            )
         }
     }
 }

@@ -16,13 +16,19 @@ val MIGRATION_40_41 = object : Migration(40, 41) {
     }
 }
 
+val MIGRATION_42_43 = object : Migration(42, 43) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE ai_chat_configs ADD COLUMN enableRagSearch INTEGER NOT NULL DEFAULT 1")
+    }
+}
+
 @Database(
     entities = [Diary::class, Chat::class,
         ChatMessage::class, AiChatConfig::class,
         UserChatConfig::class, GroupChatMember::class,
         DiaryTag::class, ChatTag::class, TagFolder::class,
         AlarmEntity::class, EmbeddingRecord::class],
-    version = 42,
+    version = 43,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -40,6 +46,7 @@ abstract class AppDatabase: RoomDatabase(){
                     AppDatabase::class.java,
                     "diary_database"
                 )
+                .addMigrations(MIGRATION_42_43)
                 .addMigrations(MIGRATION_40_41)
                 .fallbackToDestructiveMigration()
                 .build()

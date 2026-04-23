@@ -127,12 +127,12 @@ fun AlarmScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFF5F5F5), // 整个屏幕背景改为浅灰色
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { _ ->
+        containerColor = Color(0xFFF5F5F5) // 整个屏幕背景改为浅灰色
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(innerPadding)
         ) {
             // 上半部分：数字时钟 (可收起) + 收起按钮
             Column(

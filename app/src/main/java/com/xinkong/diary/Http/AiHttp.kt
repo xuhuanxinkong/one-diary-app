@@ -207,6 +207,31 @@ class AiHttp {
         })
     }
 
+    private val ragSearchToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "rag_search")
+            put("description", "在本地记忆库中执行语义RAG检索，返回简洁参考：/标签/标题/内容预览。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "检索关键词")
+                    })
+                    put("limit", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "返回条数，1 到 5")
+                        put("minimum", 1)
+                        put("maximum", 5)
+                    })
+                })
+                put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
     private val pauseAndDecideToolSchema = JSONObject().apply {
         put("type", "function")
         put("function", JSONObject().apply {
@@ -681,6 +706,9 @@ class AiHttp {
             if (enabledTools.contains("read_notes")) {
                 toolsArray.put(readNotesToolSchema)
                 toolsArray.put(getNotesListToolSchema)
+            }
+            if (enabledTools.contains("rag_search")) {
+                toolsArray.put(ragSearchToolSchema)
             }
             if (enabledTools.contains("write_note")) {
                 toolsArray.put(writeNoteToolSchema)

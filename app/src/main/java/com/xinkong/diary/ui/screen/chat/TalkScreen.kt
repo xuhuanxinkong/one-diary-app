@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
@@ -63,6 +66,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -105,6 +109,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import android.Manifest
@@ -119,6 +124,8 @@ import com.huawei.hms.mlsdk.asr.MLAsrListener
 import com.huawei.hms.mlsdk.asr.MLAsrRecognizer
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -176,7 +183,9 @@ fun TalkScreen(
     val currentTypingAi by viewModel.currentTypingAi.collectAsStateWithLifecycle()
     val userConfig by viewModel.findUserConfig(chat.id).collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 
-    var inputText by remember { mutableStateOf("") }
+    var inputFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     val listState = rememberLazyListState()
     var messageToDelete by remember { mutableStateOf<ChatMessage?>(null) }
 
@@ -192,7 +201,12 @@ fun TalkScreen(
     var selectedImageBase64 by remember { mutableStateOf<String?>(null) }
     var textToSpeech by remember { mutableStateOf<TextToSpeech?>(null) }
     var ttsReady by remember { mutableStateOf(false) }
-
+    LaunchedEffect(inputFieldValue.text) {
+        if (inputFieldValue.text.length > 500) {
+            val trimmed = inputFieldValue.text.take(500)
+            inputFieldValue = TextFieldValue(trimmed, selection = TextRange(trimmed.length))
+        }
+    }
     DisposableEffect(context) {
         var engine: TextToSpeech? = null
         engine = TextToSpeech(context) { status ->
@@ -327,17 +341,17 @@ fun TalkScreen(
                 var showAiReplySheet by remember { mutableStateOf(false) }
 
                 TalkBottomBar(
-                    inputText = inputText,
-                    onInputChange = { inputText = it },
+                    inputFieldValue = inputFieldValue,
+                    onInputFieldValueChange = { inputFieldValue = it },
                     selectedImageUri = selectedImageUri,
                     onRemoveImage = {
                         selectedImageUri = null
                         selectedImageBase64 = null
                     },
                     onSend = {
-                        if (inputText.isNotBlank() || selectedImageBase64 != null) {
-                            val msg = inputText.trim()
-                            inputText = ""
+                        if (inputFieldValue.text.isNotBlank() || selectedImageBase64 != null) {
+                            val msg = inputFieldValue.text.trim()
+                            inputFieldValue = TextFieldValue("")
                             val selectedAIs = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
                             val targetAIs = if (selectedAIs.isNotEmpty()) selectedAIs else aiConfigs.take(1)
                             viewModel.sendMessage(chat.id, msg, targetAIs, selectedImageBase64, selectedImageUri?.toString())
@@ -498,7 +512,8 @@ fun TalkTopBar(
             modifier = Modifier
                 .background(Color(0xFFEDEDED))
                 .fillMaxWidth()
-                .padding(0.dp, 36.dp, 0.dp, 4.dp)
+                .statusBarsPadding()
+                .padding(top = 4.dp, bottom = 4.dp)
         ) {
             IconButton(onClick = onBack) {
                 Icon(
@@ -1114,25 +1129,15 @@ fun ChatBubble(
                 Column(horizontalAlignment = Alignment.Start) {
                     val ragEntries = toolExecutions.mapNotNull { item ->
                         when {
-                            item.startsWith("【记忆库RAG检索结果】") -> {
-                                val body = item.removePrefix("【记忆库RAG检索结果】").trim()
-                                if (body.isNotBlank()) "【RAG检索·笔记】\n$body" else null
-                            }
-                            item.startsWith("【对话检索结果】") || item.contains("【来源类型】对话历史") -> {
-                                val body = item
-                                    .removePrefix("【对话检索结果】")
-                                    .replace("【来源类型】对话历史\n", "")
-                                    .trim()
-                                if (body.isNotBlank()) "【RAG检索·对话】\n$body" else null
-                            }
+                            item.startsWith("【RAG检索结果】") -> item.removePrefix("【RAG检索结果】").trim().ifBlank { null }
+                            item.startsWith("【记忆库RAG检索结果】") -> item.removePrefix("【记忆库RAG检索结果】").trim().ifBlank { null }
                             else -> null
                         }
                     }
                     val plainToolEntries = toolExecutions.filter {
                         it.isNotBlank() &&
                         !it.startsWith("【记忆库RAG检索结果】") &&
-                            !it.startsWith("【对话检索结果】") &&
-                            !it.contains("【来源类型】对话历史")
+                            !it.startsWith("【RAG检索结果】")
                     }
                     val displayContent = content.trimEnd()
 
@@ -1294,8 +1299,8 @@ fun DeleteIcon(onClick: () -> Unit, modifier: Modifier = Modifier) {
 
 @Composable
 fun TalkBottomBar(
-    inputText: String,
-    onInputChange: (String) -> Unit,
+    inputFieldValue: TextFieldValue,
+    onInputFieldValueChange: (TextFieldValue) -> Unit,
     selectedImageUri: android.net.Uri? = null,
     onRemoveImage: () -> Unit = {},
     onSend: () -> Unit,
@@ -1306,8 +1311,18 @@ fun TalkBottomBar(
     onShowAiReply: () -> Unit = {},
     onStartVoiceCall:() ->Unit ={}
 ) {
-    Column {
-        Divider(color = Color.LightGray, thickness = 0.5.dp)
+    val imeBottomPx = WindowInsets.ime
+        .getBottom(androidx.compose.ui.platform.LocalDensity.current)
+    val extraLiftWhenImeVisible = if (imeBottomPx > 0) 12.dp else 0.dp
+
+    Column(
+        modifier = Modifier
+            .background(Color.White)
+            .navigationBarsPadding()
+            .offset(y = -extraLiftWhenImeVisible)
+            .fillMaxWidth()
+    ) {
+        Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
         
         if (selectedImageUri != null) {
             Box(modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp).height(92.dp).width(92.dp)) {
@@ -1333,8 +1348,8 @@ fun TalkBottomBar(
         }
         
         TalkInputRow(
-            inputText = inputText,
-            onInputChange = onInputChange,
+            inputFieldValue = inputFieldValue,
+            onInputFieldValueChange = onInputFieldValueChange,
             onSend = onSend,
             onAddClick = onAddClick,
             showAiReplyButton = showAiReplyButton,
@@ -1348,8 +1363,8 @@ fun TalkBottomBar(
 
 @Composable
 fun TalkInputRow(
-    inputText: String,
-    onInputChange: (String) -> Unit,
+    inputFieldValue: TextFieldValue,
+    onInputFieldValueChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     onAddClick: () -> Unit,
     showAiReplyButton: Boolean = false,
@@ -1357,6 +1372,15 @@ fun TalkInputRow(
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
+
+    fun updateInputText(newText: String) {
+        onInputFieldValueChange(
+            TextFieldValue(
+                text = newText,
+                selection = TextRange(newText.length)
+            )
+        )
+    }
     // 记录开始识别时的文本，用于追加
     var textBeforeListening by remember { mutableStateOf("") }
     var isListening by remember { mutableStateOf(false) }
@@ -1375,7 +1399,6 @@ fun TalkInputRow(
     }
     
     // 使用 rememberUpdatedState 确保回调中使用最新的值
-    val currentOnInputChange by androidx.compose.runtime.rememberUpdatedState(onInputChange)
     val currentTextBefore by androidx.compose.runtime.rememberUpdatedState(textBeforeListening)
     
     // 系统语音识别（非华为设备使用）
@@ -1387,7 +1410,7 @@ fun TalkInputRow(
             if (!matches.isNullOrEmpty()) {
                 val recognizedText = matches[0]
                 val newText = if (textBeforeListening.isEmpty()) recognizedText else "$textBeforeListening$recognizedText"
-                onInputChange(newText)
+                updateInputText(newText)
             }
         }
     }
@@ -1412,7 +1435,7 @@ fun TalkInputRow(
                     android.util.Log.d("VoiceInput", "华为 ML Kit 实时结果: $partial")
                     if (!partial.isNullOrEmpty()) {
                         val newText = if (currentTextBefore.isEmpty()) partial else "$currentTextBefore$partial"
-                        currentOnInputChange(newText)
+                        updateInputText(newText)
                     }
                 }
                 
@@ -1422,7 +1445,7 @@ fun TalkInputRow(
                     android.util.Log.d("VoiceInput", "华为 ML Kit 最终结果: $finalResult")
                     if (!finalResult.isNullOrEmpty()) {
                         val newText = if (currentTextBefore.isEmpty()) finalResult else "$currentTextBefore$finalResult"
-                        currentOnInputChange(newText)
+                        updateInputText(newText)
                     }
                 }
                 
@@ -1467,7 +1490,7 @@ fun TalkInputRow(
     
     // 启动语音识别
     fun startVoiceRecognition() {
-        textBeforeListening = inputText
+        textBeforeListening = inputFieldValue.text
         isListening = true
         
         if (isHuaweiDevice) {
@@ -1550,24 +1573,24 @@ fun TalkInputRow(
         }
 
         Spacer(modifier = Modifier.width(4.dp))
-        val inputScrollState = rememberScrollState()
         BasicTextField(
-            value = inputText,
-            onValueChange = onInputChange,
+            value = inputFieldValue,
+            onValueChange = { newValue ->
+                onInputFieldValueChange(newValue)
+            },
             textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
             singleLine = false,
-            maxLines = Int.MAX_VALUE,
+            maxLines = 500,
             modifier = Modifier
                 .weight(1f)
                 .heightIn(min = 44.dp, max = 140.dp)
                 .background(Color.White, shape = RoundedCornerShape(6.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp)
-                .verticalScroll(inputScrollState)
                 .focusRequester(focusRequester),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (inputText.isEmpty()) {
+                    if (inputFieldValue.text.isEmpty()) {
                         Text(
                             if (isListening) "正在聆听..." else "输入消息...",
                             color = if (isListening) Color(0xFF07C160) else Color.Gray,
@@ -1607,7 +1630,7 @@ fun TalkInputRow(
             modifier = Modifier
                 .size(40.dp)
                 .background(
-                    if (inputText.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
+                    if (inputFieldValue.text.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
                     shape = RoundedCornerShape(6.dp)
                 )
         ) {
@@ -1712,7 +1735,8 @@ fun MultiSelectTopBar(
             modifier = Modifier
                 .background(Color(0xFFEDEDED))
                 .fillMaxWidth()
-                .padding(16.dp, 36.dp, 16.dp, 24.dp)
+                .statusBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp)
         ) {
             Text(
                 text = "取消",
@@ -1730,8 +1754,12 @@ fun MultiSelectBottomBar(
     onDelete: () -> Unit,
     onOther: () -> Unit
 ) {
-    Column {
-        Divider(color = Color.LightGray, thickness = 0.5.dp)
+    Column(
+        modifier = Modifier
+            .background(Color.White)
+            .navigationBarsPadding()
+            .fillMaxWidth()
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
