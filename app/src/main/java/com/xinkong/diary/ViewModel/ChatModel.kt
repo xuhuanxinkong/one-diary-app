@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -132,10 +134,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val showDontAskAgain: Boolean
     )
 
+    data class PausedReplyUIState(
+        val chatId: Long,
+        val aiId: Long,
+        val aiName: String,
+        val previewContent: String = ""
+    )
+
     private val _pendingToolUI = MutableStateFlow<PendingToolUIState?>(null)
     val pendingToolUI: StateFlow<PendingToolUIState?> = _pendingToolUI.asStateFlow()
 
+    private val _pausedReplyUI = MutableStateFlow<PausedReplyUIState?>(null)
+    val pausedReplyUI: StateFlow<PausedReplyUIState?> = _pausedReplyUI.asStateFlow()
+
     private var autoConfirmTools = false
+    private var activeReplyJob: Job? = null
 
     var aiCurrentFolder: String = "我的笔记"
 
@@ -155,7 +168,102 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val executedTools: List<String> = emptyList()
     )
 
+    private data class ReplyResumePayload(
+        val chatId: Long,
+        val aiConfig: AiChatConfig,
+        val messages: List<Map<String, Any>>,
+        val enabledTools: Set<String>,
+        val executedTools: List<String> = emptyList()
+    )
+
     private var currentBatch: ToolBatchContext? = null
+    private var latestReplyPayload: ReplyResumePayload? = null
+    private var pausedReplyPayload: ReplyResumePayload? = null
+
+    private fun launchReplyJob(cancelExisting: Boolean = true, block: suspend () -> Unit) {
+        if (cancelExisting) {
+            activeReplyJob?.cancel()
+        }
+
+        lateinit var launchedJob: Job
+        launchedJob = viewModelScope.launch {
+            try {
+                block()
+            } catch (_: CancellationException) {
+                // 用户手动停止时属于预期行为
+            } finally {
+                if (activeReplyJob == launchedJob) {
+                    activeReplyJob = null
+                    _currentTypingAi.value = null
+                    _pendingToolUI.value = null
+                    if (_aiState.value is AiState.Loading || _aiState.value is AiState.Streaming) {
+                        _aiState.value = AiState.Idle
+                    }
+                }
+            }
+        }
+        activeReplyJob = launchedJob
+    }
+
+    fun stopCurrentReply() {
+        if (activeReplyJob == null) return
+
+        val partialContent = (_aiState.value as? AiState.Streaming)
+            ?.partialContent
+            .orEmpty()
+            .trim()
+        val previewContent = if (partialContent.length > 220) {
+            partialContent.take(220) + "..."
+        } else {
+            partialContent
+        }
+
+        latestReplyPayload?.let { payload ->
+            pausedReplyPayload = payload
+            _pausedReplyUI.value = PausedReplyUIState(
+                chatId = payload.chatId,
+                aiId = payload.aiConfig.id,
+                aiName = payload.aiConfig.name,
+                previewContent = previewContent
+            )
+        }
+
+        activeReplyJob?.cancel()
+        currentBatch = null
+        _pendingToolUI.value = null
+        _currentTypingAi.value = null
+        _aiState.value = AiState.Idle
+    }
+
+    fun dismissPausedReplyPrompt() {
+        _pausedReplyUI.value = null
+        pausedReplyPayload = null
+    }
+
+    fun resumePausedReply() {
+        val payload = pausedReplyPayload ?: return
+        pausedReplyPayload = null
+        _pausedReplyUI.value = null
+
+        launchReplyJob {
+            latestReplyPayload = payload
+            _currentTypingAi.value = payload.aiConfig
+            _aiState.value = AiState.Loading
+
+            val result = requestAiResponse(payload.aiConfig, payload.messages, payload.enabledTools)
+            handleAiResponse(
+                chatId = payload.chatId,
+                result = result,
+                messages = payload.messages,
+                enabledTools = payload.enabledTools,
+                config = payload.aiConfig,
+                executedTools = payload.executedTools
+            )
+
+            _currentTypingAi.value = null
+            _aiState.value = AiState.Idle
+        }
+    }
 
 
     // ========== 对话 CRUD ==========
@@ -254,10 +362,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun sendMessage(chatId: Long, content: String, selectedAIs: List<AiChatConfig>, imageBase64: String? = null, imageUriString: String? = null, autoConfirmToolsOverride: Boolean = false) {
         if (selectedAIs.isEmpty()) return
-        viewModelScope.launch {
+        launchReplyJob {
+            dismissPausedReplyPrompt()
+            latestReplyPayload = null
             autoConfirmTools = autoConfirmToolsOverride
             applyReplySelection(chatId, selectedAIs)
-            val chat = chatDao.getChatByIdSuspend(chatId) ?: return@launch
+            val chat = chatDao.getChatByIdSuspend(chatId) ?: return@launchReplyJob
             
             // 1. 保存用户消息
             val photoUris = if (imageUriString != null) Json.encodeToString(listOf(imageUriString)) else "[]"
@@ -311,6 +421,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 _aiState.value = AiState.Loading
+                latestReplyPayload = ReplyResumePayload(
+                    chatId = chatId,
+                    aiConfig = config,
+                    messages = messages,
+                    enabledTools = enabledTools
+                )
 
                 val result = requestAiResponse(config, messages, enabledTools)
                 val initialExecutedTools = mutableListOf<String>()
@@ -716,6 +832,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ))
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             // If we already got stream chunks, prefer partial stream result and avoid duplicate requests.
             if (fullContent.isNotBlank() || fullReasoning.isNotBlank() || capturedToolCalls.isNotEmpty()) {
                 Log.w(
@@ -1069,7 +1186,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val finalExecutedTools = batch.executedTools
             currentBatch = null
             _aiState.value = AiState.Loading
-            viewModelScope.launch {
+            latestReplyPayload = ReplyResumePayload(
+                chatId = batch.chatId,
+                aiConfig = batch.aiConfig,
+                messages = finalMessages,
+                enabledTools = batch.enabledTools,
+                executedTools = finalExecutedTools
+            )
+            launchReplyJob(cancelExisting = false) {
                 Log.d(TAG, "processNextToolInBatch: all tools done, request AI again. aiId=${batch.aiConfig.id}, tools=${finalExecutedTools.size}")
                 val result = requestAiResponse(batch.aiConfig, finalMessages, batch.enabledTools)
 
@@ -2075,7 +2199,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // 直接回复：让选中的 AI 直接根据当前对话历史生成回复，而不需要用户发送新消息
     fun directReply(chatId: Long, selectedAIs: List<AiChatConfig>) {
         if (selectedAIs.isEmpty()) return
-        viewModelScope.launch {
+        launchReplyJob {
+            dismissPausedReplyPrompt()
+            latestReplyPayload = null
             applyReplySelection(chatId, selectedAIs)
 
             // 轮流回复：等待上一个 AI 回复完成后再请求下一个
@@ -2099,7 +2225,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     val messages = buildContextMessages(chatId, config, enabledTools)
-                        _aiState.value = AiState.Loading
+                    _aiState.value = AiState.Loading
+                    latestReplyPayload = ReplyResumePayload(
+                        chatId = chatId,
+                        aiConfig = config,
+                        messages = messages,
+                        enabledTools = enabledTools
+                    )
                     val result = requestAiResponse(config, messages, enabledTools)
                     // TODO: 若需要等待工具调用完全结束，此处可能要调整为观察状态
                     handleAiResponse(chatId, result, messages, enabledTools, config = config)

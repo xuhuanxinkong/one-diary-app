@@ -124,9 +124,29 @@ import com.huawei.hms.mlsdk.asr.MLAsrListener
 import com.huawei.hms.mlsdk.asr.MLAsrRecognizer
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.with
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import java.util.Locale
@@ -157,7 +177,9 @@ fun TalkScreen(
     
     val aiState by viewModel.aiState.collectAsStateWithLifecycle()
     val pendingToolUI by viewModel.pendingToolUI.collectAsStateWithLifecycle()
+    val pausedReplyUI by viewModel.pausedReplyUI.collectAsStateWithLifecycle()
     val messages by viewModel.getMessages(chat.id).collectAsStateWithLifecycle(initialValue = emptyList())
+    val currentChatPausedReplyUI = pausedReplyUI?.takeIf { it.chatId == chat.id }
     
     // 根据是否为群聊，获取不同来源的AI配置
     // 单聊：直接从 ai_chat_configs 表获取
@@ -465,8 +487,10 @@ fun TalkScreen(
                     allowSelection = allowSelection,
                     aiState = aiState,
                     pendingToolUI = pendingToolUI,
+                    pausedReplyUI = currentChatPausedReplyUI,
                     onConfirmTool = { dontAsk -> viewModel.confirmPendingToolAction(dontAsk) },
                     onCancelTool = { viewModel.cancelPendingToolAction() },
+                    onResumePausedReply = { viewModel.resumePausedReply() },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
@@ -557,8 +581,10 @@ fun ChatMessageShow(
     allowSelection: Boolean = true,
     aiState: AiState? = null,
     pendingToolUI: ChatViewModel.PendingToolUIState? = null,
+    pausedReplyUI: ChatViewModel.PausedReplyUIState? = null,
     onConfirmTool: (Boolean) -> Unit = {},
     onCancelTool: () -> Unit = {},
+    onResumePausedReply: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val userName = userConfig.name
@@ -704,6 +730,106 @@ fun ChatMessageShow(
                     onConfirm = { dontAsk -> onConfirmTool(dontAsk) },
                     onCancel = { onCancelTool() }
                 )
+            }
+        }
+
+        item {
+            if (pausedReplyUI != null) {
+                val pausedAiConfig = aiConfigs.find { it.id == pausedReplyUI.aiId }
+                PausedReplyBubble(
+                    aiAvatarUri = pausedAiConfig?.avatarUri ?: "",
+                    aiName = pausedReplyUI.aiName,
+                    previewContent = pausedReplyUI.previewContent,
+                    onResume = onResumePausedReply
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PausedReplyBubble(
+    aiAvatarUri: String,
+    aiName: String,
+    previewContent: String,
+    onResume: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF5B9BD5)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (aiAvatarUri.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(aiAvatarUri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "AI头像",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(aiName.take(2), color = Color.White, fontSize = 14.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.82f)
+                .background(Color.White, shape = RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Text(
+                text = "回复已暂停",
+                color = Color(0xFF222222),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (previewContent.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF6F7F9), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = previewContent,
+                        color = Color(0xFF444444),
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp
+                    )
+                }
+            } else {
+                Text(
+                    text = "可以继续生成剩余内容。",
+                    color = Color(0xFF666666),
+                    fontSize = 13.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = onResume,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text("继续回复", color = Color.White)
+                }
             }
         }
     }
@@ -1361,6 +1487,7 @@ fun TalkBottomBar(
     }
 }
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun TalkInputRow(
     inputFieldValue: TextFieldValue,
@@ -1372,6 +1499,8 @@ fun TalkInputRow(
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
+    val viewModel: ChatViewModel = viewModel()
+    val aiState by viewModel.aiState.collectAsStateWithLifecycle()
 
     fun updateInputText(newText: String) {
         onInputFieldValueChange(
@@ -1555,7 +1684,8 @@ fun TalkInputRow(
                     stopVoiceRecognition()
                 } else {
                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                        == PackageManager.PERMISSION_GRANTED) {
+                        == PackageManager.PERMISSION_GRANTED
+                    ) {
                         startVoiceRecognition()
                     } else {
                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -1625,25 +1755,93 @@ fun TalkInputRow(
             )
         }
         Spacer(modifier = Modifier.width(4.dp))
-        IconButton(
-            onClick = onSend,
-            modifier = Modifier
-                .size(40.dp)
-                .background(
-                    if (inputFieldValue.text.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
-                    shape = RoundedCornerShape(6.dp)
+        AnimatedContent(
+            targetState = (aiState is AiState.Loading || aiState is AiState.Streaming),
+            transitionSpec = {
+                // 自定义动画规格
+                (fadeIn(animationSpec = tween(300)) +
+                        scaleIn(initialScale = 0.6f, animationSpec = tween(300))).togetherWith(
+                    fadeOut(animationSpec = tween(200)) +
+                            scaleOut(targetScale = 0.6f, animationSpec = tween(200))
                 )
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "发送",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
-            )
+            },
+            label = "send_stop_switch"
+        ) { isLoading ->
+            if (isLoading) {
+                SendStopButton(onClick = { viewModel.stopCurrentReply() })
+            } else {
+                IconButton(
+                    onClick = onSend,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            if (inputFieldValue.text.isNotBlank()) Color(0xFF07C160) else Color(
+                                0xFFCCCCCC
+                            ),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "发送",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }
 
+@Composable
+fun SendStopButton(onClick: () -> Unit) {
+    val infiniteTransition = rememberInfiniteTransition(label = "ring_rotate")
+    val ringRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing)
+        ),
+        label = "ring_rotation"
+    )
+
+    // 外层：绿色圆底 + 旋转圆环
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(Color(0xFF4CAF50), CircleShape),
+            contentAlignment = Alignment.Center  // 关键：让内层居中
+        ) {
+            // 旋转的圆环
+            Canvas(modifier = Modifier.size(20.dp)) {
+                val tailCount = 6
+                repeat(tailCount){index->
+                    val alpha = 1f -(index*0.15f)
+                    val sweepAngle =60f -(index*8f)
+                    val offsetAngle = index*8f
+                    rotate(ringRotation + offsetAngle){
+                        drawArc(
+                            color = Color.White.copy(alpha = alpha),
+                            startAngle = 0f,
+                            sweepAngle = sweepAngle,
+                            useCenter = false,
+                            topLeft = Offset(0f,0f),
+                            size = size,
+                            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                }
+            }
+            // 静止的白色方块
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(Color.White, RoundedCornerShape(3.dp))
+            )
+        }
+    }
+}
 @Composable
 fun TalkExpandablePanel(onPickImage: () -> Unit, onStartVoiceCall: () -> Unit = {}) {
     val context = LocalContext.current
