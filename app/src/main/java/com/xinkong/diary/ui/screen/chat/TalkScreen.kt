@@ -57,7 +57,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -126,7 +125,9 @@ import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.EaseInCubic
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -136,11 +137,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.with
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
@@ -152,6 +154,7 @@ import androidx.compose.ui.window.DialogProperties
 import java.util.Locale
 
 import com.xinkong.diary.ui.screen.chat.voice.CallRecordMessageBubble
+import com.xinkong.diary.ui.screen.chat.voice.CallState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -714,7 +717,10 @@ fun ChatMessageShow(
                                 isSelectable = false
                             )
                         } else {
-                            Text("正在思考...", fontSize = 15.sp, color = Color.Gray)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("正在思考", fontSize = 15.sp, color = Color.Gray)
+                                ThinkingDots()
+                            }
                         }
                     }
                 }
@@ -743,6 +749,97 @@ fun ChatMessageShow(
                     onResume = onResumePausedReply
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun ThinkingDots(){
+    val infiniteTransition = rememberInfiniteTransition("thinking")
+
+    val alpha1 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot1"
+    )
+
+    val alpha2 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, delayMillis = 400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot2"
+    )
+
+    val alpha3 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, delayMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot3"
+    )
+
+    val offset1 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6.dp.value,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = EaseInCubic),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "jump1"
+    )
+
+    val offset2 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6.dp.value,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, delayMillis = 400, easing = EaseInCubic),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "jump1"
+    )
+
+    val offset3 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6.dp.value,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, delayMillis = 800, easing = EaseInCubic),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "jump1"
+    )
+
+    Row(horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically) {
+        repeat(3){index->
+            val alpha = when(index){
+                0->alpha1
+                1->alpha2
+                2->alpha3
+                else -> 1f
+            }
+            val offset =when(index){
+                0->offset1
+                1->offset2
+                2->offset3
+                else -> 0f
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Box(modifier = Modifier
+                .offset(y= offset.dp)
+                .size(5.dp)
+                .alpha(alpha)
+                .clip(CircleShape)
+                .background(Color.Gray))
+
         }
     }
 }

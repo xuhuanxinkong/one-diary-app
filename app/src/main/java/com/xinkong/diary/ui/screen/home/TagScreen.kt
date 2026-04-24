@@ -337,11 +337,11 @@ fun TagCard(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(vertical = 12.dp, horizontal = 16.dp).padding(start = 14.dp)
+            modifier = Modifier.padding(vertical = 6.dp, horizontal = 30.dp)
         ) {
             Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, tint = tag.color)
             Spacer(modifier = Modifier.width(8.dp))
-            Text(text = tag.displayName, fontSize = 18.sp, modifier = Modifier.weight(1f))
+            Text(text = tag.displayName, fontSize = 16.sp, modifier = Modifier.weight(1f))
 
             if (tag.itemCount > 0) {
                 Text(

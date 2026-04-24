@@ -22,6 +22,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.view.isVisible
@@ -354,11 +355,13 @@ class FloatingCallService : Service() {
         
         val voiceBtn = createOptBtn("●", "语音")
         val textBtn = createOptBtn("○", "打字")
+        val bubbleBtn = createOptBtn("●", "气泡")
         val screenBtn = createOptBtn("○", "截图")
         val returnBtn = createOptBtn("🏠", "返回")
 
         optionsLayout.addView(voiceBtn)
         optionsLayout.addView(textBtn)
+        optionsLayout.addView(bubbleBtn)
         optionsLayout.addView(screenBtn)
         optionsLayout.addView(returnBtn)
         
@@ -421,6 +424,23 @@ class FloatingCallService : Service() {
             }
         }
 
+        val conversationScroll = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(140)
+            )
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        }
+
+        val conversationContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+
         val userTextView = TextView(this).apply {
             setTextColor(Color.parseColor("#A5D6A7")) 
             textSize = 12f
@@ -433,9 +453,11 @@ class FloatingCallService : Service() {
             textSize = 12f
             isVisible = false
         }
-        
-        conversationLayout.addView(userTextView)
-        conversationLayout.addView(aiTextView)
+
+        conversationContent.addView(userTextView)
+        conversationContent.addView(aiTextView)
+        conversationScroll.addView(conversationContent)
+        conversationLayout.addView(conversationScroll)
         mainContainer.addView(conversationLayout)
         
         // Add container to root
@@ -447,6 +469,20 @@ class FloatingCallService : Service() {
         var initialTouchX = 0f
         var initialTouchY = 0f
         var moved = false
+        var isConversationHiddenByUser = false
+
+        fun refreshConversationVisibility() {
+            val hasContent = userTextView.isVisible || aiTextView.isVisible
+            conversationLayout.isVisible = !isConversationHiddenByUser && hasContent
+            val bubbleIcon = bubbleBtn.getChildAt(0) as TextView
+            bubbleIcon.text = if (isConversationHiddenByUser) "○" else "●"
+        }
+
+        fun scrollConversationToBottom() {
+            conversationScroll.post {
+                conversationScroll.fullScroll(View.FOCUS_DOWN)
+            }
+        }
 
         avatarContainer.setOnTouchListener { _, event ->
             when (event.action) {
@@ -505,6 +541,11 @@ class FloatingCallService : Service() {
                         WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             }
             windowManager.updateViewLayout(floatView, layoutParams)
+        }
+
+        bubbleBtn.setOnClickListener {
+            isConversationHiddenByUser = !isConversationHiddenByUser
+            refreshConversationVisibility()
         }
         
         screenBtn.setOnClickListener {
@@ -580,26 +621,26 @@ class FloatingCallService : Service() {
         serviceScope.launch {
             CallManager.userText.collectLatest { text ->
                 if (text.isNotEmpty()) {
-                    conversationLayout.isVisible = true
                     userTextView.isVisible = true
                     userTextView.text = "我: $text"
+                    scrollConversationToBottom()
                 } else {
                     userTextView.isVisible = false
-                    if (!aiTextView.isVisible) conversationLayout.isVisible = false
                 }
+                refreshConversationVisibility()
             }
         }
 
         serviceScope.launch {
             CallManager.aiText.collectLatest { text ->
                 if (text.isNotEmpty()) {
-                    conversationLayout.isVisible = true
                     aiTextView.isVisible = true
                     aiTextView.text = "AI: $text"
+                    scrollConversationToBottom()
                 } else {
                     aiTextView.isVisible = false
-                    if (!userTextView.isVisible) conversationLayout.isVisible = false
                 }
+                refreshConversationVisibility()
             }
         }
 

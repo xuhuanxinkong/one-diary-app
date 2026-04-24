@@ -131,8 +131,9 @@ fun AlarmScreen(
     ) { innerPadding ->
         Column(
             modifier = Modifier
+                .padding(top = innerPadding.calculateTopPadding())
                 .fillMaxSize()
-                .padding(innerPadding)
+
         ) {
             // 上半部分：数字时钟 (可收起) + 收起按钮
             Column(

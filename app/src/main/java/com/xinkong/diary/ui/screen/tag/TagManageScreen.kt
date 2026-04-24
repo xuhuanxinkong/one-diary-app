@@ -66,9 +66,10 @@ fun TagManageScreen(
     ) { padding ->
         LazyColumn(
             modifier = Modifier
+                .background(Color(0xFFF5F5F5))
                 .padding(padding)
                 .fillMaxSize()
-                .background(Color(0xFFF5F5F5))
+
         ) {
             groupedTags.forEach { (folderName, tags) ->
                 item(key = folderName) {

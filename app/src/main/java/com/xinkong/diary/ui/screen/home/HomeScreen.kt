@@ -548,7 +548,7 @@ fun HeaderColumn(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = displayTitle,
+                    text = selectedTag.first,
                     fontSize = titleFontSize.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -572,7 +572,7 @@ fun HeaderColumn(
             .padding(start = 20.dp, end = 20.dp)
         ) {
             Text(
-                text = "当前文件夹：${selectedTag.first}",
+                text = "当前分类：${selectedTag.second}",
                 fontSize = 15.sp,
                 color = Color.Gray,
                 maxLines = 1,

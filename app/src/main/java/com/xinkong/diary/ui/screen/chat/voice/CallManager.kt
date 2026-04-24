@@ -211,9 +211,14 @@ object CallManager {
     }
 
     fun sendManualText(text: String, imageBase64: String? = null, imageUriString: String? = null) {
-        if (_isPaused.value) return
         _userText.value = text
-        startThinking(imageBase64, imageUriString)
+        // Manual text should work even when voice capture is paused.
+        startThinking(
+            imageBase64 = imageBase64,
+            imageUriString = imageUriString,
+            allowWhenPaused = true,
+            resumeListeningAfterDone = !_isPaused.value
+        )
     }
 
     private fun sendVoiceWithOptionalImage() {
@@ -233,8 +238,13 @@ object CallManager {
         }
     }
 
-    private fun startThinking(imageBase64: String? = null, imageUriString: String? = null) {
-        if (_isPaused.value) return
+    private fun startThinking(
+        imageBase64: String? = null,
+        imageUriString: String? = null,
+        allowWhenPaused: Boolean = false,
+        resumeListeningAfterDone: Boolean = true
+    ) {
+        if (_isPaused.value && !allowWhenPaused) return
         _callState.value = CallState.Thinking
         voiceManager?.stopListening()
 
@@ -246,7 +256,11 @@ object CallManager {
 
         if (aiList.isEmpty() || userSpoken.isBlank()) {
             hasVoiceSubmitPending = false
-            startListening()
+            if (resumeListeningAfterDone && !_isPaused.value) {
+                startListening()
+            } else {
+                _callState.value = CallState.Idle
+            }
             return
         }
 
@@ -283,12 +297,42 @@ object CallManager {
 
                         if (displayContent.isNotEmpty()) {
                             _aiText.value = displayContent
+                            lastPartial = displayContent
                         } else if (!state.partialReasoning.isNullOrEmpty() || state.partialContent.contains("<think>")) {
                             _aiText.value = "深度思考中..."
                         } else {
                             _aiText.value = "AI 思考中..."
                         }
-                        lastPartial = displayContent
+                    }
+                    is AiState.Success -> {
+                        if (!hasStarted) return@collect
+
+                        val finalText = state.result.trim()
+                        if (finalText.isNotEmpty()) {
+                            _aiText.value = finalText
+                            lastPartial = finalText
+                        }
+
+                        if (finalText.isNotEmpty() && _isAutoRead.value && resumeListeningAfterDone) {
+                            startSpeaking(finalText)
+                        } else {
+                            _callState.value = if (finalText.isNotEmpty()) CallState.Speaking else CallState.Idle
+                            if (resumeListeningAfterDone) {
+                                val readDelay = (finalText.length * 200L).coerceIn(3000L, 15000L)
+                                if (finalText.isNotEmpty()) {
+                                    delay(readDelay)
+                                }
+                                if (!_isPaused.value) {
+                                    startListening()
+                                }
+                            } else {
+                                _callState.value = CallState.Idle
+                            }
+                        }
+
+                        hasVoiceSubmitPending = false
+                        lastPartial = ""
+                        hasStarted = false
                     }
                     is AiState.Idle -> {
                         if (!hasStarted) return@collect
@@ -323,20 +367,26 @@ object CallManager {
                             finalSpeakText = finalSpeakText.replace(Regex("[*#`]"), "").trim()
 
                             if (finalSpeakText.isNotEmpty()) {
-                                if (_isAutoRead.value) {
+                                if (_isAutoRead.value && resumeListeningAfterDone) {
                                     startSpeaking(finalSpeakText)
                                 } else {
                                     _aiText.value = finalSpeakText
                                     _callState.value = CallState.Speaking
-                                    val readDelay = (finalSpeakText.length * 200L).coerceIn(3000L, 15000L)
-                                    delay(readDelay)
-                                    if (!_isPaused.value) {
-                                        startListening()
+                                    if (resumeListeningAfterDone) {
+                                        val readDelay = (finalSpeakText.length * 200L).coerceIn(3000L, 15000L)
+                                        delay(readDelay)
+                                        if (!_isPaused.value) {
+                                            startListening()
+                                        }
+                                    } else {
+                                        _callState.value = CallState.Idle
                                     }
                                 }
                             } else {
-                                if (!_isPaused.value) {
+                                if (resumeListeningAfterDone && !_isPaused.value) {
                                     startListening()
+                                } else {
+                                    _callState.value = CallState.Idle
                                 }
                             }
 
@@ -352,8 +402,10 @@ object CallManager {
                         _aiText.value = state.message
                         delay(3000)
                         hasVoiceSubmitPending = false
-                        if (!_isPaused.value) {
+                        if (resumeListeningAfterDone && !_isPaused.value) {
                             startListening()
+                        } else {
+                            _callState.value = CallState.Idle
                         }
                         aiStateJob?.cancel()
                     }

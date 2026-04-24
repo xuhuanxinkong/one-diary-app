@@ -445,7 +445,7 @@ fun AiConfig(chat: Chat, aiId: Long? = null, onBack: () -> Unit, isGroupChat: Bo
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "开启真流式回答",
+                            "开启流式回答",
                             fontSize = 14.sp,
                             color = Color.DarkGray,
                             modifier = Modifier.weight(1f)
