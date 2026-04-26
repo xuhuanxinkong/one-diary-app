@@ -49,7 +49,6 @@ import com.xinkong.diary.ui.screen.home.HomeScreen
 import com.xinkong.diary.ui.screen.tag.TagManageRoute
 import com.xinkong.diary.ui.theme.DiarydTheme
 
-//666
 class MainActivity : ComponentActivity() {
     private lateinit var screenCaptureLauncher: ActivityResultLauncher<Intent>
     private var pendingScreenshotRequest = false

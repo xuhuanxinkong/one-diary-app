@@ -22,13 +22,75 @@ val MIGRATION_42_43 = object : Migration(42, 43) {
     }
 }
 
+val MIGRATION_43_44 = object : Migration(43, 44) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE chat_messages ADD COLUMN visibleToAiId INTEGER")
+    }
+}
+
+val MIGRATION_44_45 = object : Migration(44, 45) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE chat_messages ADD COLUMN visibleToAiIds TEXT NOT NULL DEFAULT '[]'")
+    }
+}
+
+val MIGRATION_45_46 = object : Migration(45, 46) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                chatId INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                date TEXT NOT NULL,
+                photoUris TEXT NOT NULL,
+                toolExecutions TEXT NOT NULL,
+                aiId INTEGER,
+                visibleToAiIds TEXT NOT NULL DEFAULT '[]',
+                reasoningContent TEXT,
+                FOREIGN KEY(chatId) REFERENCES chats(id) ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+
+        db.execSQL(
+            """
+            INSERT INTO chat_messages_new (
+                id, chatId, role, content, date, photoUris, toolExecutions, aiId, visibleToAiIds, reasoningContent
+            )
+            SELECT
+                id,
+                chatId,
+                role,
+                content,
+                date,
+                photoUris,
+                toolExecutions,
+                aiId,
+                CASE
+                    WHEN visibleToAiIds IS NOT NULL AND TRIM(visibleToAiIds) != '' THEN visibleToAiIds
+                    WHEN visibleToAiId IS NOT NULL THEN '[' || visibleToAiId || ']'
+                    ELSE '[]'
+                END,
+                reasoningContent
+            FROM chat_messages
+            """.trimIndent()
+        )
+
+        db.execSQL("DROP TABLE chat_messages")
+        db.execSQL("ALTER TABLE chat_messages_new RENAME TO chat_messages")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_chat_messages_chatId ON chat_messages(chatId)")
+    }
+}
+
 @Database(
     entities = [Diary::class, Chat::class,
         ChatMessage::class, AiChatConfig::class,
         UserChatConfig::class, GroupChatMember::class,
         DiaryTag::class, ChatTag::class, TagFolder::class,
         AlarmEntity::class, EmbeddingRecord::class],
-    version = 43,
+    version = 46,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -46,9 +108,11 @@ abstract class AppDatabase: RoomDatabase(){
                     AppDatabase::class.java,
                     "diary_database"
                 )
+                .addMigrations(MIGRATION_45_46)
+                .addMigrations(MIGRATION_44_45)
+                .addMigrations(MIGRATION_43_44)
                 .addMigrations(MIGRATION_42_43)
                 .addMigrations(MIGRATION_40_41)
-                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE=instance
                 instance

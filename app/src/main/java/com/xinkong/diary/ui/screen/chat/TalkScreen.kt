@@ -38,6 +38,8 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -148,13 +150,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.tooling.preview.Preview
+
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import java.util.Locale
-
 import com.xinkong.diary.ui.screen.chat.voice.CallRecordMessageBubble
-import com.xinkong.diary.ui.screen.chat.voice.CallState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -224,6 +224,7 @@ fun TalkScreen(
     
     var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var selectedImageBase64 by remember { mutableStateOf<String?>(null) }
+    var visibleToAiIds by rememberSaveable(chat.id) { mutableStateOf(emptyList<Long>()) }
     var textToSpeech by remember { mutableStateOf<TextToSpeech?>(null) }
     var ttsReady by remember { mutableStateOf(false) }
     LaunchedEffect(inputFieldValue.text) {
@@ -334,7 +335,7 @@ fun TalkScreen(
     }
 
     Scaffold(
-        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             if (isMultiSelectMode) {
                 MultiSelectTopBar(
@@ -379,7 +380,14 @@ fun TalkScreen(
                             inputFieldValue = TextFieldValue("")
                             val selectedAIs = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
                             val targetAIs = if (selectedAIs.isNotEmpty()) selectedAIs else aiConfigs.take(1)
-                            viewModel.sendMessage(chat.id, msg, targetAIs, selectedImageBase64, selectedImageUri?.toString())
+                            viewModel.sendMessage(
+                                chatId = chat.id,
+                                content = msg,
+                                selectedAIs = targetAIs,
+                                imageBase64 = selectedImageBase64,
+                                imageUriString = selectedImageUri?.toString(),
+                                visibleToAiIds = visibleToAiIds.toSet()
+                            )
                             selectedImageUri = null
                             selectedImageBase64 = null
                         }
@@ -404,11 +412,14 @@ fun TalkScreen(
                     ) {
                         AiReplyBottomSheetContent(
                             aiConfigs = aiConfigs,
+                            currentVisibleToAiIds = visibleToAiIds.toSet(),
                             onDismiss = { showAiReplySheet = false },
-                            onDirectReply = { selectedAIs ->
-                                viewModel.directReply(chat.id, selectedAIs)
+                            onDirectReply = { selectedAIs, selectedVisibleToAiIds ->
+                                visibleToAiIds = selectedVisibleToAiIds.toList()
+                                viewModel.directReply(chat.id, selectedAIs, selectedVisibleToAiIds)
                             },
-                            onSaveSelection = { selectedAIs ->
+                            onSaveSelection = { selectedAIs, selectedVisibleToAiIds ->
+                                visibleToAiIds = selectedVisibleToAiIds.toList()
                                 viewModel.saveReplySelection(chat.id, selectedAIs)
                             }
                         )
@@ -590,6 +601,16 @@ fun ChatMessageShow(
     onResumePausedReply: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    fun resolveVisibleAiIds(message: ChatMessage): Set<Long> {
+        return try {
+            Json.decodeFromString<List<Long>>(message.visibleToAiIds)
+                .filter { it > 0L }
+                .toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
     val userName = userConfig.name
     val userAvatarUri = userConfig.avatarUri
     val activeAiConfig = currentTypingAi ?: aiConfigs.firstOrNull()
@@ -626,13 +647,18 @@ fun ChatMessageShow(
                 emptyList()
             }
 
+            val visibleAiIds = resolveVisibleAiIds(message)
+            val visibleAiNames = aiConfigs.filter { it.id in visibleAiIds }.map { it.name }
+
             ChatBubble(
+                message = message,
                 content = message.content,
                 isUser = isUserMessage,
                 avatarUri = if (isUserMessage) userAvatarUri else aiAvatarUri,
                 name = if (isUserMessage) userName else aiName,
                 photoUris = photoUris,
                 toolExecutions = tools,
+                visibleToAiNames = visibleAiNames,
                 reasoningContent = if (currentAiConfig?.enableDeepThink == true) message.reasoningContent else null,
                 onAvatarClick = {
                     if (!isMultiSelectMode) onAvatarClick(if (isUserMessage) "user" else "assistant", message.aiId)
@@ -791,7 +817,7 @@ fun ThinkingDots(){
         initialValue = 0f,
         targetValue = -6.dp.value,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = EaseInCubic),
+            animation = tween(400, easing = EaseInCubic),
             repeatMode = RepeatMode.Reverse
         ),
         label = "jump1"
@@ -801,7 +827,7 @@ fun ThinkingDots(){
         initialValue = 0f,
         targetValue = -6.dp.value,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 400, easing = EaseInCubic),
+            animation = tween(400, delayMillis = 200, easing = EaseInCubic),
             repeatMode = RepeatMode.Reverse
         ),
         label = "jump1"
@@ -811,7 +837,7 @@ fun ThinkingDots(){
         initialValue = 0f,
         targetValue = -6.dp.value,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 800, easing = EaseInCubic),
+            animation = tween(400, delayMillis = 400, easing = EaseInCubic),
             repeatMode = RepeatMode.Reverse
         ),
         label = "jump1"
@@ -1165,12 +1191,14 @@ fun ChatMessageMenu(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatBubble(
+    message: ChatMessage,
     content: String,
     isUser: Boolean,
     avatarUri: String = "",
     name: String = if (isUser) "我" else "AI",
     photoUris: List<String> = emptyList(),
     toolExecutions: List<String> = emptyList(),
+    visibleToAiNames: List<String> = emptyList(),
     reasoningContent: String? = null,
     onAvatarClick: () -> Unit = {},
     showDelete: Boolean = false,
@@ -1298,6 +1326,26 @@ fun ChatBubble(
                                 onCopy = { clipboardManager.setText(AnnotatedString(content)) },
                                 onMultiSelect = onMultiSelect,
                                 onReadAloud = onReadAloud
+                            )
+                        }
+                    }
+
+                    if (visibleToAiNames.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 4.dp, end = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Visibility,
+                                contentDescription = "可见AI",
+                                tint = Color.Gray,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "可见：${visibleToAiNames.joinToString("、")}",
+                                fontSize = 11.sp,
+                                color = Color.Gray
                             )
                         }
                     }
@@ -1497,6 +1545,25 @@ fun ChatBubble(
                                     )
                                 }
                             }
+                        }
+                    }
+                    if (visibleToAiNames.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(start = 2.dp, top = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Visibility,
+                                contentDescription = "可见AI",
+                                tint = Color.Gray,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "可见：${visibleToAiNames.joinToString("、")}",
+                                fontSize = 11.sp,
+                                color = Color.Gray
+                            )
                         }
                     }
                 }
@@ -1764,7 +1831,7 @@ fun TalkInputRow(
             Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
         }
     }
-    
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2082,16 +2149,21 @@ fun MultiSelectBottomBar(
 @Composable
 fun AiReplyBottomSheetContent(
     aiConfigs: List<AiChatConfig>,
+    currentVisibleToAiIds: Set<Long> = emptySet(),
     onDismiss: () -> Unit,
-    onDirectReply: (selectedOrder: List<AiChatConfig>) -> Unit,
-    onSaveSelection: (selectedOrder: List<AiChatConfig>) -> Unit
+    onDirectReply: (selectedOrder: List<AiChatConfig>, visibleToAiIds: Set<Long>) -> Unit,
+    onSaveSelection: (selectedOrder: List<AiChatConfig>, visibleToAiIds: Set<Long>) -> Unit
 ) {
     val selectedAIs = remember { mutableStateListOf<AiChatConfig>() }
+    val visibleToAiIds = remember { mutableStateListOf<Long>() }
 
-    LaunchedEffect(aiConfigs) {
+    LaunchedEffect(aiConfigs, currentVisibleToAiIds) {
         selectedAIs.clear()
         val enabled = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
         selectedAIs.addAll(enabled)
+        visibleToAiIds.clear()
+        val enabledIdSet = enabled.map { it.id }.toSet()
+        visibleToAiIds.addAll(currentVisibleToAiIds.filter { it in enabledIdSet })
     }
 
     // 选择顺序即为回复顺序：点击添加到末尾，点击已选则移除
@@ -2112,12 +2184,37 @@ fun AiReplyBottomSheetContent(
                     modifier = Modifier.fillMaxWidth().clickable {
                         if (isSelected) {
                             selectedAIs.remove(config)
+                            visibleToAiIds.remove(config.id)
                         } else {
                             selectedAIs.add(config)
                         }
                     }.padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    IconButton(
+                        onClick = {
+                            if (isSelected) {
+                                if (config.id in visibleToAiIds) {
+                                    visibleToAiIds.remove(config.id)
+                                } else {
+                                    visibleToAiIds.add(config.id)
+                                }
+                            }
+                        },
+                        enabled = isSelected,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (config.id in visibleToAiIds) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = if (config.id in visibleToAiIds) "该AI可见" else "该AI不可见",
+                            tint = when {
+                                !isSelected -> Color.LightGray
+                                config.id in visibleToAiIds -> Color(0xFF07C160)
+                                else -> Color.Gray
+                            }
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF5B9BD5)),
                         contentAlignment = Alignment.Center
@@ -2144,20 +2241,33 @@ fun AiReplyBottomSheetContent(
             }
         }
 
+        val visibleNames = aiConfigs.filter { it.id in visibleToAiIds }.map { it.name }
+        val visibleTip = if (visibleToAiIds.isEmpty()) {
+            "当前可见性：公开（所有已选AI可见）"
+        } else {
+            "当前可见性：${visibleNames.joinToString("、")} 可见"
+        }
+        Text(
+            text = visibleTip,
+            color = Color.Gray,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+        )
+
         // 底部按钮
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Button(
-                onClick = { onDirectReply(selectedAIs); onDismiss() },
+                onClick = { onDirectReply(selectedAIs.toList(), visibleToAiIds.toSet()); onDismiss() },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5B9BD5))
             ) {
                 Text("直接回复")
             }
             Button(
-                onClick = { onSaveSelection(selectedAIs); onDismiss() },
+                onClick = { onSaveSelection(selectedAIs.toList(), visibleToAiIds.toSet()); onDismiss() },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160))
             ) {
@@ -2167,3 +2277,5 @@ fun AiReplyBottomSheetContent(
         Spacer(modifier = Modifier.height(30.dp))
     }
 }
+
+

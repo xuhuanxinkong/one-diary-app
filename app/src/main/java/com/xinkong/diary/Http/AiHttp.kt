@@ -514,22 +514,23 @@ class AiHttp {
                                 val tcArray = delta.getJSONArray("tool_calls")
                                 for (i in 0 until tcArray.length()) {
                                     val tc = tcArray.getJSONObject(i)
-                                    val index = tc.optInt("index")
+                                    val index = tc.optInt("index", i)
                                     val existing = toolCallsBuffer.getOrPut(index) { JSONObject() }
 
-                                    if (tc.has("id")) existing.put("id", tc.getString("id"))
-                                    if (tc.has("type")) existing.put("type", tc.getString("type"))
-                                    if (tc.has("function")) {
-                                        val func = tc.getJSONObject("function")
+                                    nullableJsonString(tc.opt("id"))?.let { existing.put("id", it) }
+                                    nullableJsonString(tc.opt("type"))?.let { existing.put("type", it) }
+                                    if (tc.has("function") && !tc.isNull("function")) {
+                                        val func = tc.optJSONObject("function") ?: continue
                                         val existingFunc = if (existing.has("function")) {
                                             existing.getJSONObject("function")
                                         } else {
                                             JSONObject().also { existing.put("function", it) }
                                         }
-                                        if (func.has("name")) existingFunc.put("name", func.getString("name"))
-                                        if (func.has("arguments")) {
+                                        nullableJsonString(func.opt("name"))?.let { existingFunc.put("name", it) }
+                                        val argsFragment = nullableJsonString(func.opt("arguments"))
+                                        if (!argsFragment.isNullOrEmpty()) {
                                             val currentArgs = existingFunc.optString("arguments", "")
-                                            existingFunc.put("arguments", currentArgs + func.getString("arguments"))
+                                            existingFunc.put("arguments", currentArgs + argsFragment)
                                         }
                                     }
                                 }
@@ -786,21 +787,63 @@ class AiHttp {
             val functionObj = callObj.optJSONObject("function") ?: continue
             val name = functionObj.optString("name")
             if (name.isEmpty()) continue
-            val rawArguments = functionObj.optString("arguments", "{}")
-            val safeArguments = if (rawArguments.isBlank()) "{}" else rawArguments
-            val toolCallId = callObj.optString("id").ifBlank {
+            val rawArguments = when (val raw = functionObj.opt("arguments")) {
+                null, JSONObject.NULL -> "{}"
+                else -> raw.toString()
+            }
+            val safeArguments = normalizeToolArguments(rawArguments)
+            val toolCallId = (nullableJsonString(callObj.opt("id")) ?: "").ifBlank {
                 "call_${i}_${name}_${safeArguments.hashCode().toUInt().toString(16)}"
             }
             toolCalls.add(
                 AiToolCall(
                     id = toolCallId,
-                    type = callObj.optString("type", "function"),
+                    type = normalizeToolType(callObj.opt("type")),
                     functionName = name,
                     arguments = safeArguments
                 )
             )
         }
         return toolCalls
+    }
+
+    private fun nullableJsonString(value: Any?): String? {
+        if (value == null || value == JSONObject.NULL) return null
+        val text = value.toString().trim()
+        if (text.isEmpty() || text.equals("null", ignoreCase = true)) return null
+        return text
+    }
+
+    private fun normalizeToolType(rawType: Any?): String {
+        val normalized = nullableJsonString(rawType)
+        return if (normalized.isNullOrBlank()) "function" else normalized
+    }
+
+    private fun normalizeToolArguments(rawArguments: String): String {
+        val trimmed = rawArguments.trim()
+        if (trimmed.isEmpty() || trimmed.equals("null", ignoreCase = true)) return "{}"
+
+        if (isValidJsonObject(trimmed)) return trimmed
+
+        var candidate = trimmed
+        if (!candidate.startsWith("{")) {
+            val payload = candidate.trimStart(',').trim()
+            candidate = if (payload.isEmpty()) "{}" else "{$payload"
+        }
+        if (!candidate.endsWith("}")) {
+            candidate = "$candidate}"
+        }
+
+        return if (isValidJsonObject(candidate)) candidate else "{}"
+    }
+
+    private fun isValidJsonObject(value: String): Boolean {
+        return try {
+            JSONObject(value)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun resolveCompletionsUrl(baseUrl: String): String = when {

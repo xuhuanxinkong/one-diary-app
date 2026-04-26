@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -65,14 +64,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val tagDao = db.tagDao()
     
     private val aiHttp = AiHttp()
-    private val prefs = application.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-    
-    // 获取历史消息轮数设置
-    fun getHistoryRounds(): Int = prefs.getInt(KEY_HISTORY_ROUNDS, DEFAULT_HISTORY_ROUNDS)
-    
-    fun setHistoryRounds(rounds: Int) {
-        prefs.edit().putInt(KEY_HISTORY_ROUNDS, rounds.coerceIn(1, 50)).apply()
-    }
 
     // ---- 对话列表状态 ----
     val chatListState: StateFlow<List<Chat>> = chatDao.getAllChat()
@@ -155,11 +146,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val userRole = "user"
     private val assistantRole = "assistant"
 
+    private fun resolveVisibleAiIds(message: ChatMessage): Set<Long> {
+        return try {
+            Json.decodeFromString<List<Long>>(message.visibleToAiIds)
+                .filter { it > 0L }
+                .toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    private fun isMessageVisibleToAi(message: ChatMessage, aiId: Long): Boolean {
+        val visibleAiIds = resolveVisibleAiIds(message)
+        return visibleAiIds.isEmpty() || aiId in visibleAiIds
+    }
+
+    private fun filterVisibleMessagesForAi(messages: List<ChatMessage>, aiId: Long): List<ChatMessage> {
+        return messages.filter { isMessageVisibleToAi(it, aiId) }
+    }
+
+    private fun normalizeVisibleAiIds(visibleToAiIds: Set<Long>, selectedAIs: List<AiChatConfig>): Set<Long> {
+        if (visibleToAiIds.isEmpty()) return emptySet()
+        val selectedIds = selectedAIs.map { it.id }.toSet()
+        return visibleToAiIds.filter { it in selectedIds }.toSet()
+    }
+
 
 
     private data class ToolBatchContext(
         val chatId: Long,
         val aiConfig: AiChatConfig,
+        val visibleToAiIds: Set<Long> = emptySet(),
         val enabledTools: Set<String>,
         val baseMessages: List<Map<String, Any>>,
         val assistantMessage: Map<String, Any>,
@@ -171,6 +188,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private data class ReplyResumePayload(
         val chatId: Long,
         val aiConfig: AiChatConfig,
+        val visibleToAiIds: Set<Long> = emptySet(),
         val messages: List<Map<String, Any>>,
         val enabledTools: Set<String>,
         val executedTools: List<String> = emptyList()
@@ -195,7 +213,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (activeReplyJob == launchedJob) {
                     activeReplyJob = null
                     _currentTypingAi.value = null
-                    _pendingToolUI.value = null
+                    // Keep tool confirmation UI when waiting for user action.
+                    if (currentBatch == null) {
+                        _pendingToolUI.value = null
+                    }
                     if (_aiState.value is AiState.Loading || _aiState.value is AiState.Streaming) {
                         _aiState.value = AiState.Idle
                     }
@@ -257,6 +278,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 messages = payload.messages,
                 enabledTools = payload.enabledTools,
                 config = payload.aiConfig,
+                visibleToAiIds = payload.visibleToAiIds,
                 executedTools = payload.executedTools
             )
 
@@ -267,21 +289,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
 
     // ========== 对话 CRUD ==========
-
-    fun addChat(title: String, tag: String, tagFolder: String = "我的笔记"): Chat {
-        val chat = Chat(
-            title = title,
-            date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
-            tag = tag,
-            tagFolder = tagFolder
-        )
-        viewModelScope.launch {
-            val chatId = chatDao.insertChat(chat)
-            chatDao.insertAiConfig(AiChatConfig(chatId = chatId))
-            chatDao.insertUserConfig(UserChatConfig(chatId = chatId))
-        }
-        return chat
-    }
 
     fun deleteChat(chat: Chat) {
         viewModelScope.launch {
@@ -360,7 +367,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      * 发送消息并调用 AI
      * 自动从 DB 读取该对话的 AI 配置、历史消息和上下文
      */
-    fun sendMessage(chatId: Long, content: String, selectedAIs: List<AiChatConfig>, imageBase64: String? = null, imageUriString: String? = null, autoConfirmToolsOverride: Boolean = false) {
+    fun sendMessage(
+        chatId: Long,
+        content: String,
+        selectedAIs: List<AiChatConfig>,
+        imageBase64: String? = null,
+        imageUriString: String? = null,
+        visibleToAiIds: Set<Long> = emptySet(),
+        autoConfirmToolsOverride: Boolean = false
+    ) {
         if (selectedAIs.isEmpty()) return
         launchReplyJob {
             dismissPausedReplyPrompt()
@@ -368,6 +383,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             autoConfirmTools = autoConfirmToolsOverride
             applyReplySelection(chatId, selectedAIs)
             val chat = chatDao.getChatByIdSuspend(chatId) ?: return@launchReplyJob
+            val normalizedVisibleAiIds = normalizeVisibleAiIds(visibleToAiIds, selectedAIs)
+            val targetAIs = if (normalizedVisibleAiIds.isEmpty()) {
+                selectedAIs
+            } else {
+                selectedAIs.filter { it.id in normalizedVisibleAiIds }
+            }
+            if (targetAIs.isEmpty()) return@launchReplyJob
             
             // 1. 保存用户消息
             val photoUris = if (imageUriString != null) Json.encodeToString(listOf(imageUriString)) else "[]"
@@ -376,12 +398,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 role = "user",
                 content = content,
                 date = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(Date()),
-                photoUris = photoUris
+                photoUris = photoUris,
+                visibleToAiIds = Json.encodeToString(normalizedVisibleAiIds.toList())
             )
             saveAndIndexMessage(userMsg)
 
             // 2. 轮流调用 AI
-            for (config in selectedAIs) {
+            for (config in targetAIs) {
                 _currentTypingAi.value = config
 
                 val enabledTools = mutableSetOf<String>().apply {
@@ -424,6 +447,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 latestReplyPayload = ReplyResumePayload(
                     chatId = chatId,
                     aiConfig = config,
+                    visibleToAiIds = normalizedVisibleAiIds,
                     messages = messages,
                     enabledTools = enabledTools
                 )
@@ -432,7 +456,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 val initialExecutedTools = mutableListOf<String>()
                 
                 // 处理并保证入库完成，再走下一个循环
-                handleAiResponse(chatId, result, messages, enabledTools, config = config, executedTools = initialExecutedTools)
+                handleAiResponse(
+                    chatId = chatId,
+                    result = result,
+                    messages = messages,
+                    enabledTools = enabledTools,
+                    config = config,
+                    visibleToAiIds = normalizedVisibleAiIds,
+                    executedTools = initialExecutedTools
+                )
                 _currentTypingAi.value = null
             }
             _aiState.value = AiState.Idle
@@ -499,7 +531,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     content = displayContent,
                     date = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(Date()),
                     toolExecutions = Json.encodeToString(executedTools),
-                    aiId = aiConfig.id
+                    aiId = aiConfig.id,
+                    visibleToAiIds = Json.encodeToString(listOf(aiConfig.id))
                 )
                 saveAndIndexMessage(aiMsg)
                 return Result.success(displayContent)
@@ -524,19 +557,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     
     suspend fun getAiConfigById(aiId: Long): AiChatConfig? = chatDao.getAiConfigById(aiId)
 
-    fun addAiConfig(chatId: Long) {
-        viewModelScope.launch { chatDao.insertAiConfig(AiChatConfig(chatId = chatId)) }
-    }
-
     fun updateAiConfig(config: AiChatConfig) {
         viewModelScope.launch { chatDao.updateAiConfig(config) }
     }
 
-    fun deleteAiConfig(config: AiChatConfig) {
-        // Fallback to the safe variant to ensure folder unbinding is handled
-        deleteAiConfigWithFolder(config)
-    }
-    
     /**
      * 从群聊中移除AI（不删除AI本身，只从当前聊天移除）
      */
@@ -662,17 +686,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
     }
-    
-    /**
-     * 获取所有可用的AI配置（来自AI列表，即单聊的第一个AI）
-     */
-    fun getAllAvailableAis(): Flow<List<AiChatConfig>> {
-        return chatDao.getAllChat().map { chats ->
-            chats.filter { !it.isGroupChat }.mapNotNull { chat ->
-                chatDao.getAiConfigOnce(chat.id).firstOrNull()
-            }
-        }
-    }
+
     
     // ========== 群聊成员管理（引用模式） ==========
     
@@ -709,16 +723,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * 获取群聊中引用的源AI配置列表（一次性获取）
-     */
-    suspend fun getGroupChatSourceAiConfigsOnce(groupChatId: Long): List<AiChatConfig> {
-        val members = chatDao.getGroupChatMembersOnce(groupChatId)
-        return members.mapNotNull { member ->
-            chatDao.getAiConfigById(member.sourceAiId)
-        }
-    }
-    
     /**
      * 获取群聊成员对应的源AI所在的Chat（用于导航到源AI设置界面）
      */
@@ -1000,7 +1004,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 is ToolTask.QueryChatHistory -> {
-                    val messages = chatDao.getMessagesOnce(batch.chatId)
+                    val messages = filterVisibleMessagesForAi(chatDao.getMessagesOnce(batch.chatId), batch.aiConfig.id)
                     val format = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
                     val startTimeDate = currentTask.startDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
                     val endTimeDate = currentTask.endDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
@@ -1125,7 +1129,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is ToolTask.PauseAndDecide -> {
                     val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                    val recentMessages = chatDao.getMessagesOnce(batch.chatId).takeLast(6)
+                    val recentMessages = filterVisibleMessagesForAi(chatDao.getMessagesOnce(batch.chatId), batch.aiConfig.id).takeLast(6)
                     val noteCount = diaryDao.getDiariesByFolder(targetFolder).size
                     val alarmCount = alarmDao.getActiveAlarmsByAiConfigIdSync(batch.aiConfig.id).size
                     val resultText = buildString {
@@ -1189,6 +1193,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             latestReplyPayload = ReplyResumePayload(
                 chatId = batch.chatId,
                 aiConfig = batch.aiConfig,
+                visibleToAiIds = batch.visibleToAiIds,
                 messages = finalMessages,
                 enabledTools = batch.enabledTools,
                 executedTools = finalExecutedTools
@@ -1203,6 +1208,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     messages = finalMessages, 
                     enabledTools = batch.enabledTools,
                     config = batch.aiConfig,
+                    visibleToAiIds = batch.visibleToAiIds,
                     executedTools = finalExecutedTools
                 )
             }
@@ -1255,7 +1261,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         // 历史消息（此时已经包含了最新的用户消息或者其他 AI 的回复）
         // 使用用户设置的轮数，每轮包含一来一回，所以乘2再加1确保最新消息
-        val history = chatDao.getMessagesOnce(chatId).takeLast(historyRounds * 2 + 1)
+        val history = filterVisibleMessagesForAi(
+            chatDao.getMessagesOnce(chatId),
+            currentAiConfig.id
+        ).takeLast(historyRounds * 2 + 1)
 
         // system 消息：静态规则
         val staticSystemContent = buildSystemMessage(chatId, currentAiConfig, enabledTools)
@@ -1456,6 +1465,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         messages: List<Map<String, Any>>,
         enabledTools: Set<String>,
         config: AiChatConfig? = null,
+        visibleToAiIds: Set<Long> = emptySet(),
         executedTools: List<String> = emptyList()
     ) {
         result.fold(
@@ -1481,6 +1491,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                     date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                                     toolExecutions = "[]", // 中间回复不展示工具执行记录，留到最终汇总
                                     aiId = config?.id,
+                                    visibleToAiIds = Json.encodeToString(visibleToAiIds.toList()),
                                     reasoningContent = response.reasoningContent
                                 )
                                 saveAndIndexMessage(aiMsg)
@@ -1490,6 +1501,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             currentBatch = ToolBatchContext(
                                 chatId = chatId,
                                 aiConfig = aiConfigForBatch,
+                                visibleToAiIds = visibleToAiIds,
                                 enabledTools = enabledTools,
                                 baseMessages = messages,
                                 assistantMessage = assistantToolCallMessage,
@@ -1512,6 +1524,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                             toolExecutions = toolExecutionsStr,
                             aiId = config?.id,
+                            visibleToAiIds = Json.encodeToString(visibleToAiIds.toList()),
                             reasoningContent = response.reasoningContent
                         )
                         saveAndIndexMessage(aiMsg)
@@ -1527,7 +1540,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     content = error.message ?: "AI回复失败",
                     date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                     toolExecutions = toolExecutionsStr,
-                    aiId = config?.id
+                    aiId = config?.id,
+                    visibleToAiIds = Json.encodeToString(visibleToAiIds.toList())
                 )
                 saveAndIndexMessage(errMsg)
                 _aiState.value = AiState.Error(message = error.message ?: "AI回复失败")
@@ -1537,52 +1551,59 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun parseToolTasks(toolCalls: List<AiToolCall>, enabledTools: Set<String>, boundFolder: String = ""): List<ToolTask> {
         val tasks = mutableListOf<ToolTask>()
-        for (call in toolCalls) {
+        toolLoop@ for (call in toolCalls) {
             when {
                 call.type == "function" && call.functionName == "read_notes" && "read_notes" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val keyword = json.optString("keyword").trim()
                         if (keyword.isNotEmpty() && keyword.matches(Regex("^[\\w\\u4e00-\\u9fa5]+$"))) {
                             val limit = json.optInt("limit", 3).coerceIn(1, 5)
                             tasks.add(ToolTask.ReadNotes(call, keyword, limit))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: read_notes parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "get_notes_list" && "read_notes" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val keyword = json.optString("keyword").trim()
                         val limit = json.optInt("limit", 30).coerceIn(1, 100)
                         tasks.add(ToolTask.GetNotesList(call, keyword, limit))
                     } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: get_notes_list parse failed, fallback default, args=${call.arguments}, err=${e.message}")
                         tasks.add(ToolTask.GetNotesList(call, "", 30))
                     }
                 }
                 call.type == "function" && call.functionName == "rag_search" && "rag_search" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val keyword = json.optString("keyword").trim()
                         if (keyword.isNotEmpty()) {
                             val limit = json.optInt("limit", 3).coerceIn(1, 5)
                             tasks.add(ToolTask.RagSearch(call, keyword, limit))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: rag_search parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "write_note" && "write_note" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val title = json.optString("title").trim()
                         val content = json.optString("content").trim()
                         val tag = json.optString("tag", "未分类").trim()
                         if (title.isNotEmpty() && content.isNotEmpty()) {
                             tasks.add(ToolTask.WriteNote(call, title, content, tag))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: write_note parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "edit_note" && "edit_note" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         if (json.has("id")) {
                             val id = json.getLong("id")
                             val title = if (json.has("title")) json.getString("title") else null
@@ -1590,11 +1611,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             val tag = if (json.has("tag")) json.getString("tag") else null
                             tasks.add(ToolTask.EditNote(call, id, title, content, tag))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: edit_note parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "batch_edit_note" && "edit_note" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val id = json.getLong("id")
                         val opsArray = json.getJSONArray("operations")
                         val operations = mutableListOf<ToolTask.NoteOperation>()
@@ -1610,40 +1633,48 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         if (operations.isNotEmpty()) {
                             tasks.add(ToolTask.BatchEditNote(call, id, operations))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: batch_edit_note parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "set_tag" && "edit_note" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val id = json.getLong("id")
                         val tag = json.optString("tag").trim()
                         if (tag.isNotEmpty()) {
                             tasks.add(ToolTask.SetTag(call, id, tag))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: set_tag parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "query_chat_history" && "query_chat_history" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val keyword = json.optString("keyword").trim()
                         val limit = json.optInt("limit", 20).coerceIn(1, 50)
                         val startDate = json.optString("startDate").takeIf { it.isNotBlank() }
                         val endDate = json.optString("endDate").takeIf { it.isNotBlank() }
                         tasks.add(ToolTask.QueryChatHistory(call, keyword, limit, startDate, endDate))
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: query_chat_history parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "web_search_baidu" && "web_search_baidu" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val keyword = json.optString("keyword").trim()
                         if (keyword.isNotEmpty()) {
                             tasks.add(ToolTask.WebSearchBaidu(call, keyword))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: web_search_baidu parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "create_plan" && "create_plan" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val name = json.optString("name").trim()
                         val dateTime = json.optString("dateTime").trim()
                         val taskPrompt = json.optString("taskPrompt", "").trim()
@@ -1660,23 +1691,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         if (name.isNotEmpty() && dateTime.isNotEmpty() && taskPrompt.isNotEmpty()) {
                             tasks.add(ToolTask.SetAlarm(call, name, dateTime, taskPrompt, repeatDays.sorted()))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: create_plan parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "cancel_plan" && "cancel_plan" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val alarmId = json.optInt("alarmId", 0)
                         if (alarmId > 0) {
                             tasks.add(ToolTask.CancelAlarm(call, alarmId))
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: cancel_plan parse failed, args=${call.arguments}, err=${e.message}")
+                    }
                 }
                 call.type == "function" && call.functionName == "pause_and_decide" && "pause_and_decide" in enabledTools -> {
                     try {
-                        val json = JSONObject(call.arguments)
+                        val json = parseToolArgumentsSafely(call) ?: continue@toolLoop
                         val reason = json.optString("reason").trim().ifBlank { null }
                         tasks.add(ToolTask.PauseAndDecide(call, reason))
                     } catch (e: Exception) {
+                        Log.w(TAG, "parseToolTasks: pause_and_decide parse failed, use null reason, args=${call.arguments}, err=${e.message}")
                         tasks.add(ToolTask.PauseAndDecide(call, null))
                     }
                 }
@@ -1685,9 +1721,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return tasks
     }
 
+    private fun parseToolArgumentsSafely(call: AiToolCall): JSONObject? {
+        val raw = call.arguments.trim()
+        if (raw.isBlank() || raw.equals("null", ignoreCase = true)) {
+            return JSONObject()
+        }
+
+        try {
+            return JSONObject(raw)
+        } catch (_: Exception) {
+        }
+
+        var candidate = raw
+        if (!candidate.startsWith("{")) {
+            val payload = candidate.trimStart(',').trim()
+            candidate = if (payload.isBlank()) "{}" else "{$payload"
+        }
+        if (!candidate.endsWith("}")) {
+            candidate = "$candidate}"
+        }
+
+        return try {
+            JSONObject(candidate)
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "parseToolArgumentsSafely: drop malformed tool args, name=${call.functionName}, type=${call.type}, args=${call.arguments}, err=${e.message}"
+            )
+            null
+        }
+    }
+
     private fun buildAssistantToolCallMessage(content: String, toolCalls: List<AiToolCall>): Map<String, Any> {
         val callsList = toolCalls.map { call ->
-            // Fix invalid parameter error from LLM returning empty arguments
+            // 修复空参数问题
             val safeArguments = if (call.arguments.isBlank()) "{}" else call.arguments
             mapOf(
                 "id" to call.id,
@@ -1917,7 +1984,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             is ToolTask.QueryChatHistory -> {
-                val messages = chatDao.getMessagesOnce(chatId)
+                val messages = filterVisibleMessagesForAi(chatDao.getMessagesOnce(chatId), aiConfigId)
                 val format = SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
                 val startTimeDate = task.startDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
                 val endTimeDate = task.endDate?.let { try { format.parse(it) } catch (e: Exception) { null } }
@@ -2040,7 +2107,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             is ToolTask.PauseAndDecide -> {
                 val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                val recentMessages = chatDao.getMessagesOnce(chatId).takeLast(6)
+                val recentMessages = filterVisibleMessagesForAi(chatDao.getMessagesOnce(chatId), aiConfigId).takeLast(6)
                 val noteCount = diaryDao.getDiariesByFolder(defaultFolder).size
                 val alarmCount = alarmDao.getActiveAlarmsByAiConfigIdSync(aiConfigId).size
                 val resultText = buildString {
@@ -2088,7 +2155,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // 获取当前对话的历史轮数设置
         val chat = chatDao.getChatByIdSuspend(chatId)
         val historyRounds = chat?.historyRounds ?: DEFAULT_HISTORY_ROUNDS
-        val history = chatDao.getMessagesOnce(chatId).takeLast(historyRounds * 2 + 1)
+        val history = filterVisibleMessagesForAi(
+            chatDao.getMessagesOnce(chatId),
+            currentAiConfig.id
+        ).takeLast(historyRounds * 2 + 1)
         history.forEach { msg ->
             val isUserMessage = msg.role == userRole
             val isCurrentAiMessage = msg.role == assistantRole && msg.aiId == currentAiConfig.id
@@ -2116,7 +2186,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     ): String {
         val userContext = buildContextFromConfig(chatDao.getUserConfigOnce(chatId)?.referencedDiaryId)
         val aiContext = buildContextFromConfig(referencedDiaryIdOverride ?: currentAiConfig.referencedDiaryId)
-        val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())
+        val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
         return buildString {
             append("【时间】$currentTime\n")
             append("你是${currentAiConfig.name}，正在执行定时任务，严格按指令完成。\n")
@@ -2128,10 +2198,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 alarmTools.addAll(listOf("write_note", "edit_note", "batch_edit_note", "set_tag", "pause_and_decide"))
                 append("【工具】可用：${alarmTools.joinToString("/")}，通过 tool_calls 调用。\n")
                 append("【工具调用格式要求】\n")
-                append("- 必须走标准 tool_calls，不要在普通文本里伪造工具调用。\n")
+                append("- 必须走标准 tool_calls，不能在普通文本里伪造工具调用。\n")
                 append("- arguments 必须是合法 JSON 字符串。\n")
                 append("- 未收到 tool 结果前不要下结论。\n")
-                append("- pause_and_decide 同一轮工具链最多调用 1 次。\n")
+                append("- pause_and_decide 同一轮工具链最好在最后调用。\n")
                 append("- 已拿到 read_notes/get_notes_list 结果后，不要同参重复调用。\n")
             }
         }.trim()
@@ -2197,15 +2267,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // 直接回复：让选中的 AI 直接根据当前对话历史生成回复，而不需要用户发送新消息
-    fun directReply(chatId: Long, selectedAIs: List<AiChatConfig>) {
+    fun directReply(chatId: Long, selectedAIs: List<AiChatConfig>, visibleToAiIds: Set<Long> = emptySet()) {
         if (selectedAIs.isEmpty()) return
         launchReplyJob {
             dismissPausedReplyPrompt()
             latestReplyPayload = null
             applyReplySelection(chatId, selectedAIs)
+            val normalizedVisibleAiIds = normalizeVisibleAiIds(visibleToAiIds, selectedAIs)
+            val targetAIs = if (normalizedVisibleAiIds.isEmpty()) {
+                selectedAIs
+            } else {
+                selectedAIs.filter { it.id in normalizedVisibleAiIds }
+            }
+            if (targetAIs.isEmpty()) return@launchReplyJob
 
             // 轮流回复：等待上一个 AI 回复完成后再请求下一个
-            for (config in selectedAIs) {
+            for (config in targetAIs) {
                     _currentTypingAi.value = config
 
                     val enabledTools = mutableSetOf<String>().apply {
@@ -2229,12 +2306,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     latestReplyPayload = ReplyResumePayload(
                         chatId = chatId,
                         aiConfig = config,
+                        visibleToAiIds = normalizedVisibleAiIds,
                         messages = messages,
                         enabledTools = enabledTools
                     )
                     val result = requestAiResponse(config, messages, enabledTools)
                     // TODO: 若需要等待工具调用完全结束，此处可能要调整为观察状态
-                    handleAiResponse(chatId, result, messages, enabledTools, config = config)
+                    handleAiResponse(
+                        chatId = chatId,
+                        result = result,
+                        messages = messages,
+                        enabledTools = enabledTools,
+                        config = config,
+                        visibleToAiIds = normalizedVisibleAiIds
+                    )
                     _currentTypingAi.value = null
             }
             _aiState.value = AiState.Idle

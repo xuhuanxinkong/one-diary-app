@@ -43,6 +43,7 @@ data class ChatMessage(
     val photoUris: String = "[]", // To store local file paths of images
     val toolExecutions: String = "[]", // JSON string of List<String>
     val aiId: Long? = null, // 用于记录是哪个 AI 发送的消息
+    val visibleToAiIds: String = "[]", // 可见 AI 列表(JSON)，为空数组表示公开
     val reasoningContent: String? = null // 存储深度思考的内容
 )
 
