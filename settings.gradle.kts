@@ -1,10 +1,11 @@
 pluginManagement {
     repositories {
+        mavenCentral()
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
         maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
-        // 移除 google() 和它的过滤条件
-        mavenCentral()
+        // 华为 Maven 仓库
+        maven { url = uri("https://developer.huawei.com/repo/") }
         gradlePluginPortal()
     }
 }
@@ -12,10 +13,11 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        mavenCentral()
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
-        // 移除 google()
-        mavenCentral()
+        // 华为 Maven 仓库
+        maven { url = uri("https://developer.huawei.com/repo/") }
     }
 }
 

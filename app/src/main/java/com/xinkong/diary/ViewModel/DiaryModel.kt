@@ -58,7 +58,16 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                 tagFolder = tagFolder,
                 type = type
             )
-            diaryDao.insert(diary)
+            val newId = diaryDao.insert(diary)
+            
+            // 异步创建 RAG 索引
+            try {
+                val insertedDiary = diaryDao.getDiaryById(newId) ?: diary.copy(id = newId)
+                com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+            } catch (e: Exception) {
+                // 索引失败不影响主流程
+                e.printStackTrace()
+            }
         }
     }
 
@@ -66,12 +75,48 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteDiary(diary: Diary) {
         viewModelScope.launch {
             diaryDao.delete(diary)
+            
+            // 删除 RAG 索引
+            try {
+                com.xinkong.diary.rag.RAG.deleteIndex(
+                    getApplication(),
+                    com.xinkong.diary.rag.index.IndexManager.SOURCE_TYPE_DIARY,
+                    diary.id
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // 复制日记
+    fun copyDiary(diary: Diary, newTag: String, newTagFolder: String, onComplete: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            val cloned = diary.copy(id = 0, tag = newTag, tagFolder = newTagFolder)
+            val newId = diaryDao.insert(cloned)
+            
+            // 异步创建 RAG 索引
+            try {
+                val insertedDiary = diaryDao.getDiaryById(newId) ?: cloned.copy(id = newId)
+                com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            
+            onComplete?.invoke()
         }
     }
     // 更新
     fun updateDiary(diary: Diary) {
         viewModelScope.launch {
             diaryDao.update(diary = diary)
+            
+            // 更新 RAG 索引
+            try {
+                com.xinkong.diary.rag.RAG.indexDiary(getApplication(), diary)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -143,13 +188,21 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
                         val newFolder = targetFolder.ifBlank { diary.tagFolder }
                         val newDiary = Diary(
                             title = diary.title,
+                            text = diary.text,
                             content = diary.content,
                             date = diary.date,
                             tag = newTag,
                             tagFolder = newFolder,
                             type = diary.type
                         )
-                        diaryDao.insert(newDiary)
+                        val newId = diaryDao.insert(newDiary)
+
+                        try {
+                            val insertedDiary = diaryDao.getDiaryById(newId) ?: newDiary.copy(id = newId)
+                            com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
 
                         ensureTagExists(
                             type = diary.type,
@@ -176,12 +229,19 @@ class DiaryViewModel(application: Application) : AndroidViewModel(application) {
 
                     val newDiary = Diary(
                         title = "导入的笔记",
+                        text = formattedJson,
                         content = formattedJson,
                         date = SimpleDateFormat("yyyy-MM-dd HH:mm").format(Date()),
                         tag = newTag,
                         tagFolder = newFolder
                     )
-                    diaryDao.insert(newDiary)
+                    val newId = diaryDao.insert(newDiary)
+                    try {
+                        val insertedDiary = diaryDao.getDiaryById(newId) ?: newDiary.copy(id = newId)
+                        com.xinkong.diary.rag.RAG.indexDiary(getApplication(), insertedDiary)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                     tagDao.insertDiaryTagIgnore(buildDiaryTag(newTag, newFolder))
                     callback(Result.success(1))
                 }

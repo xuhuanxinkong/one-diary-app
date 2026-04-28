@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.serialization)
+    id("io.objectbox")
+    id("com.huawei.agconnect")
 }
 
 android {
@@ -65,6 +67,18 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.material.icons.extended)
+    
+    // RAG: ONNX Runtime + ObjectBox
+    implementation(libs.onnxruntime.android)
+    implementation(libs.objectbox.android)
+    
+    // 华为 ML Kit 语音识别
+    implementation("com.huawei.hms:ml-computer-voice-asr:3.12.0.301")
+    implementation("com.huawei.hms:ml-computer-voice-asr-plugin:3.12.0.301")
+    
+    // 华为 ML Kit TTS 语音合成
+    implementation("com.huawei.hms:ml-computer-voice-tts:3.12.0.301")
+
 
 
 

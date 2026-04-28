@@ -6,11 +6,14 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
+import java.io.File
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
+import androidx.core.graphics.drawable.IconCompat
 import com.xinkong.diary.MainActivity
 import com.xinkong.diary.R
 import com.xinkong.diary.receiver.AlarmRingActivity
@@ -19,7 +22,7 @@ object NotificationHelper {
 
     private const val ALARM_CHANNEL_ID = "ALARM_CHANNEL_V2"
     private const val ALARM_CHANNEL_NAME = "重要提醒(闹钟与AI消息)"
-    private const val MESSAGE_CHANNEL_ID = "MESSAGE_CHANNEL"
+    private const val MESSAGE_CHANNEL_ID = "MESSAGE_CHANNEL_V2"
     private const val MESSAGE_CHANNEL_NAME = "普通消息"
 
     fun createChannels(context: Context) {
@@ -45,6 +48,14 @@ object NotificationHelper {
             // 2. 普通消息渠道
             val msgChannel = NotificationChannel(MESSAGE_CHANNEL_ID, MESSAGE_CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT).apply {
                 lockscreenVisibility = androidx.core.app.NotificationCompat.VISIBILITY_PRIVATE
+                val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                setSound(
+                    notificationUri,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
             }
 
             notificationManager.createNotificationChannel(alarmChannel)
@@ -55,7 +66,14 @@ object NotificationHelper {
     /**
      * 发送类似微信的AI消息通知（基于 MessagingStyle）
      */
-    fun sendAiMessageNotification(context: Context, notificationId: Int, senderName: String, messageText: String, isHighPriority: Boolean = false) {
+    fun sendAiMessageNotification(
+        context: Context,
+        notificationId: Int,
+        senderName: String,
+        messageText: String,
+        isHighPriority: Boolean = false,
+        avatarUri: String? = null
+    ) {
         createChannels(context)
 
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -68,10 +86,12 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // 构造用户或AI的头像 (示例用系统图标兜底，可换成AI特有头像)
-        val aiPerson = Person.Builder()
-            .setName(senderName)
-            .build()
+        val avatarBitmap = loadAvatarBitmap(context, avatarUri)
+        val aiPersonBuilder = Person.Builder().setName(senderName)
+        if (avatarBitmap != null) {
+            aiPersonBuilder.setIcon(IconCompat.createWithBitmap(avatarBitmap))
+        }
+        val aiPerson = aiPersonBuilder.build()
             
         val messagingStyle = NotificationCompat.MessagingStyle(aiPerson)
             .addMessage(messageText, System.currentTimeMillis(), aiPerson)
@@ -85,9 +105,28 @@ object NotificationHelper {
             .setAutoCancel(true)
             .setPriority(if (isHighPriority) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        if (avatarBitmap != null) {
+            builder.setLargeIcon(avatarBitmap)
+        }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(notificationId, builder.build())
+    }
+
+    private fun loadAvatarBitmap(context: Context, avatarUri: String?): android.graphics.Bitmap? {
+        if (avatarUri.isNullOrBlank()) return null
+        return try {
+            val uri = Uri.parse(avatarUri)
+            if (uri.scheme.isNullOrBlank()) {
+                BitmapFactory.decodeFile(avatarUri)
+            } else {
+                context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            }
+        } catch (_: Exception) {
+            if (File(avatarUri).exists()) BitmapFactory.decodeFile(avatarUri) else null
+        }
     }
 
     /**

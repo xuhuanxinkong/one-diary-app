@@ -1,5 +1,11 @@
 package com.xinkong.diary.ui.screen.alarm
 
+import android.annotation.SuppressLint
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -10,12 +16,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -28,8 +38,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
 import com.xinkong.diary.R
 import com.xinkong.diary.data.AlarmEntity
+import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.ui.animation.pressScaleEffect
-import com.xinkong.diary.ui.theme.diaryColors
+import com.xinkong.diary.ViewModel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.util.Calendar
 
@@ -41,19 +52,34 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.layout.ModifierLocalBeyondBoundsLayout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import com.xinkong.diary.ui.theme.diaryColors
 
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun AlarmScreen(
-    onAddAlarm: () -> Unit,
-    onEditAlarm: (Int) -> Unit
+    onAddAlarm: (Boolean, Long?) -> Unit,  // Boolean 表示是否是AI提醒, Long? 是AI的ID
+    onEditAlarm: (Int, Boolean) -> Unit,  // Int是id, Boolean是否是AI提醒
+    chatViewModel: ChatViewModel,
+    initialSelectedAiId: Long? = null,  // 从编辑界面返回时自动选中的AI
+    onSelectedCategoryChange: (Long?) -> Unit = {}
 ) {
     val alarmViewModel: AlarmViewModel = viewModel()
     val alarms by alarmViewModel.alarms.collectAsStateWithLifecycle()
+    val allAiConfigs by chatViewModel.allAiConfigsState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showOverlayPermissionDialog by remember { mutableStateOf(false) }
+    
+    // 选中的分类：null 表示"用户"(普通闹钟)，否则是 AI 的 id
+    var selectedCategory by rememberSaveable(initialSelectedAiId) { mutableStateOf(initialSelectedAiId) }
+    
+    // 是否收起顶部时钟区域
+    var isClockCollapsed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedCategory) {
+        onSelectedCategoryChange(selectedCategory)
+    }
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
@@ -84,51 +110,415 @@ fun AlarmScreen(
             }
         )
     }
-
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddAlarm,
-                containerColor = MaterialTheme.diaryColors.background2,
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "添加闹钟")
+    
+    // 根据选中分类过滤闹钟
+    val filteredAlarms = remember(alarms, selectedCategory, allAiConfigs) {
+        if (selectedCategory == null) {
+            // 用户分类：显示普通闹钟 (actionType != "PROCESS_NOTE")
+            alarms.filter { it.actionType != "PROCESS_NOTE" }
+        } else {
+            // AI分类：显示该AI的提醒
+            val selectedAiId = selectedCategory
+            alarms.filter { alarm ->
+                alarm.actionType == "PROCESS_NOTE" && 
+                extractAiIdFromPayload(alarm.taskPayload) == selectedAiId
             }
         }
-    ) { padding ->
+    }
+
+    Scaffold(
+        containerColor = Color(0xFFF5F5F5) // 整个屏幕背景改为浅灰色
+    ) { innerPadding ->
         Column(
             modifier = Modifier
+                .padding(top = innerPadding.calculateTopPadding())
                 .fillMaxSize()
-                .background(Color.White)
+
         ) {
-            // 上半部分：数字时钟
-            Box(
+            // 上半部分：数字时钟 (可收起) + 收起按钮
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.4f), // 占比 40%
-                contentAlignment = Alignment.Center
+                    .background(Color.White) // 保留时钟区域为白色背景
+                    .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
             ) {
-                DigitalClockCanvas()
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    // 收起/展开按钮 (始终显示在右上角)
+                    IconButton(
+                        onClick = { isClockCollapsed = !isClockCollapsed },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 30.dp, end = 24.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isClockCollapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                            contentDescription = if (isClockCollapsed) "展开" else "收起",
+                            tint = Color.Gray
+                        )
+                    }
+                }
+                
+                AnimatedVisibility(
+                    visible = !isClockCollapsed,
+                    enter = expandVertically(),
+                    exit = shrinkVertically()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(280.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        DigitalClockCanvas()
+                    }
+                }
             }
 
-            // 下半部分：闹钟列表
-            LazyColumn(
+            // 分割线
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                color = Color.LightGray.copy(alpha = 0.5f)
+            )
+            
+            // 下半部分：左右两栏布局
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(padding.calculateBottomPadding())
-                    .weight(0.6f),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .weight(1f)
             ) {
-                items(alarms, key = { it.id }) { alarm ->
-                    AlarmCard(
-                        alarm = alarm,
-                        onCheckedChange = { isChecked ->
-                            alarmViewModel.toggleAlarm(alarm, isChecked)
-                        },
-                        onClick = { onEditAlarm(alarm.id) }
+                // 左侧：用户 + AI 列表
+                Column(
+                    modifier = Modifier
+                        .width(110.dp)
+                        .fillMaxHeight()
+                        .background(Color.White)
+                        .padding(start = 8.dp, end = 8.dp, top = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // "用户" 选项
+                    CategoryItem(
+                        name = "用户",
+                        isSelected = selectedCategory == null,
+                        onClick = { selectedCategory = null }
+                    )
+                    
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                        color = Color.LightGray.copy(alpha = 0.3f),
+                        thickness = 1.dp
+                    )
+                    
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    // AI 列表
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        items(allAiConfigs, key = { it.id }) { aiConfig ->
+                            AiCategoryItem(
+                                aiConfig = aiConfig,
+                                isSelected = selectedCategory == aiConfig.id,
+                                onClick = { selectedCategory = aiConfig.id }
+                            )
+                        }
+                    }
+                }
+                
+                // 右侧：闹钟列表
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(Color(0xFFF5F5F5)),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.9f)
+                            .padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        items(filteredAlarms, key = { it.id }) { alarm ->
+                            SwipeToDeleteAlarmCard(
+                                alarm = alarm,
+                                onCheckedChange = { isChecked ->
+                                    alarmViewModel.toggleAlarm(alarm, isChecked)
+                                },
+                                onClick = { onEditAlarm(alarm.id, alarm.actionType == "PROCESS_NOTE") },
+                                onDelete = { alarmViewModel.deleteAlarm(alarm.id) }
+                            )
+                        }
+                        
+                        // 新建卡片
+                        item {
+                            AddAlarmCard(
+                                isAiReminder = selectedCategory != null,
+                                onClick = { onAddAlarm(selectedCategory != null, selectedCategory) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 从 taskPayload 中提取 aiId
+private fun extractAiIdFromPayload(taskPayload: String?): Long? {
+    if (taskPayload.isNullOrBlank()) return null
+    return try {
+        val id = org.json.JSONObject(taskPayload).optLong("aiId", -1L)
+        id.takeIf { it > 0 }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+// 分类项 (用户)
+@Composable
+private fun CategoryItem(
+    name: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val animatedBgColor by animateColorAsState(
+        targetValue = if (isSelected) Color(0xFFCFD8DC) else Color.Transparent,
+        animationSpec = tween(300),
+        label = "categoryBgColor"
+    )
+    val animatedTextColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        animationSpec = tween(300),
+        label = "categoryTextColor"
+    )
+    
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(animatedBgColor)
+            .clickable { onClick() }
+            .padding(vertical = 12.dp, horizontal = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = name,
+            fontSize = 17.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            color = animatedTextColor
+        )
+    }
+}
+
+// AI 分类项
+@Composable
+private fun AiCategoryItem(
+    aiConfig: AiChatConfig,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val animatedBgColor by animateColorAsState(
+        targetValue = if (isSelected) Color(0xFF90CAF9) else Color.Transparent,
+        animationSpec = tween(300),
+        label = "aiBgColor"
+    )
+    val animatedTextColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        animationSpec = tween(300),
+        label = "aiTextColor"
+    )
+    
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(animatedBgColor)
+            .clickable { onClick() }
+            .padding(vertical = 10.dp, horizontal = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = aiConfig.name,
+            fontSize = 15.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            color = animatedTextColor,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+}
+
+// 新建闹钟/提醒卡片
+@Composable
+private fun AddAlarmCard(
+    isAiReminder: Boolean,
+    onClick: () -> Unit
+) {
+    val addCardBorder = if (isAiReminder) Color(0xFFD6E9FF) else Color(0xFFEEEEEE)
+    val addIconTint = if (isAiReminder) Color(0xFF2F6DB2) else Color.Gray
+    val addTextTint = if (isAiReminder) Color(0xFF2F6DB2) else Color.Gray
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, addCardBorder)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(vertical = 12.dp, horizontal = 10.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "添加",
+                tint = addIconTint,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (isAiReminder) "新建AI提醒" else "新建闹钟",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = addTextTint
+            )
+        }
+    }
+}
+
+// 滑动删除闹钟卡片
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToDeleteAlarmCard(
+    alarm: AlarmEntity,
+    onCheckedChange: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { dismissValue ->
+            if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
+                onDelete()
+                true
+            } else {
+                false
+            }
+        }
+    )
+    
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val color by animateColorAsState(
+                targetValue = when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.EndToStart -> Color(0xFFFF5252)
+                    else -> Color.Transparent
+                },
+                label = "swipeColor"
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(color, RoundedCornerShape(20.dp))
+                    .padding(end = 24.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = Color.White
                     )
                 }
             }
+        },
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true
+    ) {
+        CompactAlarmCard(
+            alarm = alarm,
+            onCheckedChange = onCheckedChange,
+            onClick = onClick
+        )
+    }
+}
+
+// 紧凑型闹钟卡片 (右侧显示)
+@Composable
+private fun CompactAlarmCard(
+    alarm: AlarmEntity,
+    onCheckedChange: (Boolean) -> Unit,
+    onClick: () -> Unit
+) {
+    val cardBorder = Color(0xFFEDEDED)
+    val timeColor = if (alarm.isActive) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        Color.Gray
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, cardBorder)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(vertical = 10.dp, horizontal = 10.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+
+                    // 显示时间
+                    Text(
+                        text = String.format("%02d:%02d", alarm.hour, alarm.minute),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = timeColor
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
+                Text(
+                    text = alarm.name + remarkStr,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f) else Color.Gray,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(6.dp))
+            
+            Switch(
+                checked = alarm.isActive,
+                onCheckedChange = onCheckedChange,
+                modifier = Modifier.scale(0.68f)
+            )
         }
     }
 }
@@ -156,7 +546,7 @@ fun DigitalClockCanvas() {
     Box(
         modifier = Modifier
 
-            .fillMaxSize(0.9f)
+            .fillMaxSize(0.93f)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null
@@ -178,12 +568,12 @@ fun DigitalClockCanvas() {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             // y轴往下稍微偏移以修正表盘视觉中心，x轴水平微调
-            modifier = Modifier.offset(x=(-2).dp ,y = 10.dp)
+            modifier = Modifier.offset(x=(-8).dp ,y = 10.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 // 按要求整体缩放使其正好放在时钟图片中
-                modifier = Modifier.scale(0.65f) 
+                modifier = Modifier.scale(0.65f)
             ) {
                 // 十位和个位 小时
                 SevenSegmentDigit(displayHour / 10,showZero = true)
@@ -218,7 +608,7 @@ fun DigitalClockCanvas() {
                 fontWeight = FontWeight.Bold,
                 color = Color.DarkGray,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.offset(85.dp,y=30.dp)
+                modifier = Modifier.offset(80.dp,y=30.dp)
             )
         }
     }
@@ -314,53 +704,71 @@ fun getSegmentStates(digit: Int): BooleanArray {
     }
 }
 
-@Composable
-fun AlarmCard(
-    alarm: AlarmEntity,
-    onCheckedChange: (Boolean) -> Unit,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        shape = RoundedCornerShape(20.dp), // 使用 20.dp 以贴合苹果风格现代大圆角卡片
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(20.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = String.format("%02d:%02d", alarm.hour, alarm.minute),
-                    fontSize = 42.sp, // 加大时间主体字号，增加视觉冲击力
-                    fontWeight = FontWeight.W600,
-                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface else Color.Gray
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // 改为显示备注，文本过长截断
-                val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
-
-                androidx.compose.material3.Text(
-                    text = alarm.name + remarkStr,
-                    fontSize = 14.sp,
-                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha=0.7f) else Color.Gray,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-            }
-            Switch(
-                checked = alarm.isActive,
-                onCheckedChange = onCheckedChange,
-                modifier = Modifier.scale(1.1f) // 微调开关组件大小
-            )
-        }
-    }
-}
+//@Composable
+//fun AlarmCard(
+//    alarm: AlarmEntity,
+//    onCheckedChange: (Boolean) -> Unit,
+//    onClick: () -> Unit
+//) {
+//    val isAiReminder = alarm.actionType == "PROCESS_NOTE"
+//    Card(
+//        modifier = Modifier
+//            .fillMaxWidth()
+//            .padding(horizontal = 12.dp)
+//            .clickable { onClick() },
+//        shape = RoundedCornerShape(20.dp),
+//        colors = CardDefaults.cardColors(
+//            containerColor = MaterialTheme.colorScheme.surfaceVariant
+//        )
+//    ) {
+//        Row(
+//            modifier = Modifier
+//                .padding(20.dp)
+//                .fillMaxWidth(),
+//            horizontalArrangement = Arrangement.SpaceBetween,
+//            verticalAlignment = Alignment.CenterVertically
+//        ) {
+//            Column(modifier = Modifier.weight(1f)) {
+//                Row(verticalAlignment = Alignment.CenterVertically) {
+//                    Text(
+//                        text = String.format("%02d:%02d", alarm.hour, alarm.minute),
+//                        fontSize = 42.sp,
+//                        fontWeight = FontWeight.W600,
+//                        color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface else Color.Gray
+//                    )
+//                    if (isAiReminder) {
+//                        Spacer(modifier = Modifier.width(8.dp))
+//                        Box(
+//                            modifier = Modifier
+//                                .background(Color(0xFF5B9BD5).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+//                                .padding(horizontal = 8.dp, vertical = 4.dp)
+//                        ) {
+//                            Text(
+//                                "AI",
+//                                fontSize = 12.sp,
+//                                fontWeight = FontWeight.Bold,
+//                                color = Color(0xFF5B9BD5)
+//                            )
+//                        }
+//                    }
+//                }
+//                Spacer(modifier = Modifier.height(6.dp))
+//
+//                val remarkStr = if (alarm.remark.isNotEmpty()) " | ${alarm.remark}" else ""
+//
+//                Text(
+//                    text = alarm.name + remarkStr,
+//                    fontSize = 14.sp,
+//                    color = if (alarm.isActive) MaterialTheme.colorScheme.onSurface.copy(alpha=0.7f) else Color.Gray,
+//                    maxLines = 1,
+//                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+//                )
+//            }
+//            Switch(
+//                checked = alarm.isActive,
+//                onCheckedChange = onCheckedChange,
+//                modifier = Modifier.scale(1.1f)
+//            )
+//        }
+//    }
+//}

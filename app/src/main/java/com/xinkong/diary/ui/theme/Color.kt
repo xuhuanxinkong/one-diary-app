@@ -135,8 +135,8 @@ val DarkColorScheme = darkColorScheme(
 )
 
 val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
+    primary = Blue1,
+    secondary = Blue2,
     tertiary = Pink40,
     background = CreamWhite,
     surface = CreamWhite,

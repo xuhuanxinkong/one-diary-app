@@ -15,8 +15,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -32,7 +38,8 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -44,9 +51,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,7 +59,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +67,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,6 +103,71 @@ import java.io.File
 import java.io.FileOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import android.Manifest
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
+import com.huawei.hms.mlsdk.asr.MLAsrConstants
+import com.huawei.hms.mlsdk.asr.MLAsrListener
+import com.huawei.hms.mlsdk.asr.MLAsrRecognizer
+import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.EaseInCubic
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material3.AssistChip
+import androidx.compose.runtime.mutableStateSetOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import java.util.Locale
+import com.xinkong.diary.ui.screen.chat.voice.CallRecordMessageBubble
+
+private fun parseVisibleAiIds(raw: String): Set<Long> {
+    return try {
+        Json.decodeFromString<List<Long>>(raw)
+            .filter { it > 0L }
+            .toSet()
+    } catch (_: Exception) {
+        emptySet()
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,7 +175,9 @@ fun TalkScreen(
     chat: Chat,
     onBack: () -> Unit,
     onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
-    onSetting: () -> Unit = {}
+    onSetting: () -> Unit = {},
+    isGroupChat: Boolean = false,  // 群聊显示AI回复顺序按钮
+    onStartVoiceCall: () -> Unit = {} // <--- 语音通话回调
 ) {
     val viewModel: ChatViewModel = viewModel()
     val diaryModel: com.xinkong.diary.ViewModel.DiaryViewModel = viewModel()
@@ -122,12 +193,37 @@ fun TalkScreen(
     
     val aiState by viewModel.aiState.collectAsStateWithLifecycle()
     val pendingToolUI by viewModel.pendingToolUI.collectAsStateWithLifecycle()
+    val pausedReplyUI by viewModel.pausedReplyUI.collectAsStateWithLifecycle()
     val messages by viewModel.getMessages(chat.id).collectAsStateWithLifecycle(initialValue = emptyList())
-    val aiConfigs by viewModel.findAiConfig(chat.id).collectAsStateWithLifecycle(emptyList())
+    val currentChatPausedReplyUI = pausedReplyUI?.takeIf { it.chatId == chat.id }
+    
+    // 根据是否为群聊，获取不同来源的AI配置
+    // 单聊：直接从 ai_chat_configs 表获取
+    // 群聊：从成员关系表获取源AI配置
+    val aiConfigsFromChat by viewModel.findAiConfig(chat.id).collectAsStateWithLifecycle(emptyList())
+    val groupMembers by viewModel.getGroupChatMembers(chat.id).collectAsStateWithLifecycle(emptyList())
+    val sourceAiConfigs by viewModel.getGroupChatSourceAiConfigs(chat.id).collectAsStateWithLifecycle(emptyList())
+    
+    // 群聊时使用成员关系中的配置，单聊时使用直接配置
+    val aiConfigs = if (isGroupChat) {
+        // 将成员的 isEnabled 和 replyOrder 与源AI配置合并
+        // NOTE: 不按 replyOrder 重排显示，保留源列表顺序（避免用户认为列表未改变）
+        groupMembers.mapNotNull { member ->
+            sourceAiConfigs.find { it.id == member.sourceAiId }?.copy(
+                replyOrder = member.replyOrder,
+                isEnabled = member.isEnabled
+            )
+        }
+    } else {
+        aiConfigsFromChat
+    }
+    
     val currentTypingAi by viewModel.currentTypingAi.collectAsStateWithLifecycle()
     val userConfig by viewModel.findUserConfig(chat.id).collectAsStateWithLifecycle(UserChatConfig(chatId = chat.id))
 
-    var inputText by remember { mutableStateOf("") }
+    var inputFieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     val listState = rememberLazyListState()
     var messageToDelete by remember { mutableStateOf<ChatMessage?>(null) }
 
@@ -141,6 +237,41 @@ fun TalkScreen(
     
     var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var selectedImageBase64 by remember { mutableStateOf<String?>(null) }
+
+
+    var selectedReplyOrder by remember { mutableStateOf<List<AiChatConfig>>(emptyList()) }
+    var visibleToAiIds by rememberSaveable(chat.id) { mutableStateOf(emptyList<Long>()) }
+    var showAiReplySheet by remember { mutableStateOf(false) }
+    var showVisibilitySheet by remember { mutableStateOf(false) }
+    var visibilityEditingMessage by remember { mutableStateOf<ChatMessage?>(null) }
+
+    var textToSpeech by remember { mutableStateOf<TextToSpeech?>(null) }
+    var ttsReady by remember { mutableStateOf(false) }
+    LaunchedEffect(inputFieldValue.text) {
+        if (inputFieldValue.text.length > 500) {
+            val trimmed = inputFieldValue.text.take(500)
+            inputFieldValue = TextFieldValue(trimmed, selection = TextRange(trimmed.length))
+        }
+    }
+    DisposableEffect(context) {
+        var engine: TextToSpeech? = null
+        engine = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val result = engine?.setLanguage(Locale.CHINESE) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                ttsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+            } else {
+                ttsReady = false
+            }
+        }
+        textToSpeech = engine
+
+        onDispose {
+            engine?.stop()
+            engine?.shutdown()
+            textToSpeech = null
+            ttsReady = false
+        }
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -213,31 +344,18 @@ fun TalkScreen(
         }
     }
 
-    var initialScrollDone by remember { mutableStateOf(false) }
-
     var animatingMessageId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var previousMessageCount by rememberSaveable { mutableStateOf(0) }
+    var hasAutoScrolledToBottom by remember(chat.id) { mutableStateOf(false) }
 
-    LaunchedEffect(messages.size, aiState) {
-        if (messages.size > previousMessageCount) {
-            // 取消旧的假流式打字动画，因为现在已经有真流式了
-            if (!initialScrollDone) {
-                listState.scrollToItem(messages.size - 1)
-                initialScrollDone = true
-            } else {
-                listState.animateScrollToItem(messages.size - 1)
-            }
-        } else if (aiState is AiState.Streaming || aiState is AiState.Loading) {
-            // Scroll to the loading/streaming indicator which is at messages.size
-            if (messages.isNotEmpty()) {
-                listState.animateScrollToItem(messages.size)
-            }
+    LaunchedEffect(chat.id, messages.size) {
+        if (!hasAutoScrolledToBottom && messages.isNotEmpty()) {
+            listState.scrollToItem(messages.size - 1)
+            hasAutoScrolledToBottom = true
         }
-        previousMessageCount = messages.size
     }
 
     Scaffold(
-        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             if (isMultiSelectMode) {
                 MultiSelectTopBar(
@@ -269,47 +387,92 @@ fun TalkScreen(
                 var showAiReplySheet by remember { mutableStateOf(false) }
 
                 TalkBottomBar(
-                    inputText = inputText,
-                    onInputChange = { inputText = it },
+                    inputFieldValue = inputFieldValue,
+                    onInputFieldValueChange = { inputFieldValue = it },
                     selectedImageUri = selectedImageUri,
                     onRemoveImage = {
                         selectedImageUri = null
                         selectedImageBase64 = null
                     },
                     onSend = {
-                        if (inputText.isNotBlank() || selectedImageBase64 != null) {
-                            val msg = inputText.trim()
-                            inputText = ""
-                            val selectedAIs = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
-                            val targetAIs = if (selectedAIs.isNotEmpty()) selectedAIs else aiConfigs.take(1)
-                            viewModel.sendMessage(chat.id, msg, targetAIs, selectedImageBase64, selectedImageUri?.toString())
+                        if (inputFieldValue.text.isNotBlank() || selectedImageBase64 != null) {
+                            val msg = inputFieldValue.text.trim()
+                            inputFieldValue = TextFieldValue("")
+                            val targetAIs = if (selectedReplyOrder.isNotEmpty()) selectedReplyOrder
+                            else aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
+                            viewModel.sendMessage(
+                                chatId = chat.id,
+                                content = msg,
+                                selectedAIs = targetAIs,
+                                imageBase64 = selectedImageBase64,
+                                imageUriString = selectedImageUri?.toString(),
+                                visibleToAiIds = visibleToAiIds.toSet()
+                            )
                             selectedImageUri = null
                             selectedImageBase64 = null
                         }
                     },
                     onAddClick = { showExpandPanel = !showExpandPanel },
                     showExpandPanel = showExpandPanel,
-                    onShowAiReply = { showAiReplySheet = true },
                     onPickImage = {
                         imagePickerLauncher.launch("image/*")
                         showExpandPanel = false
-                    }
+                    },
+                    isGroupChat = isGroupChat,
+                    onShowAiReply = { showAiReplySheet = true },
+                    onShowVisibility = { showVisibilitySheet = true },
+                    onStartVoiceCall = onStartVoiceCall,
+                    selectedReplyOrderCount = selectedReplyOrder.size,
+                    visibleToAiCount = visibleToAiIds.size
                 )
 
-                if (showAiReplySheet) {
+                // 群聊时显示AI回复顺序选择
+                if (showAiReplySheet && isGroupChat) {
                     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
                     ModalBottomSheet(
                         onDismissRequest = { showAiReplySheet = false },
                         sheetState = sheetState
                     ) {
-                        AiReplyBottomSheetContent(
+                        AiReplyOrderBottomSheet(
                             aiConfigs = aiConfigs,
                             onDismiss = { showAiReplySheet = false },
-                            onDirectReply = { selectedAIs ->
-                                viewModel.directReply(chat.id, selectedAIs)
+                            onDirectReply = { selectedOrder ->
+                                selectedReplyOrder = selectedOrder
+                                viewModel.directReply(chat.id, selectedOrder, visibleToAiIds.toSet())
                             },
-                            onSaveSelection = { selectedAIs ->
-                                viewModel.saveReplySelection(chat.id, selectedAIs)
+                            onSaveSelection = { selectedOrder ->
+                                selectedReplyOrder = selectedOrder
+                                viewModel.saveReplySelection(chat.id, selectedOrder)
+                            }
+                        )
+                    }
+                }
+
+                // AI可见性选择弹窗
+                if ((showVisibilitySheet || visibilityEditingMessage != null) && aiConfigs.isNotEmpty()) {
+                    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    val editingMessage = visibilityEditingMessage
+                    ModalBottomSheet(
+                        onDismissRequest = {
+                            showVisibilitySheet = false
+                            visibilityEditingMessage = null
+                        },
+                        sheetState = sheetState
+                    ) {
+                        AiVisibilityBottomSheet(
+                            aiConfigs = aiConfigs,
+                            currentVisibleToAiIds = editingMessage?.let { parseVisibleAiIds(it.visibleToAiIds) }
+                                ?: visibleToAiIds.toSet(),
+                            onDismiss = {
+                                showVisibilitySheet = false
+                                visibilityEditingMessage = null
+                            },
+                            onConfirm = { selectedIds ->
+                                if (editingMessage != null) {
+                                    viewModel.updateMessageVisibility(editingMessage.id, selectedIds)
+                                } else {
+                                    visibleToAiIds = selectedIds.toList()
+                                }
                             }
                         )
                     }
@@ -331,6 +494,12 @@ fun TalkScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    focusManager.clearFocus()
+                }
         ) {
             if (chat.backgroundUri.isNotEmpty()) {
                 AsyncImage(
@@ -348,6 +517,7 @@ fun TalkScreen(
                 ChatMessageShow(
                     messages = messages,
                     listState = listState,
+                    isGroupChat = isGroupChat,
                     aiConfigs = aiConfigs,
                     currentTypingAi = currentTypingAi,
                     userConfig = userConfig,
@@ -355,6 +525,23 @@ fun TalkScreen(
                     onAnimationEnd = { animatingMessageId = null },
                     onAvatarClick = onAvatarClick,
                     onMessageLongPress = { messageToDelete = it },
+                    onReadAloud = { content ->
+                        if (content.isBlank()) return@ChatMessageShow
+                        if (!ttsReady || textToSpeech == null) {
+                            Toast.makeText(context, "朗读暂不可用", Toast.LENGTH_SHORT).show()
+                        } else {
+                            textToSpeech?.stop()
+                            val speakResult = textToSpeech?.speak(
+                                content,
+                                TextToSpeech.QUEUE_FLUSH,
+                                null,
+                                "chat_read_${System.currentTimeMillis()}"
+                            )
+                            if (speakResult == TextToSpeech.ERROR) {
+                                Toast.makeText(context, "朗读失败", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
                     isMultiSelectMode = isMultiSelectMode,
                     selectedMessages = selectedMessages,
                     onToggleSelect = { msg ->
@@ -367,8 +554,14 @@ fun TalkScreen(
                     allowSelection = allowSelection,
                     aiState = aiState,
                     pendingToolUI = pendingToolUI,
+                    pausedReplyUI = currentChatPausedReplyUI,
                     onConfirmTool = { dontAsk -> viewModel.confirmPendingToolAction(dontAsk) },
                     onCancelTool = { viewModel.cancelPendingToolAction() },
+                    onResumePausedReply = { viewModel.resumePausedReply() },
+                    onEditMessageVisibility = { message ->
+                        visibilityEditingMessage = message
+                        showVisibilitySheet = false
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
@@ -414,7 +607,8 @@ fun TalkTopBar(
             modifier = Modifier
                 .background(Color(0xFFEDEDED))
                 .fillMaxWidth()
-                .padding(0.dp, 36.dp, 0.dp, 4.dp)
+                .statusBarsPadding()
+                .padding(top = 4.dp, bottom = 4.dp)
         ) {
             IconButton(onClick = onBack) {
                 Icon(
@@ -443,6 +637,7 @@ fun TalkTopBar(
 fun ChatMessageShow(
     messages: List<ChatMessage>,
     listState: LazyListState,
+    isGroupChat: Boolean = false,
     aiConfigs: List<AiChatConfig>,
     currentTypingAi: AiChatConfig?,
     userConfig: UserChatConfig,
@@ -450,6 +645,7 @@ fun ChatMessageShow(
     onAnimationEnd: () -> Unit = {},
     onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
     onMessageLongPress: (ChatMessage) -> Unit = {},
+    onReadAloud: (String) -> Unit = {},
     isMultiSelectMode: Boolean = false,
     selectedMessages: List<ChatMessage> = emptyList(),
     onToggleSelect: (ChatMessage) -> Unit = {},
@@ -457,8 +653,11 @@ fun ChatMessageShow(
     allowSelection: Boolean = true,
     aiState: AiState? = null,
     pendingToolUI: ChatViewModel.PendingToolUIState? = null,
+    pausedReplyUI: ChatViewModel.PausedReplyUIState? = null,
     onConfirmTool: (Boolean) -> Unit = {},
     onCancelTool: () -> Unit = {},
+    onResumePausedReply: () -> Unit = {},
+    onEditMessageVisibility: (ChatMessage) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val userName = userConfig.name
@@ -475,52 +674,32 @@ fun ChatMessageShow(
             items(messages, key = { it.id }) { message ->
             var showDelete by remember { mutableStateOf(false) }
             val isSelected = selectedMessages.contains(message)
-            val isUserMessage = message.role == "user"
-            val isAiMessage = message.role == "assistant"
-
-            val tools = try {
-                Json.decodeFromString<List<String>>(message.toolExecutions)
-            } catch (e: Exception) {
-                emptyList()
-            }
-            
-            val currentAiConfig = if (isAiMessage) {
-                aiConfigs.find { it.id == message.aiId } ?: aiConfigs.firstOrNull()
-            } else null
-            
-            val aiName = currentAiConfig?.name ?: "AI"
-            val aiAvatarUri = currentAiConfig?.avatarUri ?: ""
-
-            val photoUris = try {
-                Json.decodeFromString<List<String>>(message.photoUris)
-            } catch (e: Exception) {
-                emptyList()
-            }
 
             ChatBubble(
-                content = message.content,
-                isUser = isUserMessage,
-                avatarUri = if (isUserMessage) userAvatarUri else aiAvatarUri,
-                name = if (isUserMessage) userName else aiName,
-                date = message.date,
-                photoUris = photoUris,
-                toolExecutions = tools,
+                message = message,
+                isGroupChat = isGroupChat,
+                aiConfigs = aiConfigs,
+                userName = userName,
+                userAvatarUri = userAvatarUri,
                 onAvatarClick = {
+                    val isUserMessage = message.role == "user"
                     if (!isMultiSelectMode) onAvatarClick(if (isUserMessage) "user" else "assistant", message.aiId)
                 },
                 showDelete = showDelete,
                 onDelete = { onMessageLongPress(message) },
                 onQuote = { },
                 onMultiSelect = { onEnterMultiSelect(message) },
+                onReadAloud = { onReadAloud(message.content) },
                 isMultiSelectMode = isMultiSelectMode,
                 isSelected = isSelected,
                 onToggleSelect = { onToggleSelect(message) },
                 isAnimating = (animatingMessageId == message.id),
                 onAnimationEnd = onAnimationEnd,
-                allowSelection = allowSelection
+                allowSelection = allowSelection,
+                onEditVisibility = { onEditMessageVisibility(message) }
             )
         }
-        
+
         item {
             if (aiState is AiState.Loading || aiState is AiState.Streaming) {
                 Row(
@@ -548,14 +727,38 @@ fun ChatMessageShow(
                         }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .background(Color.White, shape = RoundedCornerShape(8.dp))
-                            .padding(12.dp)
+                            .fillMaxWidth(0.78f)
                             .widthIn(max = 260.dp)
+                            .background(Color.White, shape = RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
                         val streaming = aiState as? AiState.Streaming
                         if (streaming != null) {
+                            streaming.partialReasoning?.let {
+                                if (it.isNotEmpty()) {
+                                    ExpandableAnim(
+                                        title = "思考过程",
+                                        modifier = Modifier.padding(bottom = 6.dp),
+                                        isExpandedAtStart = false
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .widthIn(max = 220.dp)
+                                                .background(Color(0xFFF0F0F0), RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                        ) {
+                                            ExpandableMessageContent(
+                                                content = streaming.partialReasoning,
+                                                textColor = Color.DarkGray,
+                                                isAnimating = false,
+                                                isSelectable = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             ExpandableMessageContent(
                                 content = streaming.partialContent,
                                 textColor = Color.Black,
@@ -563,7 +766,10 @@ fun ChatMessageShow(
                                 isSelectable = false
                             )
                         } else {
-                            Text("正在思考...", fontSize = 15.sp, color = Color.Gray)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("正在思考", fontSize = 15.sp, color = Color.Gray)
+                                ThinkingDots()
+                            }
                         }
                     }
                 }
@@ -579,6 +785,197 @@ fun ChatMessageShow(
                     onConfirm = { dontAsk -> onConfirmTool(dontAsk) },
                     onCancel = { onCancelTool() }
                 )
+            }
+        }
+
+        item {
+            if (pausedReplyUI != null) {
+                val pausedAiConfig = aiConfigs.find { it.id == pausedReplyUI.aiId }
+                PausedReplyBubble(
+                    aiAvatarUri = pausedAiConfig?.avatarUri ?: "",
+                    aiName = pausedReplyUI.aiName,
+                    previewContent = pausedReplyUI.previewContent,
+                    onResume = onResumePausedReply
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ThinkingDots(){
+    val infiniteTransition = rememberInfiniteTransition("thinking")
+
+    val alpha1 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot1"
+    )
+
+    val alpha2 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, delayMillis = 400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot2"
+    )
+
+    val alpha3 by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, delayMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dot3"
+    )
+
+    val offset1 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6.dp.value,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, easing = EaseInCubic),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "jump1"
+    )
+
+    val offset2 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6.dp.value,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, delayMillis = 200, easing = EaseInCubic),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "jump1"
+    )
+
+    val offset3 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -6.dp.value,
+        animationSpec = infiniteRepeatable(
+            animation = tween(400, delayMillis = 400, easing = EaseInCubic),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "jump1"
+    )
+
+    Row(horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically) {
+        repeat(3){index->
+            val alpha = when(index){
+                0->alpha1
+                1->alpha2
+                2->alpha3
+                else -> 1f
+            }
+            val offset =when(index){
+                0->offset1
+                1->offset2
+                2->offset3
+                else -> 0f
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Box(modifier = Modifier
+                .offset(y= offset.dp)
+                .size(5.dp)
+                .alpha(alpha)
+                .clip(CircleShape)
+                .background(Color.Gray))
+
+        }
+    }
+}
+
+@Composable
+fun PausedReplyBubble(
+    aiAvatarUri: String,
+    aiName: String,
+    previewContent: String,
+    onResume: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF5B9BD5)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (aiAvatarUri.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(aiAvatarUri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "AI头像",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(aiName.take(2), color = Color.White, fontSize = 14.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.82f)
+                .background(Color.White, shape = RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Text(
+                text = "回复已暂停",
+                color = Color(0xFF222222),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (previewContent.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF6F7F9), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = previewContent,
+                        color = Color(0xFF444444),
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp
+                    )
+                }
+            } else {
+                Text(
+                    text = "可以继续生成剩余内容。",
+                    color = Color(0xFF666666),
+                    fontSize = 13.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = onResume,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text("继续回复", color = Color.White)
+                }
             }
         }
     }
@@ -730,7 +1127,7 @@ fun ExpandableMessageContent(
         fun MessageTextComponent() {
             Text(
                 text = displayedText,
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 color = textColor,
                 maxLines = if (isExpanded) Int.MAX_VALUE else 15,
                 onTextLayout = { textLayoutResult ->
@@ -748,7 +1145,7 @@ fun ExpandableMessageContent(
                 MessageTextComponent()
             }
         }
-        
+
         if (showExpandButton) {
             Text(
                 text = if (isExpanded) "收起" else "展开全文",
@@ -769,7 +1166,8 @@ fun ChatMessageMenu(
     onDelete: () -> Unit,
     onQuote: () -> Unit,
     onCopy: () -> Unit,
-    onMultiSelect: () -> Unit
+    onMultiSelect: () -> Unit,
+    onReadAloud: () -> Unit
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -803,24 +1201,31 @@ fun ChatMessageMenu(
                 onMultiSelect()
             }
         )
+        DropdownMenuItem(
+            text = { Text("朗读") },
+            onClick = {
+                onDismissRequest()
+                onReadAloud()
+            }
+        )
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatBubble(
-    content: String,
-    isUser: Boolean,
-    avatarUri: String = "",
-    name: String = if (isUser) "我" else "AI",
-    date: String = "",
-    photoUris: List<String> = emptyList(),
-    toolExecutions: List<String> = emptyList(),
+    message: ChatMessage,
+    isGroupChat: Boolean = false,
+    aiConfigs: List<AiChatConfig>,
+    userName: String,
+    userAvatarUri: String,
     onAvatarClick: () -> Unit = {},
     showDelete: Boolean = false,
     onDelete: () -> Unit = {},
     onQuote: () -> Unit = {},
     onMultiSelect: () -> Unit = {},
+    onReadAloud: () -> Unit = {},
+    onEditVisibility: () -> Unit = {},
     isMultiSelectMode: Boolean = false,
     isSelected: Boolean = false,
     onToggleSelect: () -> Unit = {},
@@ -832,12 +1237,33 @@ fun ChatBubble(
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val focusManager = LocalFocusManager.current
+    val isUser = message.role == "user"
+    val currentAiConfig = if (!isUser) {
+        aiConfigs.find { it.id == message.aiId } ?: aiConfigs.firstOrNull()
+    } else {
+        null
+    }
+    val displayName = if (isUser) userName else (currentAiConfig?.name ?: "AI")
+    val avatarUri = if (isUser) userAvatarUri else (currentAiConfig?.avatarUri ?: "")
+    val photoUris = try {
+        Json.decodeFromString<List<String>>(message.photoUris)
+    } catch (_: Exception) {
+        emptyList()
+    }
+    val toolExecutions = try {
+        Json.decodeFromString<List<String>>(message.toolExecutions)
+    } catch (_: Exception) {
+        emptyList()
+    }
+    val visibleAiIds = parseVisibleAiIds(message.visibleToAiIds)
+    val visibleAiNames = aiConfigs.filter { it.id in visibleAiIds }.map { it.name }
+    val reasoningContent = if (currentAiConfig?.enableDeepThink == true) message.reasoningContent else null
+    val displayContent = message.content.trimEnd()
 
     if (expandedImageUri != null) {
-        androidx.compose.ui.window.Dialog(
+        Dialog(
             onDismissRequest = { expandedImageUri = null },
-            properties = androidx.compose.ui.window.DialogProperties(
+            properties = DialogProperties(
                 usePlatformDefaultWidth = false,
                 dismissOnBackPress = true,
                 dismissOnClickOutside = true
@@ -891,78 +1317,67 @@ fun ChatBubble(
                     Row(verticalAlignment = Alignment.Bottom) {
 
                         Text(
-                            text = name,
+                            text = displayName,
                             fontSize = 12.sp,
                             color = Color.Gray,
                             modifier = Modifier.padding(bottom = 2.dp, end = 4.dp)
                         )
                     }
-                    Box {
-                        Box(
-                            modifier = Modifier
-                                .widthIn(max = 260.dp)
-                                .combinedClickable(
-                                    enabled = !isMultiSelectMode,
-                                    onLongClick = { showMenu = true },
-                                    onClick = { }
-                                )
-                                .background(Color(0xFF95EC69), shape = RoundedCornerShape(8.dp))
-                                .padding(12.dp)
-                        ) {
-                            Column {
-                                if (photoUris.isNotEmpty()) {
-                                    photoUris.forEach { uri ->
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
-                                            contentDescription = "用户图片",
-                                            modifier = Modifier
-                                                .padding(bottom = 8.dp)
-                                                .widthIn(max = 140.dp)
-                                                .height(140.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { expandedImageUri = uri },
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
-                                }
+                    // 图片单独显示在气泡外
+                    ChatBubbleImages(
+                        photoUris = photoUris,
+                        contentDescription = "用户图片",
+                        onImageClick = { expandedImageUri = it }
+                    )
+                    // 文字气泡（如果有文字内容）
+                    if (message.content.isNotBlank()) {
+                        Box {
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 260.dp)
+                                    .combinedClickable(
+                                        enabled = !isMultiSelectMode,
+                                        onLongClick = { showMenu = true },
+                                        onClick = { }
+                                    )
+                                    .background(Color(0xFF95EC69), shape = RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                            ) {
                                 ExpandableMessageContent(
-                                    content = content,
+                                    content = message.content,
                                     textColor = Color.Black,
                                     isAnimating = false,
                                     isSelectable = allowSelection
                                 )
                             }
+                            ChatMessageMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                onDelete = onDelete,
+                                onQuote = onQuote,
+                                onCopy = { clipboardManager.setText(AnnotatedString(message.content)) },
+                                onMultiSelect = onMultiSelect,
+                                onReadAloud = onReadAloud
+                            )
                         }
-                        ChatMessageMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                            onDelete = onDelete,
-                            onQuote = onQuote,
-                            onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                            onMultiSelect = onMultiSelect
+                    }
+
+                    if (isGroupChat && visibleAiNames.isNotEmpty()) {
+                        ChatBubbleVisibilityRow(
+                            visibleToAiNames = visibleAiNames,
+                            modifier = Modifier.padding(top = 4.dp, end = 2.dp),
+                            onClick = onEditVisibility
                         )
                     }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF6CB4EE))
-                        .clickable { onAvatarClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (avatarUri.isNotEmpty()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context).data(avatarUri).crossfade(true).build(),
-                            contentDescription = "用户头像",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text(name.take(2), color = Color.White, fontSize = 14.sp)
-                    }
-                }
+                ChatBubbleAvatar(
+                    avatarUri = avatarUri,
+                    fallbackName = displayName,
+                    backgroundColor = Color(0xFF6CB4EE),
+                    contentDescription = "用户头像",
+                    onClick = onAvatarClick
+                )
             }
         } else {
             Row(
@@ -970,89 +1385,143 @@ fun ChatBubble(
                 horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.Top
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF5B9BD5))
-                        .clickable { onAvatarClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (avatarUri.isNotEmpty()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context).data(avatarUri).crossfade(true).build(),
-                            contentDescription = "AI头像",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text(name.take(2), color = Color.White, fontSize = 14.sp)
-                    }
-                }
+                ChatBubbleAvatar(
+                    avatarUri = avatarUri,
+                    fallbackName = displayName,
+                    backgroundColor = Color(0xFF5B9BD5),
+                    contentDescription = "AI头像",
+                    onClick = onAvatarClick
+                )
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(horizontalAlignment = Alignment.Start) {
+                    val ragEntries = toolExecutions.mapNotNull { item ->
+                        when {
+                            item.startsWith("【RAG检索结果】") -> item.removePrefix("【RAG检索结果】").trim().ifBlank { null }
+                            item.startsWith("【记忆库RAG检索结果】") -> item.removePrefix("【记忆库RAG检索结果】").trim().ifBlank { null }
+                            else -> null
+                        }
+                    }
+                    val plainToolEntries = toolExecutions.filter {
+                        it.isNotBlank() &&
+                        !it.startsWith("【记忆库RAG检索结果】") &&
+                            !it.startsWith("【RAG检索结果】")
+                    }
+
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = name,
+                            text = displayName,
                             fontSize = 12.sp,
                             color = Color.Gray,
                             modifier = Modifier.padding(bottom = 2.dp, start = 4.dp)
                         )
                     }
-                    Box {
-                        Box(
-                            modifier = Modifier
-                                .widthIn(max = 260.dp)
-                                .combinedClickable(
-                                    enabled = !isMultiSelectMode,
-                                    onLongClick = { showMenu = true },
-                                    onClick = { }
-                                )
-                                .background(Color.White, shape = RoundedCornerShape(8.dp))
-                                .padding(12.dp)
+                    // 图片单独显示在气泡外
+                    ChatBubbleImages(
+                        photoUris = photoUris,
+                        contentDescription = "AI图片",
+                        onImageClick = { expandedImageUri = it }
+                    )
+
+                    if (ragEntries.isNotEmpty()) {
+                        ExpandableAnim(
+                            title = "RAG检索参考（${ragEntries.size}）",
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                            isExpandedAtStart = false
                         ) {
-                            Column {
-                                if (photoUris.isNotEmpty()) {
-                                    photoUris.forEach { uri ->
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
-                                            contentDescription = "AI图片",
-                                            modifier = Modifier
-                                                .padding(bottom = 8.dp)
-                                                .widthIn(max = 140.dp)
-                                                .height(140.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { expandedImageUri = uri },
-                                            contentScale = ContentScale.Crop
+                            Column(modifier = Modifier.padding(start = 8.dp)) {
+                                ragEntries.forEach { item ->
+                                    Text(
+                                        text = item,
+                                        fontSize = 11.sp,
+                                        color = Color.Gray,
+                                        modifier = Modifier.padding(vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 文字气泡（如果有文字内容）
+                    if (displayContent.isNotBlank()) {
+                        Box {
+                            if (displayContent.startsWith("[语音通话记录]")) {
+                                val lines = displayContent.split("\n", limit = 3)
+                                val duration = lines.getOrNull(1) ?: "未知时长"
+                                val textRecord = lines.getOrNull(2) ?: ""
+                                CallRecordMessageBubble(
+                                    durationStr = duration,
+                                    callContent = textRecord,
+                                    isUser = isUser,
+                                    modifier = Modifier.widthIn(max = 260.dp)
+                                        .combinedClickable(
+                                            enabled = !isMultiSelectMode,
+                                            onLongClick = { showMenu = true },
+                                            onClick = { }
+                                        )
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .widthIn(max = 260.dp)
+                                        .combinedClickable(
+                                            enabled = !isMultiSelectMode,
+                                            onLongClick = { showMenu = true },
+                                            onClick = { }
+                                        )
+                                        .background(Color.White, shape = RoundedCornerShape(8.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Column {
+                                        if (!reasoningContent.isNullOrBlank()) {
+                                            ExpandableAnim(
+                                                title = "深度思考",
+                                                modifier = Modifier.padding(bottom = 6.dp),
+                                                isExpandedAtStart = false
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(Color(0xFFF5F5F5), RoundedCornerShape(6.dp))
+                                                        .padding(8.dp)
+                                                ) {
+                                                    ExpandableMessageContent(
+                                                        content = reasoningContent,
+                                                        textColor = Color.DarkGray,
+                                                        isAnimating = false, // 已完成思考过程不播放动画
+                                                        isSelectable = allowSelection
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        ExpandableMessageContent(
+                                            content = displayContent,
+                                            textColor = Color.Black,
+                                            isAnimating = isAnimating,
+                                            isSelectable = allowSelection,
+                                            onAnimationEnd = onAnimationEnd
                                         )
                                     }
                                 }
-                                ExpandableMessageContent(
-                                    content = content,
-                                    textColor = Color.Black,
-                                    isAnimating = isAnimating,
-                                    isSelectable = allowSelection,
-                                    onAnimationEnd = onAnimationEnd
-                                )
                             }
+                            ChatMessageMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                onDelete = onDelete,
+                                onQuote = onQuote,
+                                onCopy = { clipboardManager.setText(AnnotatedString(displayContent)) },
+                                onMultiSelect = onMultiSelect,
+                                onReadAloud = onReadAloud
+                            )
                         }
-                        ChatMessageMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                            onDelete = onDelete,
-                            onQuote = onQuote,
-                            onCopy = { clipboardManager.setText(AnnotatedString(content)) },
-                            onMultiSelect = onMultiSelect
-                        )
                     }
 
-                    if (toolExecutions.isNotEmpty()) {
+                    if (plainToolEntries.isNotEmpty()) {
                         ExpandableAnim(
-                            title = "执行了 ${toolExecutions.size} 个工具",
+                            title = "执行了 ${plainToolEntries.size} 个工具",
                             modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                         ) {
                             Column(modifier = Modifier.padding(start = 8.dp)) {
-                                toolExecutions.forEach { tool ->
+                                plainToolEntries.forEach { tool ->
                                     Text(
                                         text = "• $tool",
                                         fontSize = 11.sp,
@@ -1063,6 +1532,13 @@ fun ChatBubble(
                             }
                         }
                     }
+                    if (isGroupChat) {
+                        ChatBubbleVisibilityRow(
+                            visibleToAiNames = visibleAiNames,
+                            modifier = Modifier.padding(start = 2.dp, top = 4.dp),
+                            onClick = onEditVisibility
+                        )
+                    }
                 }
                 if (showDelete) {
                     DeleteIcon(onClick = onDelete, modifier = Modifier.align(Alignment.CenterVertically))
@@ -1070,6 +1546,86 @@ fun ChatBubble(
             }
         }
     }
+}
+
+@Composable
+private fun ChatBubbleAvatar(
+    avatarUri: String,
+    fallbackName: String,
+    backgroundColor: Color,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(backgroundColor)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (avatarUri.isNotEmpty()) {
+            AsyncImage(
+                model = ImageRequest.Builder(context).data(avatarUri).crossfade(true).build(),
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Text(fallbackName.take(2), color = Color.White, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun ChatBubbleImages(
+    photoUris: List<String>,
+    contentDescription: String,
+    onImageClick: (String) -> Unit
+) {
+    val context = LocalContext.current
+    if (photoUris.isNotEmpty()) {
+        photoUris.forEach { uri ->
+            AsyncImage(
+                model = ImageRequest.Builder(context).data(uri).crossfade(true).build(),
+                contentDescription = contentDescription,
+                modifier = Modifier
+                    .padding(bottom = 6.dp)
+                    .widthIn(max = 200.dp)
+                    .heightIn(max = 200.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onImageClick(uri) },
+                contentScale = ContentScale.Crop
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatBubbleVisibilityRow(
+    visibleToAiNames: List<String>,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier.clickable { onClick() }
+        ) {
+            Icon(
+                imageVector = Icons.Default.Visibility,
+                contentDescription = "可见AI",
+                tint = Color.Gray,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "可见：${visibleToAiNames.joinToString("、")}",
+                fontSize = 11.sp,
+                color = Color.Gray
+            )
+        }
+
 }
 
 @Composable
@@ -1086,27 +1642,61 @@ fun DeleteIcon(onClick: () -> Unit, modifier: Modifier = Modifier) {
 
 @Composable
 fun TalkBottomBar(
-    inputText: String,
-    onInputChange: (String) -> Unit,
+    inputFieldValue: TextFieldValue,
+    onInputFieldValueChange: (TextFieldValue) -> Unit,
     selectedImageUri: android.net.Uri? = null,
     onRemoveImage: () -> Unit = {},
     onSend: () -> Unit,
     onAddClick: () -> Unit,
     showExpandPanel: Boolean,
-    onShowAiReply: () -> Unit,
-    onPickImage: () -> Unit = {}
+    onPickImage: () -> Unit = {},
+    isGroupChat: Boolean = false,
+    onShowAiReply: () -> Unit = {},
+    onShowVisibility: () -> Unit = {},
+    onStartVoiceCall: () -> Unit = {},
+    selectedReplyOrderCount: Int = 0,
+    visibleToAiCount: Int = 0
 ) {
-    Column {
-        Divider(color = Color.LightGray, thickness = 0.5.dp)
-        
+    val imeBottomPx = WindowInsets.ime
+        .getBottom(androidx.compose.ui.platform.LocalDensity.current)
+    val extraLiftWhenImeVisible = if (imeBottomPx > 0) 12.dp else 0.dp
+
+    Column(
+        modifier = Modifier
+            .background(Color.White)
+            .navigationBarsPadding()
+            .offset(y = -extraLiftWhenImeVisible)
+            .fillMaxWidth()
+    ) {
+        Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+
+        // 群聊功能栏
+        if (isGroupChat) {
+            GroupChatFunctionBar(
+                selectedReplyOrderCount = selectedReplyOrderCount,
+                visibleToAiCount = visibleToAiCount,
+                onReplyOrderClick = onShowAiReply,
+                onVisibilityClick = onShowVisibility
+            )
+        }
+
+        // 图片预览
         if (selectedImageUri != null) {
-            Box(modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp).height(92.dp).width(92.dp)) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                    .height(92.dp)
+                    .width(92.dp)
+            ) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(selectedImageUri)
                         .build(),
                     contentDescription = "Selected Image",
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).border(2.dp, Color(0xFF6CB4EE), RoundedCornerShape(12.dp)),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(2.dp, Color(0xFF6CB4EE), RoundedCornerShape(12.dp)),
                     contentScale = ContentScale.Crop
                 )
                 IconButton(
@@ -1114,35 +1704,217 @@ fun TalkBottomBar(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .size(24.dp)
+                        .size(8.dp)
                         .background(Color.Black.copy(alpha = 0.6f), CircleShape)
                 ) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }
-        
+
+        // 输入行
         TalkInputRow(
-            inputText = inputText,
-            onInputChange = onInputChange,
+            inputFieldValue = inputFieldValue,
+            onInputFieldValueChange = onInputFieldValueChange,
             onSend = onSend,
             onAddClick = onAddClick,
+            showAiReplyButton = isGroupChat,
             onShowAiReply = onShowAiReply
         )
+
+        // 展开面板
         if (showExpandPanel) {
-            TalkExpandablePanel(onPickImage)
+            TalkExpandablePanel(onPickImage, onStartVoiceCall)
         }
     }
 }
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun TalkInputRow(
-    inputText: String,
-    onInputChange: (String) -> Unit,
+    inputFieldValue: TextFieldValue,
+    onInputFieldValueChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     onAddClick: () -> Unit,
-    onShowAiReply: () -> Unit
+    showAiReplyButton: Boolean = false,
+    onShowAiReply: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val focusRequester = remember { FocusRequester() }
+    val viewModel: ChatViewModel = viewModel()
+    val aiState by viewModel.aiState.collectAsStateWithLifecycle()
+
+    fun updateInputText(newText: String) {
+        onInputFieldValueChange(
+            TextFieldValue(
+                text = newText,
+                selection = TextRange(newText.length)
+            )
+        )
+    }
+    // 记录开始识别时的文本，用于追加
+    var textBeforeListening by remember { mutableStateOf("") }
+    var isListening by remember { mutableStateOf(false) }
+
+    // 检测是否为华为/荣耀设备
+    val isHuaweiDevice = remember {
+        val manufacturer = android.os.Build.MANUFACTURER.lowercase()
+        manufacturer.contains("huawei") || manufacturer.contains("honor")
+    }
+
+    // 华为 ML Kit 语音识别器（仅华为设备创建）
+    var mlAsrRecognizer by remember {
+        mutableStateOf(
+            if (isHuaweiDevice) MLAsrRecognizer.createAsrRecognizer(context) else null
+        )
+    }
+
+    // 使用 rememberUpdatedState 确保回调中使用最新的值
+    val currentTextBefore by androidx.compose.runtime.rememberUpdatedState(textBeforeListening)
+
+    // 系统语音识别（非华为设备使用）
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            if (!matches.isNullOrEmpty()) {
+                val recognizedText = matches[0]
+                val newText = if (textBeforeListening.isEmpty()) recognizedText else "$textBeforeListening$recognizedText"
+                updateInputText(newText)
+            }
+        }
+    }
+
+    // 设置华为语音识别监听器（仅华为设备）
+    if (isHuaweiDevice && mlAsrRecognizer != null) {
+        DisposableEffect(mlAsrRecognizer) {
+            val recognizer = mlAsrRecognizer
+            recognizer?.setAsrListener(object : MLAsrListener {
+                override fun onStartListening() {
+                    android.util.Log.d("VoiceInput", "华为 ML Kit: 开始聆听")
+                }
+
+                override fun onStartingOfSpeech() {
+                    android.util.Log.d("VoiceInput", "华为 ML Kit: 检测到说话")
+                }
+
+                override fun onVoiceDataReceived(data: ByteArray?, energy: Float, bundle: Bundle?) {}
+
+                override fun onRecognizingResults(partialResults: Bundle?) {
+                    val partial = partialResults?.getString(MLAsrRecognizer.RESULTS_RECOGNIZING)
+                    android.util.Log.d("VoiceInput", "华为 ML Kit 实时结果: $partial")
+                    if (!partial.isNullOrEmpty()) {
+                        val newText = if (currentTextBefore.isEmpty()) partial else "$currentTextBefore$partial"
+                        updateInputText(newText)
+                    }
+                }
+
+                override fun onResults(results: Bundle?) {
+                    isListening = false
+                    val finalResult = results?.getString(MLAsrRecognizer.RESULTS_RECOGNIZED)
+                    android.util.Log.d("VoiceInput", "华为 ML Kit 最终结果: $finalResult")
+                    if (!finalResult.isNullOrEmpty()) {
+                        val newText = if (currentTextBefore.isEmpty()) finalResult else "$currentTextBefore$finalResult"
+                        updateInputText(newText)
+                    }
+                }
+
+                override fun onError(error: Int, errorMessage: String?) {
+                    isListening = false
+                    android.util.Log.e("VoiceInput", "华为 ML Kit 错误: $error - $errorMessage")
+                    val msg = when (error) {
+                        MLAsrConstants.ERR_NO_NETWORK -> "网络不可用"
+                        MLAsrConstants.ERR_SERVICE_UNAVAILABLE -> "服务不可用"
+                        MLAsrConstants.ERR_NO_UNDERSTAND -> "未识别到语音"
+                        else -> errorMessage ?: "识别错误"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onState(state: Int, params: Bundle?) {
+                    android.util.Log.d("VoiceInput", "华为 ML Kit 状态: $state")
+                }
+            })
+
+            onDispose {
+                recognizer?.destroy()
+            }
+        }
+    }
+
+    fun startSystemSpeechRecognition() {
+        // 系统界面会接管录音流程
+        isListening = false
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "请说话...")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+        try {
+            speechLauncher.launch(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "您的设备不支持语音识别", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // 启动语音识别
+    fun startVoiceRecognition() {
+        textBeforeListening = inputFieldValue.text
+        isListening = true
+
+        if (isHuaweiDevice) {
+            // 华为设备：使用 ML Kit
+            if (mlAsrRecognizer == null) {
+                mlAsrRecognizer = MLAsrRecognizer.createAsrRecognizer(context)
+            }
+            val intent = Intent(MLAsrConstants.ACTION_HMS_ASR_SPEECH).apply {
+                putExtra(MLAsrConstants.LANGUAGE, "zh-CN")
+                putExtra(MLAsrConstants.FEATURE, MLAsrConstants.FEATURE_WORDFLUX)
+                putExtra(MLAsrConstants.PUNCTUATION_ENABLE, true)
+            }
+            try {
+                mlAsrRecognizer?.startRecognizing(intent) ?: startSystemSpeechRecognition()
+            } catch (e: Exception) {
+                // 华为识别器异常时回退到系统识别
+                startSystemSpeechRecognition()
+            }
+        } else {
+            // 其他设备：使用系统语音识别
+            startSystemSpeechRecognition()
+        }
+    }
+
+    // 停止语音识别
+    fun stopVoiceRecognition() {
+        if (isHuaweiDevice && mlAsrRecognizer != null) {
+            try {
+                mlAsrRecognizer?.destroy()
+                mlAsrRecognizer = MLAsrRecognizer.createAsrRecognizer(context)
+            } catch (_: Exception) {
+                // 已销毁或未启动时忽略
+            }
+        }
+        isListening = false
+    }
+
+    // 权限请求
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startVoiceRecognition()
+        } else {
+            Toast.makeText(context, "需要麦克风权限才能使用语音输入", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1150,33 +1922,65 @@ fun TalkInputRow(
             .padding(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+
+
+        // 语音输入按钮（输入框左侧）
+        IconButton(
+            onClick = {
+                if (isListening) {
+                    stopVoiceRecognition()
+                } else {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        startVoiceRecognition()
+                    } else {
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = if (isListening) "停止语音" else "语音输入",
+                tint = if (isListening) Color(0xFFE53935) else Color.DarkGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(4.dp))
         BasicTextField(
-            value = inputText,
-            onValueChange = onInputChange,
+            value = inputFieldValue,
+            onValueChange = { newValue ->
+                onInputFieldValueChange(newValue)
+            },
             textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+            singleLine = false,
+            maxLines = 500,
             modifier = Modifier
                 .weight(1f)
+                .heightIn(min = 44.dp, max = 140.dp)
                 .background(Color.White, shape = RoundedCornerShape(6.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .focusRequester(focusRequester),
             decorationBox = { innerTextField ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (inputText.isEmpty()) {
-                        Text("输入消息...", color = Color.Gray, fontSize = 16.sp)
+                    if (inputFieldValue.text.isEmpty()) {
+                        Text(
+                            if (isListening) "正在聆听..." else "输入消息...",
+                            color = if (isListening) Color(0xFF07C160) else Color.Gray,
+                            fontSize = 16.sp
+                        )
                     }
                     innerTextField()
                 }
             }
         )
+
         Spacer(modifier = Modifier.width(4.dp))
-        IconButton(onClick = onShowAiReply, modifier = Modifier.size(40.dp)) {
-            Icon(
-                imageVector = Icons.Default.StarBorder,
-                contentDescription = "AI",
-                tint = Color.DarkGray,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(4.dp))
+
         IconButton(onClick = onAddClick, modifier = Modifier.size(40.dp)) {
             Icon(
                 imageVector = Icons.Default.Add,
@@ -1186,34 +1990,102 @@ fun TalkInputRow(
             )
         }
         Spacer(modifier = Modifier.width(4.dp))
-        IconButton(
-            onClick = onSend,
-            modifier = Modifier
-                .size(40.dp)
-                .background(
-                    if (inputText.isNotBlank()) Color(0xFF07C160) else Color(0xFFCCCCCC),
-                    shape = RoundedCornerShape(6.dp)
+        AnimatedContent(
+            targetState = (aiState is AiState.Loading || aiState is AiState.Streaming),
+            transitionSpec = {
+                // 自定义动画规格
+                (fadeIn(animationSpec = tween(300)) +
+                        scaleIn(initialScale = 0.6f, animationSpec = tween(300))).togetherWith(
+                    fadeOut(animationSpec = tween(200)) +
+                            scaleOut(targetScale = 0.6f, animationSpec = tween(200))
                 )
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "发送",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
-            )
+            },
+            label = "send_stop_switch"
+        ) { isLoading ->
+            if (isLoading) {
+                SendStopButton(onClick = { viewModel.stopCurrentReply() })
+            } else {
+                IconButton(
+                    onClick = onSend,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            if (inputFieldValue.text.isNotBlank()) Color(0xFF07C160) else Color(
+                                0xFFCCCCCC
+                            ),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "发送",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-fun TalkExpandablePanel(onPickImage: () -> Unit) {
+fun SendStopButton(onClick: () -> Unit) {
+    val infiniteTransition = rememberInfiniteTransition(label = "ring_rotate")
+    val ringRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing)
+        ),
+        label = "ring_rotation"
+    )
+
+    // 外层：绿色圆底 + 旋转圆环
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(Color(0xFF4CAF50), CircleShape),
+            contentAlignment = Alignment.Center  // 关键：让内层居中
+        ) {
+            // 旋转的圆环
+            Canvas(modifier = Modifier.size(20.dp)) {
+                val tailCount = 6
+                repeat(tailCount){index->
+                    val alpha = 1f -(index*0.15f)
+                    val sweepAngle =60f -(index*8f)
+                    val offsetAngle = index*8f
+                    rotate(ringRotation + offsetAngle){
+                        drawArc(
+                            color = Color.White.copy(alpha = alpha),
+                            startAngle = 0f,
+                            sweepAngle = sweepAngle,
+                            useCenter = false,
+                            topLeft = Offset(0f,0f),
+                            size = size,
+                            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                        )
+                    }
+                }
+            }
+            // 静止的白色方块
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(Color.White, RoundedCornerShape(3.dp))
+            )
+        }
+    }
+}
+@Composable
+fun TalkExpandablePanel(onPickImage: () -> Unit, onStartVoiceCall: () -> Unit = {}) {
     val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFFF7F7F7))
             .padding(horizontal = 16.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceAround
+        horizontalArrangement = Arrangement.Start
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
             .padding(5.dp)
@@ -1229,7 +2101,9 @@ fun TalkExpandablePanel(onPickImage: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
             Text("相册", fontSize = 12.sp, color = Color.DarkGray)
         }
-        
+
+        Spacer(modifier = Modifier.width(16.dp))
+
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
             .padding(5.dp)
             .clickable { Toast.makeText(context, "分享功能开发中", Toast.LENGTH_SHORT).show() }) {
@@ -1245,8 +2119,23 @@ fun TalkExpandablePanel(onPickImage: () -> Unit) {
             Text("分享", fontSize = 12.sp, color = Color.DarkGray)
         }
 
-        // 可以继续添加更多功能按钮
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.width(16.dp))
+
+        // 新增的语音通话入口
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier
+            .padding(5.dp)
+            .clickable { onStartVoiceCall() }) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .background(Color.White, shape = RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(imageVector = Icons.Default.Phone, contentDescription = "语音通话", tint = Color.Gray, modifier = Modifier.size(32.dp))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("语音通话", fontSize = 12.sp, color = Color.DarkGray)
+        }
     }
 }
 
@@ -1279,7 +2168,8 @@ fun MultiSelectTopBar(
             modifier = Modifier
                 .background(Color(0xFFEDEDED))
                 .fillMaxWidth()
-                .padding(16.dp, 36.dp, 16.dp, 24.dp)
+                .statusBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp)
         ) {
             Text(
                 text = "取消",
@@ -1297,8 +2187,12 @@ fun MultiSelectBottomBar(
     onDelete: () -> Unit,
     onOther: () -> Unit
 ) {
-    Column {
-        Divider(color = Color.LightGray, thickness = 0.5.dp)
+    Column(
+        modifier = Modifier
+            .background(Color.White)
+            .navigationBarsPadding()
+            .fillMaxWidth()
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1323,88 +2217,256 @@ fun MultiSelectBottomBar(
     }
 }
 
+
 @Composable
-fun AiReplyBottomSheetContent(
+fun GroupChatFunctionBar(
+    selectedReplyOrderCount: Int,
+    visibleToAiCount: Int,
+    onReplyOrderClick: () -> Unit,
+    onVisibilityClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        AssistChip(
+            onClick = onReplyOrderClick,
+            label = {
+                Text(
+                    if (selectedReplyOrderCount > 0)
+                        "回复顺序(${selectedReplyOrderCount})"
+                    else
+                        "回复顺序",
+                    fontSize = 13.sp
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.SwapVert,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            modifier = Modifier.height(32.dp)
+        )
+
+        AssistChip(
+            onClick = onVisibilityClick,
+            label = {
+                Text(
+                    if (visibleToAiCount > 0)
+                        "可见性(${visibleToAiCount})"
+                    else
+                        "可见性",
+                    fontSize = 13.sp
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Visibility,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            modifier = Modifier.height(32.dp)
+        )
+    }
+}
+
+@Composable
+fun AiReplyOrderBottomSheet(
     aiConfigs: List<AiChatConfig>,
     onDismiss: () -> Unit,
     onDirectReply: (selectedOrder: List<AiChatConfig>) -> Unit,
     onSaveSelection: (selectedOrder: List<AiChatConfig>) -> Unit
 ) {
     val selectedAIs = remember { mutableStateListOf<AiChatConfig>() }
+    val selectedIds = remember { mutableStateSetOf<Long>()}
 
     LaunchedEffect(aiConfigs) {
-        if (selectedAIs.isEmpty()) {
-            val enabled = aiConfigs.filter { it.isEnabled }.sortedBy { it.replyOrder }
-            selectedAIs.addAll(enabled)
+        selectedAIs.clear()
+        selectedIds.clear()
+        val saved = aiConfigs
+            .filter { it.isEnabled && it.replyOrder >=0}
+            .sortedBy { it.replyOrder }
+        if (saved.isNotEmpty()) {
+            selectedAIs.addAll(saved)
+            selectedIds.addAll(saved.map { it.id })
         }
     }
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(16.dp)
     ) {
-        // AI 列表
-        Text("选择要回复的 AI 及顺序：", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 12.dp))
+        Text(
+            "选择要回复的 AI 及顺序：",
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
         Divider(modifier = Modifier.padding(bottom = 12.dp))
 
         LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
-            items(aiConfigs) { config ->
-                val index = selectedAIs.indexOf(config)
-                val isSelected = index != -1
-                
+            items(aiConfigs, key = { it.id }) { config ->
+                val isSelected = config.id in selectedIds
                 Row(
                     modifier = Modifier.fillMaxWidth().clickable {
                         if (isSelected) {
-                            selectedAIs.remove(config)
+                            selectedIds.remove(config.id)
+                            selectedAIs.removeAll { it.id == config.id }
                         } else {
+                            selectedIds.add(config.id)
                             selectedAIs.add(config)
                         }
                     }.padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
-                        modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF5B9BD5)),
-                        contentAlignment = Alignment.Center
-                    ) {
+                        modifier = Modifier.size(40.dp).clip(CircleShape)
+                            .background(Color(0xFF5B9BD5)), contentAlignment = Alignment.Center
+                        ) {
                         Text(config.name.take(2), color = Color.White)
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(text = config.name, modifier = Modifier.weight(1f))
-                    
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .border(1.dp, if (isSelected) Color(0xFF07C160) else Color.Gray, CircleShape)
-                            .background(if (isSelected) Color(0xFF07C160) else Color.Transparent, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(text = config.name, modifier = Modifier.weight(1f))
+
                         if (isSelected) {
-                            Text((index + 1).toString(), color = Color.White, fontSize = 12.sp)
+                            val index = selectedAIs.indexOfFirst { it.id == config.id }
+                            Box(
+                                modifier = Modifier.size(28.dp)
+                                    .background(Color(0xFF07C160), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text((index + 1).toString(), color = Color.White, fontSize = 12.sp)
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier.size(28.dp)
+                                    .border(1.dp, Color.Gray, CircleShape)
+                            )
                         }
                     }
                 }
             }
-        }
-        
-        // 底部按钮
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Button(
-                onClick = { onDirectReply(selectedAIs); onDismiss() },
+                onClick = { onDirectReply(selectedAIs.toList()); onDismiss() },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5B9BD5))
             ) {
                 Text("直接回复")
             }
             Button(
-                onClick = { onSaveSelection(selectedAIs); onDismiss() },
+                onClick = { onSaveSelection(selectedAIs.toList()); onDismiss() },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF07C160))
             ) {
                 Text("保存选择")
+                }
             }
+        Spacer(modifier = Modifier.height(30.dp))
+    }
+}
+
+@Composable
+fun AiVisibilityBottomSheet(
+    aiConfigs: List<AiChatConfig>,
+    currentVisibleToAiIds: Set<Long>,
+    onConfirm: (visibleAiIds: Set<Long>) -> Unit,
+    onDismiss: () -> Unit
+){
+    var visibleToAiIds by remember { mutableStateOf(currentVisibleToAiIds) }
+
+    LaunchedEffect(currentVisibleToAiIds) {
+        visibleToAiIds = currentVisibleToAiIds
+    }
+
+    Column(modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp)) {
+        Text("选择那些AI可以看到此消息",
+            fontSize = 16.sp,
+            modifier = Modifier.padding(bottom = 12.dp))
+        Divider(modifier = Modifier.padding(bottom = 12.dp))
+        LazyColumn {
+            items(aiConfigs){ config->
+                val isVisible = config.id in visibleToAiIds
+
+                Row(modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable{
+                        visibleToAiIds = if(isVisible){
+                            visibleToAiIds - config.id
+                        }else{
+                            visibleToAiIds + config.id
+                        }
+                    }
+                    .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically)
+                {
+                    Box(modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF5B9BD5)),
+                        contentAlignment = Alignment.Center)
+                    {
+                        Text(
+                            text = config.name.take(2),
+                            color = Color.White
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = config.name,
+                        modifier = Modifier.weight(1f),
+                        fontSize = 16.sp
+                    )
+                    Icon(
+                        imageVector = if (isVisible)Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = if(isVisible)"可见" else "不可见",
+                        tint = if(isVisible) Color.Gray else Color.LightGray,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+        val visibleNames = aiConfigs.filter { it.id in visibleToAiIds }.joinToString(" ") { it.name }
+
+        Text(
+            text = if(visibleToAiIds.isEmpty()){
+                "提示：所有 AI 可见"
+            }else{
+                "已选择的可见 AI： $visibleNames"
+            },
+            color = Color.Gray,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp, bottom = 16.dp)
+        )
+
+        Button(
+            onClick = {
+                onConfirm(visibleToAiIds)
+                onDismiss()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF07C160)
+            )
+        ) {
+            Text(
+                "确认",
+                fontSize = 16.sp,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
         }
         Spacer(modifier = Modifier.height(30.dp))
     }
 }
+

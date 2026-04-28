@@ -3,9 +3,12 @@ package com.xinkong.diary.ui.screen.home
 
 import android.net.Uri
 import android.os.Build
+import android.text.Html
+import android.text.InputType
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -28,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xinkong.diary.ViewModel.DiaryViewModel
+import com.xinkong.diary.ViewModel.Route
 import com.xinkong.diary.repository.Diary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -142,7 +146,15 @@ fun DiaryEditorWebView(
 
                         @JavascriptInterface
                         fun getContent(): String {
-                            return diary.content
+                            // 优先使用HTML内容，如果为空则用纯文本包装成简单HTML
+                            return if (diary.content.isNotBlank()) {
+                                diary.content
+                            } else if (diary.text.isNotBlank()) {
+                                // 将纯文本转换为基础HTML（按换行分段）
+                                diary.text.split("\n").joinToString("") { "<p>$it</p>" }
+                            } else {
+                                ""
+                            }
                         }
 
                         @JavascriptInterface
@@ -177,6 +189,39 @@ fun DiaryEditorWebView(
         },
         modifier = Modifier.fillMaxSize()
     )
+}
+
+@Composable
+fun DiaryEditor(){
+    @Composable
+    fun RichEditor(
+        modifier: Modifier = Modifier,
+        htmlContent: String = ""
+    ) {
+        var editTextRef by remember { mutableStateOf<EditText?>(null) }
+
+        AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                EditText(context).apply {
+                    // 关键：让 EditText 知道内容是富文本
+                    setText(Html.fromHtml(htmlContent,Html.FROM_HTML_MODE_COMPACT))
+
+                    // 设为可编辑
+                    inputType = InputType.TYPE_CLASS_TEXT or
+                            InputType.TYPE_TEXT_FLAG_MULTI_LINE
+
+                    // 去掉默认背景
+                    background = null
+
+                    editTextRef = this
+                }
+            },
+            update = { editText ->
+                // 如果外部状态变化，在这里同步
+            }
+        )
+    }
 }
 
 

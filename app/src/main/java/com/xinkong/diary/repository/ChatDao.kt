@@ -31,6 +31,9 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE id = :chatId LIMIT 1")
     suspend fun getChatByIdSuspend(chatId: Long): Chat?
 
+    @Query("SELECT * FROM chats WHERE tagFolder = :folder ORDER BY id DESC")
+    suspend fun getChatsByFolder(folder: String): List<Chat>
+
     @Query("SELECT * FROM chats WHERE tag =:tag")
     fun getChatByTag(tag: String): Flow<List<Chat>>
 
@@ -47,7 +50,7 @@ interface ChatDao {
 
     //消息相关 ChatMessage
     @Insert
-    suspend fun insertMessage(message: ChatMessage)
+    suspend fun insertMessage(message: ChatMessage): Long
 
     @Insert
     suspend fun insertMessages(messages: List<ChatMessage>)
@@ -60,6 +63,15 @@ interface ChatDao {
 
     @Query("SELECT * FROM chat_messages WHERE chatId = :chatId ORDER BY id ASC")
     suspend fun getMessagesOnce(chatId: Long): List<ChatMessage>
+
+    @Query("SELECT * FROM chat_messages WHERE id = :messageId LIMIT 1")
+    suspend fun getMessageById(messageId: Long): ChatMessage?
+
+    @Query("UPDATE chat_messages SET visibleToAiIds = :visibleToAiIds WHERE id = :messageId")
+    suspend fun updateMessageVisibleToAiIds(messageId: Long, visibleToAiIds: String)
+
+    @Query("SELECT * FROM chat_messages ORDER BY id ASC")
+    suspend fun getAllMessages(): List<ChatMessage>
 
 
     //配置相关 AiChatConfig
@@ -76,6 +88,18 @@ interface ChatDao {
     @Query("SELECT * FROM ai_chat_configs WHERE chatId = :chatId")
     suspend fun getAiConfigOnce(chatId: Long): List<AiChatConfig>
 
+    @Query("SELECT * FROM ai_chat_configs")
+    fun getAllAiConfigs(): Flow<List<AiChatConfig>>
+
+    @Query("SELECT * FROM ai_chat_configs")
+    suspend fun getAllAiConfigsOnce(): List<AiChatConfig>
+
+    @Query("SELECT * FROM ai_chat_configs WHERE id = :aiId LIMIT 1")
+    suspend fun getAiConfigById(aiId: Long): AiChatConfig?
+
+    @Query("SELECT * FROM ai_chat_configs ORDER BY id ASC LIMIT 1")
+    suspend fun getFirstAiConfig(): AiChatConfig?
+
     //配置相关 UserChatConfig
     @Insert
     suspend fun insertUserConfig(config: UserChatConfig)
@@ -88,4 +112,29 @@ interface ChatDao {
 
     @Query("SELECT * FROM user_chat_configs WHERE chatId = :chatId LIMIT 1")
     suspend fun getUserConfigOnce(chatId: Long): UserChatConfig?
+    
+    // ========== 群聊成员相关 GroupChatMember ==========
+    @Insert
+    suspend fun insertGroupChatMember(member: GroupChatMember)
+    
+    @Update
+    suspend fun updateGroupChatMember(member: GroupChatMember)
+    
+    @Delete
+    suspend fun deleteGroupChatMember(member: GroupChatMember)
+    
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY id ASC")
+    fun getGroupChatMembers(groupChatId: Long): Flow<List<GroupChatMember>>
+    
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId ORDER BY id ASC")
+    suspend fun getGroupChatMembersOnce(groupChatId: Long): List<GroupChatMember>
+    
+    @Query("DELETE FROM group_chat_members WHERE groupChatId = :groupChatId AND sourceAiId = :sourceAiId")
+    suspend fun removeGroupChatMember(groupChatId: Long, sourceAiId: Long)
+    
+    @Query("SELECT * FROM group_chat_members WHERE groupChatId = :groupChatId AND sourceAiId = :sourceAiId LIMIT 1")
+    suspend fun getGroupChatMemberBySourceAi(groupChatId: Long, sourceAiId: Long): GroupChatMember?
+    
+    @Query("SELECT * FROM group_chat_members")
+    fun getAllGroupChatMembers(): Flow<List<GroupChatMember>>
 }

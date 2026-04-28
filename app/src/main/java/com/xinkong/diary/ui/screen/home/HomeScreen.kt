@@ -79,8 +79,7 @@ import com.xinkong.diary.repository.Diary
 import com.xinkong.diary.repository.DiarySaver
 import com.xinkong.diary.ui.animation.pressScaleEffect
 import com.xinkong.diary.ui.animation.toggleRotateEffect
-import com.xinkong.diary.ui.screen.chat.ChatScreen
-import com.xinkong.diary.ui.screen.chat.TalkScreen
+import com.xinkong.diary.ui.screen.chat.AiListScreen
 import com.xinkong.diary.ui.theme.DiarydTheme
 import com.xinkong.diary.ui.theme.ThemeDefault
 import com.xinkong.diary.ui.theme.currentDiaryColors
@@ -92,7 +91,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.MarkUnreadChatAlt
 import androidx.compose.material.icons.filled.NoteAlt
@@ -116,6 +117,7 @@ fun HomeScreen(){
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
     var showMoveBar by remember { mutableStateOf(false) }
+    var showCopyBar by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     val diaryViewModel: DiaryViewModel = viewModel()
@@ -123,13 +125,14 @@ fun HomeScreen(){
     val tagModel: TagModel = viewModel()
     
     val contentList by diaryViewModel.listState.collectAsStateWithLifecycle()
+    val currentFolder by diaryViewModel.currentFolder.collectAsStateWithLifecycle()
     val chatList by chatViewModel.chatListState.collectAsStateWithLifecycle()
     val diaryTags by tagModel.diaryTags.collectAsStateWithLifecycle()
     val chatTags by tagModel.chatTags.collectAsStateWithLifecycle()
     val tagFolders by tagModel.tagFolders.collectAsStateWithLifecycle()
 
     var homeSelectedTag by rememberSaveable { mutableStateOf(DEFAULT_TAG_FOLDER to UNCLASSIFIED_TAG_NAME) }
-    var chatSelectedTag by rememberSaveable { mutableStateOf(UNCLASSIFIED_TAG_NAME) }
+    var alarmSelectedAiId by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val homeTagDisplayMap = remember(contentList, diaryTags, tagFolders) {
         tagModel.buildDiaryGroupedTags(contentList)
@@ -138,22 +141,30 @@ fun HomeScreen(){
             .flatten()
             .associateBy { it.folder to it.name }
     }
-    val chatTagDisplayMap = remember(chatList, chatTags) {
-        tagModel.buildChatGroupedTags(chatList)
-            .groupedTags
-            .values
-            .flatten()
-            .associateBy { it.name }
+
+    LaunchedEffect(currentFolder, homeTagDisplayMap) {
+        val currentSelectionValid =
+            homeSelectedTag.first == currentFolder && homeTagDisplayMap.containsKey(homeSelectedTag)
+        if (!currentSelectionValid) {
+            val fallback = when {
+                homeTagDisplayMap.containsKey(currentFolder to UNCLASSIFIED_TAG_NAME) -> {
+                    currentFolder to UNCLASSIFIED_TAG_NAME
+                }
+                else -> homeTagDisplayMap.keys.firstOrNull { it.first == currentFolder }
+                    ?: (currentFolder to UNCLASSIFIED_TAG_NAME)
+            }
+            homeSelectedTag = fallback
+        }
     }
 
-    LaunchedEffect(homeSelectedTag, chatSelectedTag, homeTagDisplayMap, chatTagDisplayMap) {
+    LaunchedEffect(homeSelectedTag, homeTagDisplayMap) {
         val homeMatched = homeTagDisplayMap[homeSelectedTag]
         val homeBg = homeMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background2
         val homeBorder = homeMatched?.let { Color(it.border2Int) } ?: ThemeDefault.border2
 
-        val chatMatched = chatTagDisplayMap[chatSelectedTag]
-        val chatBg = chatMatched?.let { Color(it.bg2Int) } ?: ThemeDefault.background0
-        val chatBorder = chatMatched?.let { Color(it.border2Int) } ?: ThemeDefault.sweetBorder
+        // 使用默认背景色
+        val chatBg = ThemeDefault.background0
+        val chatBorder = ThemeDefault.sweetBorder
 
         currentDiaryColors.value = currentDiaryColors.value.copy(
             background2 = homeBg,
@@ -184,6 +195,7 @@ fun HomeScreen(){
                                         )
                                     )
                                 }
+                                android.widget.Toast.makeText(context, "移动成功", android.widget.Toast.LENGTH_SHORT).show()
                                 showMoveBar = false
                                 isSelectionMode = false
                                 selectedIds = emptySet()
@@ -196,6 +208,7 @@ fun HomeScreen(){
                                         )
                                     )
                                 }
+                                android.widget.Toast.makeText(context, "移动成功", android.widget.Toast.LENGTH_SHORT).show()
                                 showMoveBar = false
                                 isSelectionMode = false
                                 selectedIds = emptySet()
@@ -203,9 +216,36 @@ fun HomeScreen(){
                             onDismiss = { showMoveBar = false }
                         )
                     }
+                    if (showCopyBar) {
+                        MoveToCategoryDialog(
+                            isDiary = selectedTab == Tab.HOME,
+                            title = "选择复制到：",
+                            diaryList = contentList,
+                            chatList = chatList,
+                            onDiaryTagSelected = { tag: Pair<String, String> ->
+                                contentList.filter { it.id in selectedIds }.forEach {
+                                    diaryViewModel.copyDiary(it, tag.second, tag.first)
+                                }
+                                android.widget.Toast.makeText(context, "复制成功", android.widget.Toast.LENGTH_SHORT).show()
+                                showCopyBar = false
+                                isSelectionMode = false
+                                selectedIds = emptySet()
+                            },
+                            onChatTagSelected = { tag: String ->
+                                chatList.filter { it.id in selectedIds }.forEach {
+                                    chatViewModel.copyChat(it, tag)
+                                }
+                                android.widget.Toast.makeText(context, "复制成功", android.widget.Toast.LENGTH_SHORT).show()
+                                showCopyBar = false
+                                isSelectionMode = false
+                                selectedIds = emptySet()
+                            },
+                            onDismiss = { showCopyBar = false }
+                        )
+                    }
                     SelectionModeBottomBar(
                         isDiary = selectedTab == Tab.HOME,
-                        onMerge = { /* TODO */ },
+                        onCopy = { showCopyBar = !showCopyBar },
                         onSplit = { /* TODO */ },
                         onMove = { showMoveBar = !showMoveBar },
                         onDelete = { showDeleteDialog = true }
@@ -263,32 +303,22 @@ fun HomeScreen(){
                         navViewModel.navigateTo(Route.DiaryDetail(diary.id))
                     }
                 )
-                Tab.AI -> ChatScreen(
-                    selectedTag = chatSelectedTag,
-                    onSelectedTagChange = { chatSelectedTag = it },
-                    isSelectionMode = isSelectionMode,
-                    selectedIds = selectedIds,
-                    onEnterSelection = { id ->
-                        isSelectionMode = true
-                        selectedIds = setOf(id)
-                        showMoveBar = false
-                    },
-                    onToggleSelection = { id ->
-                        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
-                        if (selectedIds.isEmpty()) isSelectionMode = false
-                    },
-                    onExitSelection = {
-                        isSelectionMode = false
-                        selectedIds = emptySet()
-                        showMoveBar = false
-                    },
-                    onClick = { chat ->
+                Tab.AI -> AiListScreen(
+                    onAiChatClick = { chat ->
                         navViewModel.navigateTo(Route.ChatDetail(chat.id))
+                    },
+                    onGroupChatClick = { chat ->
+                        navViewModel.navigateTo(Route.GroupChatDetail(chat.id))
                     }
                 )
                 Tab.ALARM -> AlarmScreen(
-                    onAddAlarm = { navViewModel.navigateTo(Route.AlarmEdit(0)) },
-                    onEditAlarm = { id -> navViewModel.navigateTo(Route.AlarmEdit(id)) }
+                    onAddAlarm = { isAiReminder, selectedAiId -> navViewModel.navigateTo(Route.AlarmEdit(0, isAiReminder, selectedAiId)) },
+                    onEditAlarm = { id, isAiReminder -> navViewModel.navigateTo(Route.AlarmEdit(id, isAiReminder)) },
+                    chatViewModel = chatViewModel,
+                    initialSelectedAiId = alarmSelectedAiId,
+                    onSelectedCategoryChange = { selectedAiId ->
+                        alarmSelectedAiId = selectedAiId
+                    }
                 )
             }
         }
@@ -371,11 +401,14 @@ fun ContentShow(
 
     Scaffold (
         floatingActionButton={ if (!isSelectionMode && !isSearchMode) AddButton(selectedTag) },
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
     ){ innerPadding ->
         Column(modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.diaryColors.background2)
-            .padding(innerPadding)
+            .navigationBarsPadding()
+            .padding(top = 36.dp) // 补齐之前因为去除 WindowInsets 而丢失的顶部状态栏距离
+            .padding(innerPadding) // 保留 FAB 所需要的底部安全边距
         ) {
             if (isSelectionMode) {
                 SelectionModeTopBar(
@@ -506,23 +539,44 @@ fun HeaderColumn(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val displayTitle = selectedTag.second
-            Text(displayTitle, fontSize = titleFontSize.sp, modifier = Modifier.clickable{isRolled = !isRolled })
-            Icon(imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "展开",
-                modifier = Modifier.padding(top = 5.dp).toggleRotateEffect(isRotated = isRolled))
-            Spacer(modifier = Modifier.weight(1f))
+            
+            // 用一个带有 weight 的内部 Row 以确保不会将最右侧的设置按钮挤出去
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable (indication = null, interactionSource = remember { MutableInteractionSource() }){ isRolled = !isRolled},
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = selectedTag.first,
+                    fontSize = titleFontSize.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false) // 分配剩余所有空间以支持截断，不够长时不强制撑满
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "展开",
+                    modifier = Modifier
+                        .padding(start = 4.dp, top = 5.dp)
+                        .toggleRotateEffect(isRotated = isRolled)
+                )
+            }
+            
             Text("☰", fontSize = 30.sp, modifier=Modifier.padding(8.dp).clickable { showSettings = true })
         }
         Box(modifier = Modifier
             .fillMaxWidth()
             .height(subtitleHeight)
             .graphicsLayer { alpha = subtitleAlpha }
-            .padding(start = 20.dp)
+            .padding(start = 20.dp, end = 20.dp)
         ) {
             Text(
-                "当前文件夹：${selectedTag.first}",
+                text = "当前分类：${selectedTag.second}",
                 fontSize = 15.sp,
                 color = Color.Gray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.align(Alignment.BottomStart)
             )
         }
@@ -746,9 +800,8 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             Icon(
                 imageVector = Icons.Default.NoteAlt,
                 contentDescription = "笔记",
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text("笔记", fontSize = 10.sp)
         }
 
@@ -768,9 +821,8 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             Icon(
                 imageVector = Icons.Default.MarkUnreadChatAlt,
                 contentDescription = "对话",
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text("对话", fontSize = 10.sp)
         }
 
@@ -790,9 +842,8 @@ fun BottomNavigate(selectedTab: Tab, onTabSelected: (Tab) -> Unit) {
             Icon(
                 imageVector = Icons.Default.Notifications,
                 contentDescription = "闹钟",
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(20.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text("闹钟", fontSize = 10.sp)
         }
     }

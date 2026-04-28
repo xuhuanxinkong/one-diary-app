@@ -5,6 +5,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,6 +81,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.ui.text.input.ImeAction
 
 import androidx.compose.material3.ModalBottomSheet
@@ -105,7 +109,7 @@ fun SearchBarItem(
         onValueChange = onSearchQueryChange,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         placeholder = { Text("搜索...") },
         leadingIcon = {
             Icon(Icons.Default.Search, contentDescription = "Search")
@@ -303,6 +307,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
     val scope = remember { CoroutineScope(Dispatchers.Main) }
     val context = LocalContext.current
     val viewModel: ChatViewModel = viewModel()
+    
     Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
         // Base URL Input with Preset Dropdown
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -311,7 +316,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
                 onValueChange = { aiBaseUrl = it },
                 label = { Text("Base URL") },
                 modifier = Modifier.fillMaxWidth(),
-                maxLines = 1,
+                singleLine = true,
                 trailingIcon = {
                     Box {
                         IconButton(onClick = { showUrlDropdown = true }) {
@@ -352,7 +357,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
                 onValueChange = { aiModel = it },
                 label = { Text("Model") },
                 modifier = Modifier.fillMaxWidth(),
-                maxLines = 1,
+                singleLine = true,
                 trailingIcon = {
                     IconButton(onClick = {
                         scope.launch {
@@ -392,7 +397,7 @@ fun AiSection(config: AiChatConfig? = null, onSave: ((AiChatConfig) -> Unit)? = 
             onValueChange = { aiApiKey = it },
             label = { Text("API Key") },
             modifier = Modifier.fillMaxWidth(),
-            maxLines = 1
+            singleLine = true
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -637,12 +642,12 @@ fun SelectionModeTopBar(
             imageVector = Icons.Default.Close,
             contentDescription = "退出",
             modifier = Modifier
-                .size(32.dp)
+                .size(26.dp)
                 .clickable { onClose() }
         )
         Text(
             text = title ?: "已选择 $selectedCount 项",
-            fontSize = 20.sp,
+            fontSize = 16.sp,
             modifier = Modifier.padding(start = 16.dp)
         )
     }
@@ -651,7 +656,7 @@ fun SelectionModeTopBar(
 @Composable
 fun SelectionModeBottomBar(
     isDiary: Boolean = true,
-    onMerge: () -> Unit,
+    onCopy: () -> Unit,
     onSplit: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit
@@ -666,10 +671,13 @@ fun SelectionModeBottomBar(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.clickable { onMerge() }.padding(8.dp)
+            modifier = Modifier.clickable { onCopy() }.padding(8.dp)
         ) {
-            Text("📎", fontSize = 20.sp)
-            Text("合并", fontSize = 12.sp, color = Color.Gray)
+            Icon(imageVector = Icons.Default.ContentCopy,
+                contentDescription = "复制",
+                modifier = Modifier.size(20.dp)
+                )
+            Text("复制", fontSize = 12.sp)
         }
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -682,7 +690,9 @@ fun SelectionModeBottomBar(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.clickable { onMove() }.padding(8.dp)
         ) {
-            Text("📁", fontSize = 20.sp)
+            Icon(imageVector = Icons.Default.FolderOpen,
+                contentDescription = "移动",
+                modifier = Modifier.size(20.dp))
             Text("移动", fontSize = 12.sp)
         }
         Column(
@@ -706,6 +716,7 @@ fun SelectionModeBottomBar(
 @Composable
 fun MoveToCategoryDialog(
     isDiary: Boolean,
+    title: String = "选择移动到：",
     diaryList: List<Diary> = emptyList(),
     chatList: List<Chat> = emptyList(),
     onDiaryTagSelected: (Pair<String, String>) -> Unit = {},
@@ -727,7 +738,7 @@ fun MoveToCategoryDialog(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("选择移动到：", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.weight(1f))
             }
             
@@ -738,7 +749,8 @@ fun MoveToCategoryDialog(
                     displayConfig = TagListDisplayConfig(
                         showManageAction = false,
                         showAddAction = false,
-                        enableSelection = false
+                        enableSelection = false,
+                        filterByCurrentFolder = false
                     ),
                     onTagsDelete = {}
                 )
@@ -749,7 +761,8 @@ fun MoveToCategoryDialog(
                     displayConfig = TagListDisplayConfig(
                         showManageAction = false,
                         showAddAction = false,
-                        enableSelection = false
+                        enableSelection = false,
+                        filterByCurrentFolder = false
                     ),
                     onTagsDelete = {}
                 )

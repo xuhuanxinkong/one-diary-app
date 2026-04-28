@@ -9,7 +9,9 @@ import androidx.room.Entity
 data class TagFolder(
     val name: String,
     val type: String,
-    val isHidden: Boolean = false
+    val isHidden: Boolean = false,
+    val isAiBound: Boolean = false, // AI绑定的文件夹，不允许用户删除
+    val orderIndex: Int = 0 // 用于自定义排序
 )
 
 @Entity(

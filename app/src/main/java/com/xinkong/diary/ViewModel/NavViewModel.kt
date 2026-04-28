@@ -45,24 +45,44 @@ sealed class Route {
     @Serializable
     data class DiaryDetail(val id: Long) : Route()
 
-    // 从 AI 页面打开的对话详情
+    // 从 AI 页面打开的单聊对话详情
     @Serializable
     data class ChatDetail(val sessionId: Long) : Route()
 
+    // 从 AI 页面打开的群聊对话详情
+    @Serializable
+    data class GroupChatDetail(val sessionId: Long) : Route()
+
     // 角色详情页（从对话中点击头像进入）
     @Serializable
-    data class RoleDetail(val chatId: Long, val role: String, val aiId: Long? = null) : Route()
+    data class RoleDetail(val chatId: Long, val role: String, val aiId: Long? = null, val isGroupChat: Boolean = false) : Route()
 
-    // 对话设置页
+    // 对话设置页（单聊）
     @Serializable
     data class ChatSetting(val chatId: Long) : Route()
+
+    // 对话设置页（群聊，可添加AI）
+    @Serializable
+    data class GroupChatSetting(val chatId: Long) : Route()
+    
+    // 源AI详情页（从群聊中点击AI导航到源AI所在的单聊设置）
+    @Serializable
+    data class SourceAiDetail(val sourceAiId: Long) : Route()
 
     // 标签管理页 (type: "diary" 或 "chat")
     @Serializable
     data class TagManage(val type: String) : Route()
 
     @Serializable
-    data class AlarmEdit(val id: Int) : Route()
+    data class AlarmEdit(val id: Int, val isAiReminder: Boolean = false, val selectedAiId: Long? = null) : Route()
+
+    // 语音通话页面
+    @Serializable
+    data class VoiceCall(val chatId: Long, val aiId: Long, val isGroupChat: Boolean = false) : Route()
+
+    // 语音通话选择 AI 界面
+    @Serializable
+    data class VoiceCallSelectAi(val chatId: Long, val isGroupChat: Boolean = false) : Route()
 
     // 其他页面
 }

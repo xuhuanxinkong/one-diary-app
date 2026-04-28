@@ -19,6 +19,9 @@ interface TagDao {
     @Query("SELECT * FROM tag_folders")
     fun getAllTagFolders(): Flow<List<TagFolder>>
 
+    @Query("SELECT * FROM tag_folders")
+    suspend fun getAllTagFoldersOnce(): List<TagFolder>
+
     @Query("SELECT * FROM tag_folders WHERE type = :type")
     fun getTagFoldersByType(type: String): Flow<List<TagFolder>>
 
@@ -35,6 +38,9 @@ interface TagDao {
     @Query("SELECT * FROM diary_tags")
     fun getAllDiaryTags(): Flow<List<DiaryTag>>
 
+    @Query("SELECT * FROM diary_tags WHERE folder = :folder")
+    suspend fun getDiaryTagsByFolder(folder: String): List<DiaryTag>
+
     // Chat Tag
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertChatTag(tag: ChatTag)
@@ -47,4 +53,7 @@ interface TagDao {
 
     @Query("SELECT * FROM chat_tags")
     fun getAllChatTags(): Flow<List<ChatTag>>
+
+    @Query("SELECT * FROM chat_tags WHERE folder = :folder")
+    suspend fun getChatTagsByFolder(folder: String): List<ChatTag>
 }

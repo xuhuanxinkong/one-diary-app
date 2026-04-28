@@ -33,7 +33,7 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "read_notes")
-            put("description", "按关键词读取本地笔记摘要")
+            put("description", "按关键词从本地读取笔记")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -85,7 +85,7 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "edit_note")
-            put("description", "修改已有的本地笔记")
+            put("description", "修改已有的本地笔记（全量替换，适合小内容修改）")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -112,14 +112,143 @@ class AiHttp {
         })
     }
 
-    private val getTagsAndFoldersToolSchema = JSONObject().apply {
+    // 批量编辑笔记工具 - 支持多种原子操作组合
+    private val batchEditNoteToolSchema = JSONObject().apply {
         put("type", "function")
         put("function", JSONObject().apply {
-            put("name", "get_tags_and_folders")
-            put("description", "获取本地所有的文件夹和标签，以了解现有的分类结构")
+            put("name", "batch_edit_note")
+            put("description", "批量编辑笔记，支持多种操作组合：set_title(改标题)、append(追加内容)、replace(查找替换)。一次调用可执行多个操作。")
             put("parameters", JSONObject().apply {
                 put("type", "object")
-                put("properties", JSONObject())
+                put("properties", JSONObject().apply {
+                    put("id", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "笔记ID")
+                    })
+                    put("operations", JSONObject().apply {
+                        put("type", "array")
+                        put("description", "操作列表，按顺序执行")
+                        put("items", JSONObject().apply {
+                            put("type", "object")
+                            put("properties", JSONObject().apply {
+                                put("op", JSONObject().apply {
+                                    put("type", "string")
+                                    put("enum", JSONArray().put("set_title").put("append").put("replace"))
+                                    put("description", "操作类型：set_title=改标题, append=追加内容, replace=查找替换")
+                                })
+                                put("value", JSONObject().apply {
+                                    put("type", "string")
+                                    put("description", "set_title和append时的新内容")
+                                })
+                                put("old", JSONObject().apply {
+                                    put("type", "string")
+                                    put("description", "replace时要查找的原文本")
+                                })
+                                put("new", JSONObject().apply {
+                                    put("type", "string")
+                                    put("description", "replace时的替换文本，删除时传空字符串")
+                                })
+                            })
+                            put("required", JSONArray().put("op"))
+                        })
+                    })
+                })
+                put("required", JSONArray().put("id").put("operations"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val setTagToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "set_tag")
+            put("description", "设置指定笔记的标签")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("id", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "笔记ID")
+                    })
+                    put("tag", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "要设置的新标签")
+                    })
+                })
+                put("required", JSONArray().put("id").put("tag"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val getNotesListToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "get_notes_list")
+            put("description", "获取笔记列表。在允许读取笔记情况就可使用。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "可选关键词，不传表示全部")
+                    })
+                    put("limit", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "返回条数，1 到 100")
+                        put("minimum", 1)
+                        put("maximum", 100)
+                    })
+                })
+                put("required", JSONArray())
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val ragSearchToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "rag_search")
+            put("description", "在本地记忆库中执行语义RAG检索，返回简洁参考：/标签/标题/内容预览。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("keyword", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "检索关键词")
+                    })
+                    put("limit", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "返回条数，1 到 5")
+                        put("minimum", 1)
+                        put("maximum", 5)
+                    })
+                })
+                put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val pauseAndDecideToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "pause_and_decide")
+            put(
+                "description",
+                "当你后续操作需要前一个工具返回的特定结果（如需要判断截图内容、逻辑分叉或等待用户确认）时，请调用此工具。调用此工具后，你可以根据当前状况补充工具调用。"
+            )
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("reason", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "可选，说明暂停原因")
+                    })
+                })
+                put("required", JSONArray())
                 put("additionalProperties", false)
             })
         })
@@ -161,7 +290,7 @@ class AiHttp {
         put("type", "function")
         put("function", JSONObject().apply {
             put("name", "web_search_baidu")
-            put("description", "使用百度智能云进行搜索，获取最新的网页信息。当你需要了解超出训练数据截止日期的事情、实时动态或检索具体资料时使用。")
+            put("description", "使用百度智能云进行互联网网页搜索（来源为互联网，不是本地记忆库）。当你需要实时动态或外部资料时使用。")
             put("parameters", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -171,6 +300,61 @@ class AiHttp {
                     })
                 })
                 put("required", JSONArray().put("keyword"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val createPlanToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "create_plan")
+            put("description", "制定AI自动执行计划。时间到达时AI将自动执行taskPrompt计划。可设置每天/每周重复。查看【我的提醒】了解已制定的计划。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("name", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "任务名称，简短描述任务内容")
+                    })
+                    put("dateTime", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "首次执行时间，格式 yyyy-MM-dd HH:mm，如 2024-12-25 09:00")
+                    })
+                    put("taskPrompt", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "AI任务提示词，描述到时执行的具体任务")
+                    })
+                    put("repeatDays", JSONObject().apply {
+                        put("type", "array")
+                        put("items", JSONObject().apply {
+                            put("type", "integer")
+                            put("minimum", 1)
+                            put("maximum", 7)
+                        })
+                        put("description", "重复日期，1-7对应周一至周日。如[1,2,3,4,5]表示工作日每天，空数组或不填表示仅执行一次")
+                    })
+                })
+                put("required", JSONArray().put("name").put("dateTime").put("taskPrompt"))
+                put("additionalProperties", false)
+            })
+        })
+    }
+
+    private val cancelPlanToolSchema = JSONObject().apply {
+        put("type", "function")
+        put("function", JSONObject().apply {
+            put("name", "cancel_plan")
+            put("description", "取消已制定的AI执行计划。查看【我的提醒】获取计划ID。")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("alarmId", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "要取消的提醒ID，从【我的提醒】列表中获取")
+                    })
+                })
+                put("required", JSONArray().put("alarmId"))
                 put("additionalProperties", false)
             })
         })
@@ -188,8 +372,20 @@ class AiHttp {
         return withContext(Dispatchers.IO) {
             try {
                 val chatUrl = resolveCompletionsUrl(config.baseUrl)
-                val requestPayload = buildRequestJson(config.model, messages, enabledTools)
-                val body = buildRequestBody(config.model, messages, enabledTools)
+                val requestPayload = buildRequestJson(
+                    model = config.model,
+                    messages = messages,
+                    enabledTools = enabledTools,
+                    baseUrl = config.baseUrl,
+                    enableDeepThink = config.enableDeepThink
+                )
+                val body = buildRequestBody(
+                    model = config.model,
+                    messages = messages,
+                    enabledTools = enabledTools,
+                    baseUrl = config.baseUrl,
+                    enableDeepThink = config.enableDeepThink
+                )
 
                 Log.d(TAG, "[chatWithAi] url=$chatUrl, model=${config.model}, stream=false, messages=$messages, enabledTools=$enabledTools")
                 Log.d(TAG, "[chatWithAi] request payload: $requestPayload")
@@ -214,8 +410,9 @@ class AiHttp {
                         val message = choicesArray.getJSONObject(0).optJSONObject("message")
                         if (message != null) {
                             val content = message.optString("content", "")
+                            val reasoningContent = extractReasoningText(message)
                             val toolCalls = parseToolCalls(message.optJSONArray("tool_calls"))
-                            Result.success(AiResponse.Message(content = content, toolCalls = toolCalls))
+                            Result.success(AiResponse.Message(content = content, toolCalls = toolCalls, reasoningContent = if (reasoningContent.isNotEmpty()) reasoningContent else null))
                         } else {
                             Result.failure(IOException("解析失败：message 字段为空"))
                         }
@@ -240,8 +437,22 @@ class AiHttp {
         enabledTools: Set<String> = emptySet()
     ): Flow<AiResponse.StreamChunk> = flow {
         val chatUrl = resolveCompletionsUrl(config.baseUrl)
-        val requestPayload = buildRequestJson(config.model, messages, enabledTools, isStream = true)
-        val body = buildRequestBody(config.model, messages, enabledTools, isStream = true)
+        val requestPayload = buildRequestJson(
+            model = config.model,
+            messages = messages,
+            enabledTools = enabledTools,
+            isStream = true,
+            baseUrl = config.baseUrl,
+            enableDeepThink = config.enableDeepThink
+        )
+        val body = buildRequestBody(
+            model = config.model,
+            messages = messages,
+            enabledTools = enabledTools,
+            isStream = true,
+            baseUrl = config.baseUrl,
+            enableDeepThink = config.enableDeepThink
+        )
 
         Log.d(TAG, "[chatWithAiStream] url=$chatUrl, model=${config.model}, stream=true, messages=$messages, enabledTools=$enabledTools")
         Log.d(TAG, "[chatWithAiStream] request payload: $requestPayload")
@@ -282,6 +493,17 @@ class AiHttp {
                             if (choicesArray.length() == 0) continue
                             val delta = choicesArray.getJSONObject(0).optJSONObject("delta") ?: continue
 
+                            // 0. Reasoning Content
+                            if (delta.has("reasoning_content") && !delta.isNull("reasoning_content")) {
+                                emit(AiResponse.StreamChunk.ReasoningContent(delta.optString("reasoning_content", "")))
+                            }
+                            if (delta.has("reasoning") && !delta.isNull("reasoning")) {
+                                val reasoning = delta.opt("reasoning")
+                                if (reasoning is String && reasoning.isNotEmpty()) {
+                                    emit(AiResponse.StreamChunk.ReasoningContent(reasoning))
+                                }
+                            }
+
                             // 1. Text Content
                             if (delta.has("content") && !delta.isNull("content")) {
                                 emit(AiResponse.StreamChunk.Content(delta.optString("content", "")))
@@ -292,22 +514,23 @@ class AiHttp {
                                 val tcArray = delta.getJSONArray("tool_calls")
                                 for (i in 0 until tcArray.length()) {
                                     val tc = tcArray.getJSONObject(i)
-                                    val index = tc.optInt("index")
+                                    val index = tc.optInt("index", i)
                                     val existing = toolCallsBuffer.getOrPut(index) { JSONObject() }
 
-                                    if (tc.has("id")) existing.put("id", tc.getString("id"))
-                                    if (tc.has("type")) existing.put("type", tc.getString("type"))
-                                    if (tc.has("function")) {
-                                        val func = tc.getJSONObject("function")
+                                    nullableJsonString(tc.opt("id"))?.let { existing.put("id", it) }
+                                    nullableJsonString(tc.opt("type"))?.let { existing.put("type", it) }
+                                    if (tc.has("function") && !tc.isNull("function")) {
+                                        val func = tc.optJSONObject("function") ?: continue
                                         val existingFunc = if (existing.has("function")) {
                                             existing.getJSONObject("function")
                                         } else {
                                             JSONObject().also { existing.put("function", it) }
                                         }
-                                        if (func.has("name")) existingFunc.put("name", func.getString("name"))
-                                        if (func.has("arguments")) {
+                                        nullableJsonString(func.opt("name"))?.let { existingFunc.put("name", it) }
+                                        val argsFragment = nullableJsonString(func.opt("arguments"))
+                                        if (!argsFragment.isNullOrEmpty()) {
                                             val currentArgs = existingFunc.optString("arguments", "")
-                                            existingFunc.put("arguments", currentArgs + func.getString("arguments"))
+                                            existingFunc.put("arguments", currentArgs + argsFragment)
                                         }
                                     }
                                 }
@@ -377,6 +600,8 @@ class AiHttp {
                     put("search_recency_filter", "year")
                 }
                 
+                Log.d(TAG, "百度搜索请求: keyword=$keyword")
+                
                 val request = Request.Builder()
                     .url(url)
                     .header("Authorization", "Bearer $apiKey")
@@ -384,17 +609,61 @@ class AiHttp {
                     .build()
                     
                 val response = client.newCall(request).execute()
+                val responseBody = response.body?.string() ?: ""
+                Log.d(TAG, "百度搜索响应码: ${response.code}, body长度: ${responseBody.length}")
+                
                 if (response.isSuccessful) {
-                    val respJson = JSONObject(response.body?.string() ?: "")
-                    val content = respJson.optJSONArray("choices")
+                    val respJson = JSONObject(responseBody)
+                    var content: String? = null
+                    
+                    // 优先从choices数组获取内容（某些API格式）
+                    content = respJson.optJSONArray("choices")
                         ?.optJSONObject(0)
                         ?.optJSONObject("message")
-                        ?.optString("content", "未返回结果")
-                    Result.success(content ?: "未返回结果")
+                        ?.optString("content", null)
+                    
+                    // 如果choices中没有，从references数组获取搜索结果
+                    if (content.isNullOrBlank()) {
+                        val references = respJson.optJSONArray("references")
+                        if (references != null && references.length() > 0) {
+                            val sb = StringBuilder()
+                            for (i in 0 until minOf(references.length(), 10)) {
+                                val item = references.optJSONObject(i) ?: continue
+                                val title = item.optString("title", "")
+                                val snippet = item.optString("content", item.optString("snippet", ""))
+                                val url = item.optString("url", "")
+                                val date = item.optString("date", "")
+                                val website = item.optString("website", "")
+                                if (title.isNotBlank() || snippet.isNotBlank()) {
+                                    sb.append("【${i + 1}】$title")
+                                    if (date.isNotBlank()) sb.append("（$date）")
+                                    sb.append("\n$snippet")
+                                    if (website.isNotBlank()) sb.append("\n来源: $website")
+                                    if (url.isNotBlank()) sb.append(" $url")
+                                    sb.append("\n\n")
+                                }
+                            }
+                            content = sb.toString().ifBlank { null }
+                        }
+                    }
+                    
+                    // 检查是否有error信息
+                    if (content.isNullOrBlank()) {
+                        val errorMsg = respJson.optString("error_msg", respJson.optString("message", ""))
+                        if (errorMsg.isNotBlank()) {
+                            content = "搜索返回错误: $errorMsg"
+                        }
+                    }
+                    
+                    Log.d(TAG, "百度搜索解析结果: ${content?.take(200)}")
+                    Result.success(content ?: "搜索未返回有效结果")
                 } else {
-                    Result.failure(IOException("搜索请求失败: ${response.code}"))
+                    val errorBody = responseBody.take(500)
+                    Log.e(TAG, "百度搜索失败: code=${response.code}, body=$errorBody")
+                    Result.failure(IOException("搜索请求失败: ${response.code}, $errorBody"))
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "百度搜索异常", e)
                 Result.failure(e)
             }
         }
@@ -406,21 +675,49 @@ class AiHttp {
         model: String,
         messages: List<Map<String, Any>>,
         enabledTools: Set<String>,
-        isStream: Boolean = false
+        isStream: Boolean = false,
+        baseUrl: String = "",
+        enableDeepThink: Boolean = false
     ): JSONObject {
+        val requestMessages = if (enableDeepThink) {
+            val deepThinkPrompt = "[深度思考模式]请先充分思考后再回答；若模型支持，请在 reasoning_content 中输出思考过程，再在 content 中给出最终答复。"
+            val systemIndex = messages.indexOfFirst {
+                it["role"] == "system" && it["content"] is String
+            }
+            if (systemIndex >= 0) {
+                messages.mapIndexed { index, message ->
+                    if (index == systemIndex) {
+                        val merged = (message["content"] as String).trimEnd() + "\n\n" + deepThinkPrompt
+                        message.toMutableMap().apply { put("content", merged) }
+                    } else {
+                        message
+                    }
+                }
+            } else {
+                listOf(mapOf("role" to "system", "content" to deepThinkPrompt)) + messages
+            }
+        } else {
+            messages
+        }
+
         return JSONObject().apply {
             put("model", model)
-            put("messages", JSONObject.wrap(messages))
+            put("messages", JSONObject.wrap(requestMessages))
             val toolsArray = JSONArray()
             if (enabledTools.contains("read_notes")) {
                 toolsArray.put(readNotesToolSchema)
-                toolsArray.put(getTagsAndFoldersToolSchema)
+                toolsArray.put(getNotesListToolSchema)
+            }
+            if (enabledTools.contains("rag_search")) {
+                toolsArray.put(ragSearchToolSchema)
             }
             if (enabledTools.contains("write_note")) {
                 toolsArray.put(writeNoteToolSchema)
             }
             if (enabledTools.contains("edit_note")) {
                 toolsArray.put(editNoteToolSchema)
+                toolsArray.put(batchEditNoteToolSchema)
+                toolsArray.put(setTagToolSchema)
             }
             if (enabledTools.contains("query_chat_history")) {
                 toolsArray.put(queryChatHistoryToolSchema)
@@ -428,17 +725,58 @@ class AiHttp {
             if (enabledTools.contains("web_search_baidu")) {
                 toolsArray.put(webSearchBaiduToolSchema)
             }
+            if (enabledTools.contains("create_plan")) {
+                toolsArray.put(createPlanToolSchema)
+            }
+            if (enabledTools.contains("cancel_plan")) {
+                toolsArray.put(cancelPlanToolSchema)
+            }
+            if (enabledTools.contains("pause_and_decide")) {
+                toolsArray.put(pauseAndDecideToolSchema)
+            }
             if (toolsArray.length() > 0) {
                 put("tools", toolsArray)
                 put("tool_choice", "auto")
             }
             put("stream", isStream)
+            if (enableDeepThink && isDashScopeUrl(baseUrl)) {
+                // DashScope Qwen 深度思考兼容参数
+                put("enable_thinking", true)
+            }
         }
     }
 
-    private fun buildRequestBody(model: String, messages: List<Map<String, Any>>, enabledTools: Set<String>, isStream: Boolean = false): RequestBody {
-        val json = buildRequestJson(model, messages, enabledTools, isStream)
+    private fun buildRequestBody(
+        model: String,
+        messages: List<Map<String, Any>>,
+        enabledTools: Set<String>,
+        isStream: Boolean = false,
+        baseUrl: String = "",
+        enableDeepThink: Boolean = false
+    ): RequestBody {
+        val json = buildRequestJson(model, messages, enabledTools, isStream, baseUrl, enableDeepThink)
         return json.toString().toRequestBody(mediaType)
+    }
+
+    private fun isDashScopeUrl(baseUrl: String): Boolean {
+        return baseUrl.contains("dashscope.aliyuncs.com", ignoreCase = true)
+    }
+
+    private fun extractReasoningText(message: JSONObject): String {
+        val direct = message.optString("reasoning_content", "")
+        if (direct.isNotBlank()) return direct
+
+        val reasoning = message.opt("reasoning")
+        if (reasoning is String && reasoning.isNotBlank()) return reasoning
+        if (reasoning is JSONObject) {
+            val text = reasoning.optString("content", "")
+            if (text.isNotBlank()) return text
+        }
+
+        val alt = message.optString("reasoning", "")
+        if (alt.isNotBlank()) return alt
+
+        return ""
     }
 
     private fun parseToolCalls(toolCallsArray: JSONArray?): List<AiToolCall> {
@@ -449,16 +787,63 @@ class AiHttp {
             val functionObj = callObj.optJSONObject("function") ?: continue
             val name = functionObj.optString("name")
             if (name.isEmpty()) continue
+            val rawArguments = when (val raw = functionObj.opt("arguments")) {
+                null, JSONObject.NULL -> "{}"
+                else -> raw.toString()
+            }
+            val safeArguments = normalizeToolArguments(rawArguments)
+            val toolCallId = (nullableJsonString(callObj.opt("id")) ?: "").ifBlank {
+                "call_${i}_${name}_${safeArguments.hashCode().toUInt().toString(16)}"
+            }
             toolCalls.add(
                 AiToolCall(
-                    id = callObj.optString("id"),
-                    type = callObj.optString("type", "function"),
+                    id = toolCallId,
+                    type = normalizeToolType(callObj.opt("type")),
                     functionName = name,
-                    arguments = functionObj.optString("arguments", "{}")
+                    arguments = safeArguments
                 )
             )
         }
         return toolCalls
+    }
+
+    private fun nullableJsonString(value: Any?): String? {
+        if (value == null || value == JSONObject.NULL) return null
+        val text = value.toString().trim()
+        if (text.isEmpty() || text.equals("null", ignoreCase = true)) return null
+        return text
+    }
+
+    private fun normalizeToolType(rawType: Any?): String {
+        val normalized = nullableJsonString(rawType)
+        return if (normalized.isNullOrBlank()) "function" else normalized
+    }
+
+    private fun normalizeToolArguments(rawArguments: String): String {
+        val trimmed = rawArguments.trim()
+        if (trimmed.isEmpty() || trimmed.equals("null", ignoreCase = true)) return "{}"
+
+        if (isValidJsonObject(trimmed)) return trimmed
+
+        var candidate = trimmed
+        if (!candidate.startsWith("{")) {
+            val payload = candidate.trimStart(',').trim()
+            candidate = if (payload.isEmpty()) "{}" else "{$payload"
+        }
+        if (!candidate.endsWith("}")) {
+            candidate = "$candidate}"
+        }
+
+        return if (isValidJsonObject(candidate)) candidate else "{}"
+    }
+
+    private fun isValidJsonObject(value: String): Boolean {
+        return try {
+            JSONObject(value)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun resolveCompletionsUrl(baseUrl: String): String = when {

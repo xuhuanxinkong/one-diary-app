@@ -14,14 +14,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -29,20 +32,18 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderColors
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,9 +57,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.xinkong.diary.data.AiResponse
-
-import com.xinkong.diary.Http.AiHttp
 import com.xinkong.diary.ViewModel.ChatViewModel
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
@@ -73,6 +71,7 @@ fun SettingScreen(
     onBack: () -> Unit,
     onTitleChange: (String) -> Unit,
     onBackgroundChange: (String) -> Unit,
+    onHistoryRoundsChange: (Int) -> Unit = {},
     onAvatarClick: (String, Long?) -> Unit = {_, _ ->}
 ) {
     val chatViewModel: ChatViewModel = viewModel()
@@ -87,32 +86,20 @@ fun SettingScreen(
         uri?.toString()?.let(onBackgroundChange)
     }
 
-    val context = LocalContext.current
-    val prefs = context.getSharedPreferences("api_keys", android.content.Context.MODE_PRIVATE)
-    var baiduApiKey by remember { mutableStateOf(prefs.getString("baidu_api_key", "") ?: "") }
-
     Scaffold(
         topBar = { SettingTopBar(onBack = onBack) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
+                .background(Color(0xFFF5F5F5))
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(Color(0xFFF5F5F5)),
+                .verticalScroll(rememberScrollState())
+                ,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // AI 头像 + 添加按钮
-            AvatarRow(
-                aiConfigs = aiConfigs,
-                userConfig = userConfig,
-                onAvatarClick = onAvatarClick,
-                onAddAiClick = { chatViewModel.addAiConfig(chat.id) }
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-            Divider(color = Color.LightGray, thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(16.dp))
+            
             // 对话名称设置
             Column(
                 modifier = Modifier
@@ -132,151 +119,111 @@ fun SettingScreen(
                     onClick = { backgroundPicker.launch("image/*") }
                 )
 
-                // 工具设置
-                var toolsExpanded by remember { mutableStateOf(true) }
+                // 记忆对话轮数设置
+                Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                var historyExpanded by remember { mutableStateOf(true) }
                 SettingSectionHeader(
-                    title = "工具设置",
-                    isExpanded = toolsExpanded,
-                    onClick = { toolsExpanded = !toolsExpanded }
+                    title = "记忆设置",
+                    isExpanded = historyExpanded,
+                    onClick = { historyExpanded = !historyExpanded }
                 )
-                if (toolsExpanded) {
-                    if (aiConfigs.isNotEmpty()) {
-                        val config = aiConfigs.first()
+                if (historyExpanded) {
+                    var historyRounds by remember { mutableIntStateOf(chat.historyRounds) }
+                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                "开启图片识别",
+                                "历史对话轮数",
                                 fontSize = 14.sp,
-                                color = Color.DarkGray,
-                                modifier = Modifier.weight(1f)
+                                color = Color.DarkGray
                             )
-                            Switch(
-                                checked = config.enableImageSupport,
-                                onCheckedChange = { checked ->
-                                    chatViewModel.updateAiConfig(
-                                        config.copy(enableImageSupport = checked)
-                                    )
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = MaterialTheme.diaryColors.primary
-                                )
+                            Text(
+                                "${historyRounds}轮",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.diaryColors.primary,
+                                fontWeight = FontWeight.Medium
                             )
                         }
-                    } else {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Slider(
+                            value = historyRounds.toFloat(),
+                            onValueChange = { 
+                                historyRounds = it.toInt()
+                            },
+                            onValueChangeFinished = {
+                                onHistoryRoundsChange(historyRounds)
+                            },
+                            valueRange = 1f..30f,
+                            steps = 28,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = androidx.compose.material3.SliderDefaults.colors(
+                                thumbColor = MaterialTheme.diaryColors.primary,
+                                activeTrackColor = MaterialTheme.diaryColors.primary
+                            )
+                        )
                         Text(
-                            "请先添加AI后再设置工具开关。",
-                            color = Color.Gray,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(vertical = 8.dp)
+                            "AI将记忆最近${historyRounds}轮对话内容（建议6-15轮）",
+                            fontSize = 12.sp,
+                            color = Color.Gray
                         )
-                    }
-                }
-
-                // 百度搜索设置
-                var searchExpanded by remember { mutableStateOf(true) }
-                SettingSectionHeader(
-                    title = "百度搜索设置",
-                    isExpanded = searchExpanded,
-                    onClick = { searchExpanded = !searchExpanded }
-                )
-                if (searchExpanded) {
-                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                        OutlinedTextField(
-                            value = baiduApiKey,
-                            onValueChange = {
-                                baiduApiKey = it
-                                prefs.edit().putString("baidu_api_key", it).apply()
-                            },
-                            label = { Text("千帆大模型 API Key") },
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            singleLine = true
-                        )
-                    }
-                }
-
-                // 图片识别测试
-                var imageTestExpanded by remember { mutableStateOf(true) }
-                SettingSectionHeader(
-                    title = "图片识别测试",
-                    isExpanded = imageTestExpanded,
-                    onClick = { imageTestExpanded = !imageTestExpanded }
-                )
-                if (imageTestExpanded) {
-                    var testStatus by remember { mutableStateOf("") }
-                    val scope = rememberCoroutineScope()
-                    
-                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    testStatus = "测试中..."
-                                    try {
-                                        val drawable = androidx.core.content.ContextCompat.getDrawable(context, com.xinkong.diary.R.mipmap.ic_launcher)
-                                        val bitmap = if (drawable is android.graphics.drawable.BitmapDrawable) {
-                                            drawable.bitmap
-                                        } else {
-                                            val w = drawable?.intrinsicWidth?.coerceAtLeast(1) ?: 100
-                                            val h = drawable?.intrinsicHeight?.coerceAtLeast(1) ?: 100
-                                            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
-                                            val canvas = android.graphics.Canvas(bmp)
-                                            drawable?.setBounds(0, 0, canvas.width, canvas.height)
-                                            drawable?.draw(canvas)
-                                            bmp
-                                        }
-                                        
-                                        val outputStream = java.io.ByteArrayOutputStream()
-                                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
-                                        val base64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
-                                        
-                                        val config = aiConfigs.firstOrNull()
-                                        if (config != null) {
-                                            val messages = listOf(
-                                                mapOf(
-                                                    "role" to "user",
-                                                    "content" to listOf(
-                                                        mapOf("type" to "text", "text" to "What is this?"),
-                                                        mapOf("type" to "image_url", "image_url" to mapOf("url" to "data:image/jpeg;base64,$base64"))
-                                                    )
-                                                )
-                                            )
-                                            val result = AiHttp().chatWithAi(config, messages)
-                                            result.fold(
-                                                onSuccess = { response ->
-                                                    val reply = (response as? AiResponse.Message)?.content ?: ""
-                                                    if (reply.contains("笔记") || reply.contains("日记")) {
-                                                        testStatus = "成功！AI识别为笔记/日记"
-                                                    } else {
-                                                        testStatus = "失败：AI回答为 $reply"
-                                                    }
-                                                },
-                                                onFailure = { e ->
-                                                    testStatus = "请求失败：${e.message}"
-                                                }
-                                            )
-                                        } else {
-                                            testStatus = "请先添加AI"
-                                        }
-                                    } catch (e: Exception) {
-                                        testStatus = "错误：${e.message}"
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("测试图片识别")
-                        }
-                        if (testStatus.isNotEmpty()) {
-                            Text(testStatus, color = Color.Gray, fontSize = 14.sp)
-                        }
                     }
                 }
             }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // 对话成员
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .background(Color.White, RoundedCornerShape(12.dp))
+                    .padding(16.dp)
+            ) {
+                Text(
+                    "对话成员",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                // 用户项
+                ChatMemberItem(
+                    name = userConfig.name.ifEmpty { "用户" },
+                    subtitle = "我",
+                    avatarUri = userConfig.avatarUri,
+                    avatarColor = Color(0xFF5B9BD5),
+                    onClick = { onAvatarClick("user", null) }
+                )
+                Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                
+                // AI成员列表
+                aiConfigs.forEach { aiConfig ->
+                    ChatMemberItem(
+                        name = aiConfig.name,
+                        subtitle = aiConfig.model.ifEmpty { "AI助手" },
+                        avatarUri = aiConfig.avatarUri,
+                        avatarColor = Color(0xFFE8F5E9),
+                        onClick = { onAvatarClick("assistant", aiConfig.id) }
+                    )
+                    if (aiConfig != aiConfigs.last()) {
+                        Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            // 底部导航栏填充（白色背景，防止显示应用主背景色）
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .background(Color.White)
+            )
         }
     }
 }
@@ -309,96 +256,75 @@ fun SettingTopBar(onBack: () -> Unit) {
     }
 }
 
-
+/**
+ * 对话成员列表项（单聊用）
+ */
 @Composable
-fun AvatarRow(
-    aiConfigs: List<AiChatConfig>,
-    userConfig: UserChatConfig,
-    onAvatarClick: (String, Long?) -> Unit = {_, _ ->},
-    onAddAiClick: () -> Unit = {}
+fun ChatMemberItem(
+    name: String,
+    subtitle: String,
+    avatarUri: String,
+    avatarColor: Color,
+    onClick: () -> Unit
 ) {
     val context = LocalContext.current
-    LazyRow(
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.Start,
+    
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp)
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        item {
-            // 用户 头像
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF5B9BD5))
-                        .clickable{onAvatarClick("user", null)},
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (userConfig.avatarUri.isNotEmpty()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context).data(userConfig.avatarUri).crossfade(true).build(),
-                            contentDescription = "用户头像",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text("我", color = Color.White, fontSize = 16.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-        }
-
-        items(aiConfigs) { aiConfig ->
-            // AI 头像
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF5B9BD5))
-                        .clickable{onAvatarClick("assistant", aiConfig.id)},
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (aiConfig.avatarUri.isNotEmpty()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context).data(aiConfig.avatarUri).crossfade(true).build(),
-                            contentDescription = "AI头像",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text("AI", color = Color.White, fontSize = 16.sp)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-        }
-
-        item {
-            // 添加按钮
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFE0E0E0))
-                        .clickable { onAddAiClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = "添加",
-                        tint = Color.Gray,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
+        // 头像
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(avatarColor),
+            contentAlignment = Alignment.Center
+        ) {
+            if (avatarUri.isNotEmpty()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context).data(avatarUri).crossfade(true).build(),
+                    contentDescription = "头像",
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Text(
+                    name.take(1),
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        // 名称和副标题
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+        }
+        
+        // 右箭头
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color.Gray,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 

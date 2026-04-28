@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
 interface DiaryDao {
     //日记相关
     @Insert
-    suspend fun insert(diary: Diary)
+    suspend fun insert(diary: Diary): Long
 
     @Update
     suspend fun update(diary:Diary)
@@ -65,4 +65,7 @@ interface DiaryDao {
         """
     )
     fun searchAllByKeyword(keyword: String): Flow<List<Diary>>
+
+    @Query("SELECT * FROM diaries WHERE tagFolder = :folder ORDER BY id DESC")
+    suspend fun getDiariesByFolder(folder: String): List<Diary>
 }
