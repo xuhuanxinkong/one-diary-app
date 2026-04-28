@@ -2391,7 +2391,7 @@ fun AiVisibilityBottomSheet(
     Column(modifier = Modifier
         .fillMaxWidth()
         .padding(16.dp)) {
-        Text("选择那些AI可以看到此消息",
+        Text("选择哪些AI可以看到此消息",
             fontSize = 16.sp,
             modifier = Modifier.padding(bottom = 12.dp))
         Divider(modifier = Modifier.padding(bottom = 12.dp))
