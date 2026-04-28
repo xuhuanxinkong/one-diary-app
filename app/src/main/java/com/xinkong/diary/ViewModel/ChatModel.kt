@@ -363,6 +363,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { chatDao.deleteMessage(message) }
     }
 
+    fun updateMessageVisibility(messageId: Long, visibleToAiIds: Set<Long>) {
+        viewModelScope.launch {
+            val normalizedIds = visibleToAiIds.filter { it > 0L }.toSet()
+            chatDao.updateMessageVisibleToAiIds(
+                messageId = messageId,
+                visibleToAiIds = Json.encodeToString(normalizedIds.toList())
+            )
+        }
+    }
+
     /**
      * 发送消息并调用 AI
      * 自动从 DB 读取该对话的 AI 配置、历史消息和上下文

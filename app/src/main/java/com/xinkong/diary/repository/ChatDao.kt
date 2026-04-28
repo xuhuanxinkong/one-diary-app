@@ -67,6 +67,9 @@ interface ChatDao {
     @Query("SELECT * FROM chat_messages WHERE id = :messageId LIMIT 1")
     suspend fun getMessageById(messageId: Long): ChatMessage?
 
+    @Query("UPDATE chat_messages SET visibleToAiIds = :visibleToAiIds WHERE id = :messageId")
+    suspend fun updateMessageVisibleToAiIds(messageId: Long, visibleToAiIds: String)
+
     @Query("SELECT * FROM chat_messages ORDER BY id ASC")
     suspend fun getAllMessages(): List<ChatMessage>
 
