@@ -21,8 +21,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -87,6 +85,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.xinkong.diary.data.AiState
 import com.xinkong.diary.ViewModel.ChatViewModel
+import com.xinkong.diary.ViewModel.BubbleConfigViewModel
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.ChatMessage
@@ -139,6 +138,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
@@ -148,7 +148,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -172,6 +171,7 @@ private fun parseVisibleAiIds(raw: String): Set<Long> {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TalkScreen(
+    bubbleViewModel: BubbleConfigViewModel,
     chat: Chat,
     onBack: () -> Unit,
     onAvatarClick: (String, Long?) -> Unit = {_, _ -> },
@@ -1082,6 +1082,7 @@ fun ToolRequestBubble(
 fun ExpandableMessageContent(
     content: String,
     textColor: Color = Color.Black,
+    textSize: Float = 16f,
     isAnimating: Boolean = false,
     isSelectable: Boolean = true, // Added isSelectable flag to prevent SelectionContainer crashes during layout thrashing
     onAnimationEnd: () -> Unit = {}
@@ -1127,7 +1128,7 @@ fun ExpandableMessageContent(
         fun MessageTextComponent() {
             Text(
                 text = displayedText,
-                fontSize = 16.sp,
+                fontSize = textSize.sp,
                 color = textColor,
                 maxLines = if (isExpanded) Int.MAX_VALUE else 15,
                 onTextLayout = { textLayoutResult ->
@@ -1233,6 +1234,8 @@ fun ChatBubble(
     onAnimationEnd: () -> Unit = {},
     allowSelection: Boolean = true
 ) {
+
+    val bubbleViewModel: BubbleConfigViewModel = viewModel()
     var showMenu by remember { mutableStateOf(false) }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -1259,6 +1262,7 @@ fun ChatBubble(
     val visibleAiNames = aiConfigs.filter { it.id in visibleAiIds }.map { it.name }
     val reasoningContent = if (currentAiConfig?.enableDeepThink == true) message.reasoningContent else null
     val displayContent = message.content.trimEnd()
+    val bubbleConfig by bubbleViewModel.config.collectAsStateWithLifecycle()
 
     if (expandedImageUri != null) {
         Dialog(
@@ -1346,6 +1350,7 @@ fun ChatBubble(
                                 ExpandableMessageContent(
                                     content = message.content,
                                     textColor = Color.Black,
+                                    textSize = bubbleConfig.textSize,
                                     isAnimating = false,
                                     isSelectable = allowSelection
                                 )
@@ -1362,7 +1367,7 @@ fun ChatBubble(
                         }
                     }
 
-                    if (isGroupChat && visibleAiNames.isNotEmpty()) {
+                    if (bubbleConfig.showVisibility && isGroupChat && visibleAiNames.isNotEmpty()) {
                         ChatBubbleVisibilityRow(
                             visibleToAiNames = visibleAiNames,
                             modifier = Modifier.padding(top = 4.dp, end = 2.dp),
@@ -1422,7 +1427,7 @@ fun ChatBubble(
                         onImageClick = { expandedImageUri = it }
                     )
 
-                    if (ragEntries.isNotEmpty()) {
+                    if (bubbleConfig.showRagResult && ragEntries.isNotEmpty()) {
                         ExpandableAnim(
                             title = "RAG检索参考（${ragEntries.size}）",
                             modifier = Modifier.padding(start = 4.dp, top = 2.dp),
@@ -1487,6 +1492,7 @@ fun ChatBubble(
                                                     ExpandableMessageContent(
                                                         content = reasoningContent,
                                                         textColor = Color.DarkGray,
+                                                        textSize = (bubbleConfig.textSize - 2).coerceAtLeast(10f),
                                                         isAnimating = false, // 已完成思考过程不播放动画
                                                         isSelectable = allowSelection
                                                     )
@@ -1496,6 +1502,7 @@ fun ChatBubble(
                                         ExpandableMessageContent(
                                             content = displayContent,
                                             textColor = Color.Black,
+                                            textSize = bubbleConfig.textSize,
                                             isAnimating = isAnimating,
                                             isSelectable = allowSelection,
                                             onAnimationEnd = onAnimationEnd
@@ -1515,7 +1522,7 @@ fun ChatBubble(
                         }
                     }
 
-                    if (plainToolEntries.isNotEmpty()) {
+                    if (bubbleConfig.showToolResult && plainToolEntries.isNotEmpty()) {
                         ExpandableAnim(
                             title = "执行了 ${plainToolEntries.size} 个工具",
                             modifier = Modifier.padding(start = 4.dp, top = 4.dp)
@@ -1532,7 +1539,7 @@ fun ChatBubble(
                             }
                         }
                     }
-                    if (isGroupChat) {
+                    if (bubbleConfig.showVisibility && isGroupChat) {
                         ChatBubbleVisibilityRow(
                             visibleToAiNames = visibleAiNames,
                             modifier = Modifier.padding(start = 2.dp, top = 4.dp),
@@ -2228,8 +2235,9 @@ fun GroupChatFunctionBar(
 ) {
     Row(
         modifier = modifier
+            .background(Color(0xFFF7F7F7))
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         AssistChip(
@@ -2250,7 +2258,8 @@ fun GroupChatFunctionBar(
                     modifier = Modifier.size(18.dp)
                 )
             },
-            modifier = Modifier.height(32.dp)
+            modifier = Modifier.height(36.dp),
+            border = BorderStroke(0.5.dp, color = Color.LightGray)
         )
 
         AssistChip(
@@ -2271,7 +2280,8 @@ fun GroupChatFunctionBar(
                     modifier = Modifier.size(18.dp)
                 )
             },
-            modifier = Modifier.height(32.dp)
+            modifier = Modifier.height(36.dp),
+            border = BorderStroke(0.5.dp, color = Color.LightGray)
         )
     }
 }
@@ -2405,7 +2415,7 @@ fun AiVisibilityBottomSheet(
                         visibleToAiIds = if(isVisible){
                             visibleToAiIds - config.id
                         }else{
-                            visibleToAiIds + config.id
+                            (visibleToAiIds - (-1L)) + config.id
                         }
                     }
                     .padding(vertical = 8.dp),
@@ -2438,11 +2448,50 @@ fun AiVisibilityBottomSheet(
             }
         }
         val visibleNames = aiConfigs.filter { it.id in visibleToAiIds }.joinToString(" ") { it.name }
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    visibleToAiIds = if (visibleToAiIds.contains(-1L)) {
+                        emptySet()
+                    } else {
+                        setOf(-1L)
+                    }
+                }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.Gray),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "无", color = Color.White)
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "所有AI均不可见(仅写注释)",
+                modifier = Modifier.weight(1f),
+                fontSize = 16.sp,
+                color = Color.DarkGray
+            )
+            Icon(
+                imageVector = if (visibleToAiIds.contains(-1L)) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                contentDescription = if (visibleToAiIds.contains(-1L)) "所有不可见" else "部分可见",
+                tint = if (visibleToAiIds.contains(-1L)) Color.Gray else Color.LightGray,
+                modifier = Modifier.size(24.dp)
+            )
+        }
 
         Text(
-            text = if(visibleToAiIds.isEmpty()){
+            text = if (visibleToAiIds.contains(-1L)) {
+                "提示：所有 AI 不可见"
+            } else if (visibleToAiIds.isEmpty()) {
                 "提示：所有 AI 可见"
-            }else{
+            } else {
                 "已选择的可见 AI： $visibleNames"
             },
             color = Color.Gray,

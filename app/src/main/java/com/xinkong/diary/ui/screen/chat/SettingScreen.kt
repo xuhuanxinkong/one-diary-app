@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
@@ -34,6 +35,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+
 import androidx.compose.material3.SliderColors
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +61,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.xinkong.diary.ViewModel.ChatViewModel
+import com.xinkong.diary.ViewModel.NavigationViewModel
+import com.xinkong.diary.ViewModel.Route
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.UserChatConfig
@@ -75,6 +80,7 @@ fun SettingScreen(
     onAvatarClick: (String, Long?) -> Unit = {_, _ ->}
 ) {
     val chatViewModel: ChatViewModel = viewModel()
+    val navViewModel: NavigationViewModel = viewModel()
     val aiConfigs by chatViewModel.findAiConfig(chat.id)
         .collectAsStateWithLifecycle(emptyList())
     val userConfig by chatViewModel.findUserConfig(chat.id)
@@ -118,6 +124,24 @@ fun SettingScreen(
                     hasBackground = chat.backgroundUri.isNotEmpty(),
                     onClick = { backgroundPicker.launch("image/*") }
                 )
+                
+                Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { navViewModel.navigateTo(Route.BubbleSetting) }
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "气泡属性设置", fontSize = 16.sp, color = Color.Black)
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "进入气泡属性设置",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
                 // 记忆对话轮数设置
                 Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
@@ -407,10 +431,5 @@ fun BackgroundSettingRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("自定义背景", fontSize = 16.sp)
-        Text(
-            text = if (hasBackground) "已设置 >" else ">",
-            fontSize = 16.sp,
-            color = Color.Gray
-        )
     }
 }

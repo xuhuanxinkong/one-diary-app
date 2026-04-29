@@ -84,13 +84,30 @@ val MIGRATION_45_46 = object : Migration(45, 46) {
     }
 }
 
+val MIGRATION_46_47 = object : Migration(46, 47) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS bubble_config (
+                id INTEGER PRIMARY KEY NOT NULL,
+                textSize REAL NOT NULL,
+                showRagResult INTEGER NOT NULL,
+                showToolResult INTEGER NOT NULL,
+                showVisibility INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+}
+
 @Database(
     entities = [Diary::class, Chat::class,
         ChatMessage::class, AiChatConfig::class,
         UserChatConfig::class, GroupChatMember::class,
         DiaryTag::class, ChatTag::class, TagFolder::class,
-        AlarmEntity::class, EmbeddingRecord::class],
-    version = 46,
+        AlarmEntity::class, EmbeddingRecord::class,
+        com.xinkong.diary.data.BubbleConfig::class],
+    version = 47,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -100,6 +117,7 @@ abstract class AppDatabase: RoomDatabase(){
     abstract fun tagDao(): TagDao
     abstract fun alarmDao(): AlarmDao
     abstract fun embeddingDao(): EmbeddingDao
+    abstract fun bubbleConfigDao(): BubbleConfigDao
     companion object{
         private var INSTANCE: AppDatabase?=null
         fun getDatabase(context: Context): AppDatabase{
@@ -108,6 +126,7 @@ abstract class AppDatabase: RoomDatabase(){
                     AppDatabase::class.java,
                     "diary_database"
                 )
+                .addMigrations(MIGRATION_46_47)
                 .addMigrations(MIGRATION_45_46)
                 .addMigrations(MIGRATION_44_45)
                 .addMigrations(MIGRATION_43_44)

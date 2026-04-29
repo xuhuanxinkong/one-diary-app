@@ -84,5 +84,9 @@ sealed class Route {
     @Serializable
     data class VoiceCallSelectAi(val chatId: Long, val isGroupChat: Boolean = false) : Route()
 
+    // 气泡设置页
+    @Serializable
+    data object BubbleSetting : Route()
+
     // 其他页面
 }

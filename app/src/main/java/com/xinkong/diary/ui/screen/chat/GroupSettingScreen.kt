@@ -24,8 +24,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
@@ -34,6 +36,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,6 +60,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.xinkong.diary.ViewModel.ChatViewModel
+import com.xinkong.diary.ViewModel.NavigationViewModel
+import com.xinkong.diary.ViewModel.Route
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.repository.Chat
 import com.xinkong.diary.repository.GroupChatMember
@@ -83,8 +88,8 @@ fun GroupSettingScreen(
     onUserClick: () -> Unit = {}  // 点击用户导航到用户设置
 ) {
     val chatViewModel: ChatViewModel = viewModel()
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val navViewModel: NavigationViewModel = viewModel()
+
     
     // 获取群聊成员列表
     val members by chatViewModel.getGroupChatMembers(chat.id)
@@ -129,10 +134,11 @@ fun GroupSettingScreen(
     ) { innerPadding ->
         Column(
             modifier = Modifier
+                .background(Color(0xFFF5F5F5))
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .background(Color(0xFFF5F5F5)),
+,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -164,19 +170,37 @@ fun GroupSettingScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { groupAvatarPicker.launch("image/*") }
-                        .padding(vertical = 12.dp),
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         "群聊头像",
-                        fontSize = 14.sp,
-                        color = Color.DarkGray
+                        fontSize = 16.sp,
+                        color = Color.Black
                     )
                     Text(
                         if (chat.groupAvatarUri.isNotEmpty()) "已设置" else "未设置",
                         fontSize = 14.sp,
                         color = if (chat.groupAvatarUri.isNotEmpty()) MaterialTheme.diaryColors.primary else Color.Gray
+                    )
+                }
+
+                Divider(color = Color(0xFFF0F0F0), thickness = 0.5.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { navViewModel.navigateTo(Route.BubbleSetting) }
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "气泡属性设置", fontSize = 16.sp, color = Color.Black)
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "进入气泡属性设置",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 

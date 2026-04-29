@@ -148,9 +148,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun resolveVisibleAiIds(message: ChatMessage): Set<Long> {
         return try {
-            Json.decodeFromString<List<Long>>(message.visibleToAiIds)
-                .filter { it > 0L }
-                .toSet()
+            Json.decodeFromString<List<Long>>(message.visibleToAiIds).toSet()
         } catch (_: Exception) {
             emptySet()
         }
@@ -158,6 +156,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun isMessageVisibleToAi(message: ChatMessage, aiId: Long): Boolean {
         val visibleAiIds = resolveVisibleAiIds(message)
+        if (visibleAiIds.contains(-1L)) return false
         return visibleAiIds.isEmpty() || aiId in visibleAiIds
     }
 

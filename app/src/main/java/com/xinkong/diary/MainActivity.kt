@@ -44,6 +44,7 @@ import com.xinkong.diary.ui.screen.chat.SettingScreen
 import com.xinkong.diary.ui.screen.chat.TalkScreen
 import com.xinkong.diary.repository.AiChatConfig
 import com.xinkong.diary.ui.screen.alarm.AlarmEditScreen
+import com.xinkong.diary.ui.screen.chat.BubbleSettingScreen
 import com.xinkong.diary.ui.screen.home.DiaryDetail
 import com.xinkong.diary.ui.screen.home.HomeScreen
 import com.xinkong.diary.ui.screen.tag.TagManageRoute
@@ -131,6 +132,7 @@ fun DiaryApp(incomingIntent: Intent? = null) {
     val diaryViewModel: DiaryViewModel = viewModel()
     val chatViewModel: ChatViewModel = viewModel()
     val alarmViewModel: AlarmViewModel = viewModel()
+    val bubbleConfigViewModel: com.xinkong.diary.ViewModel.BubbleConfigViewModel = viewModel()
     val backStack = navViewModel.backStack
 
     LaunchedEffect(incomingIntent) {
@@ -179,6 +181,7 @@ fun DiaryApp(incomingIntent: Intent? = null) {
                     .collectAsStateWithLifecycle(initialValue = null)
                 chat?.let {
                     TalkScreen(
+                        bubbleViewModel = bubbleConfigViewModel,
                         chat = it,
                         onBack = { navViewModel.navigateBack() },
                         onAvatarClick = { role, aiId ->
@@ -199,6 +202,7 @@ fun DiaryApp(incomingIntent: Intent? = null) {
                     .collectAsStateWithLifecycle(initialValue = null)
                 chat?.let {
                     TalkScreen(
+                        bubbleViewModel = bubbleConfigViewModel,
                         chat = it,
                         onBack = { navViewModel.navigateBack() },
                         onAvatarClick = { role, aiId ->
@@ -349,6 +353,11 @@ fun DiaryApp(incomingIntent: Intent? = null) {
                 val type = route.type
                 TagManageRoute(
                     type = type,
+                    onBack = { navViewModel.navigateBack() }
+                )
+            }
+            entry<Route.BubbleSetting> { route ->
+                BubbleSettingScreen(
                     onBack = { navViewModel.navigateBack() }
                 )
             }
