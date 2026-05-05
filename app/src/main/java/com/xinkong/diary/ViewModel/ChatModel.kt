@@ -26,6 +26,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import org.json.JSONObject
 import android.util.Log
+import com.xinkong.diary.repository.Diary
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -547,7 +548,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 return Result.success(displayContent)
             }
 
-            messages.add(buildAssistantToolCallMessage(response.content, tasks.map { it.toolCall }))
+            messages.add(buildAssistantToolCallMessage(response.content, tasks.map { it.toolCall }, response.reasoningContent))
             for (task in tasks) {
                 val toolResult = executeBackgroundToolTask(task, chatId, aiConfig.id, chat.tagFolder)
                 executedTools.add(buildRagExecutionEntry(toolResult) ?: task.title)
@@ -1308,7 +1309,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             
             // 时间和发送者信息已在系统提示词中提供，消息内容保持简洁
             val formattedContent = msg.content
-            messages.add(mapOf("role" to actualRole, "content" to formattedContent))
+            
+            val messageMap = mutableMapOf<String, Any>("role" to actualRole, "content" to formattedContent)
+            // 如果存在推理内容，必须加回到请求参数中以避免模型错误 (比如 deepseek-reasoner 返回 400)
+            msg.reasoningContent?.takeIf { it.isNotBlank() }?.let {
+                messageMap["reasoning_content"] = it
+            }
+            messages.add(messageMap)
         }
 
         return messages
@@ -1486,7 +1493,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             val validToolCalls = tasks.map { it.toolCall }
                             val assistantToolCallMessage = buildAssistantToolCallMessage(
                                 content = response.content,
-                                toolCalls = validToolCalls
+                                toolCalls = validToolCalls,
+                                reasoningContent = response.reasoningContent
                             )
     
                             if (response.content.isNotBlank()) {
@@ -1761,7 +1769,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun buildAssistantToolCallMessage(content: String, toolCalls: List<AiToolCall>): Map<String, Any> {
+    private fun buildAssistantToolCallMessage(content: String, toolCalls: List<AiToolCall>, reasoningContent: String? = null): Map<String, Any> {
         val callsList = toolCalls.map { call ->
             // 修复空参数问题
             val safeArguments = if (call.arguments.isBlank()) "{}" else call.arguments
@@ -1774,14 +1782,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
         }
-        return mapOf(
+        val messageMap = mutableMapOf<String, Any>(
             "role" to "assistant",
             "content" to content,
             "tool_calls" to callsList
         )
+        reasoningContent?.takeIf { it.isNotBlank() }?.let {
+            messageMap["reasoning_content"] = it
+        }
+        return messageMap
     }
 
-    private fun formatDiaryToolResult(diaries: List<com.xinkong.diary.repository.Diary>): String {
+    private fun formatDiaryToolResult(diaries: List<Diary>): String {
         if (diaries.isEmpty()) {
             return "未找到匹配笔记。"
         }
@@ -2174,7 +2186,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val senderName = if (isUserMessage) userConfig?.name ?: "我" else aiConfigs.find { it.id == msg.aiId }?.name ?: "AI"
             val actualRole = if (isCurrentAiMessage) assistantRole else userRole
             val formattedContent = "${senderName}(${msg.date}): ${msg.content}"
-            messages.add(mapOf("role" to actualRole, "content" to formattedContent))
+            
+            val messageMap = mutableMapOf<String, Any>("role" to actualRole, "content" to formattedContent)
+            msg.reasoningContent?.takeIf { it.isNotBlank() }?.let {
+                messageMap["reasoning_content"] = it
+            }
+            messages.add(messageMap)
         }
 
         val nowText = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(Date())

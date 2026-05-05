@@ -49,9 +49,9 @@ fun DiaryDetail(
     onSave: (Diary) -> Unit,
 ) {
     val viewModel: DiaryViewModel = viewModel()
-    DiaryEditorWebView(diary = diary,
-        onClose = onClose,
-        onSave = onSave)
+    NativeDiaryEditorScreen (diary = diary,
+        onSave = onSave,
+        onClose = onClose)
 }
 
 @Composable
