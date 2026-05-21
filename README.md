@@ -8,6 +8,3 @@ https://github.com/xuhuanxinkong/one-diary-app
 4.增加不同笔记类型
 5.修改Detail页面进入方式（完成一半）
 6.ui优化
-附：AI功能测试api应该可以用：
-网址：https://api-inference.modelscope.cn/v1
-api：ms-8e4f5b8f-3f94-443e-a668-23a812__2290(空的两位是我学号后两位)
